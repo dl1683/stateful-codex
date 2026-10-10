@@ -51,8 +51,6 @@ const PROJECT_HEADERS: [&str; 4] = [
 /// The one informational preface allowed before an embedded header (CONTRACT §3).
 const HORIZON_PREFACE: &str = "I maintain an internal fork of python-humanize for our dashboards, and I'll be working on it with you over the next few weeks, roughly one session a day.";
 
-const TASK_SECTIONS: [&str; 3] = ["First task:", "Today's task:", "For today,"];
-
 /// The supported declaration in `text`, or `None` when any part of the enclosing message is
 /// outside the grammar. Unknown outer framing, quotation, questions, nested or mixed lists,
 /// trailing qualifiers and unsupported bodies all fail closed.
@@ -63,7 +61,7 @@ pub(crate) fn project_declaration(text: &str) -> Option<Declaration> {
     if let Some(envelope) = header(first_text) {
         let envelope = first.start + envelope.start..first.start + envelope.end;
         let (units, tail) = list(text, rest)?;
-        task_tail(text, tail)?;
+        blank_tail(text, tail)?;
         return Some(Declaration {
             production: Production::ProjectList,
             envelope,
@@ -72,7 +70,7 @@ pub(crate) fn project_declaration(text: &str) -> Option<Declaration> {
     }
     let (envelope, unit) = scoped_imperative(first_text)?;
     let unit_range = first.start + unit.start..first.start + unit.end;
-    task_tail(text, rest)?;
+    blank_tail(text, rest)?;
     Some(Declaration {
         production: Production::ScopedImperative,
         envelope: first.start + envelope.start..first.start + envelope.end,
@@ -202,22 +200,13 @@ fn marker(line: &str, ordered: &mut Option<bool>, position: usize) -> Option<usi
     Some(digits + 2)
 }
 
-/// After the declaration: nothing, or a blank line then an explicit task section. The task
-/// text is a request, never additional standing rules.
-fn task_tail(text: &str, lines: &[Range<usize>]) -> Option<()> {
-    let Some(next) = lines
+/// After the declaration: nothing but blank lines. Any following text, a task section
+/// included, can narrow, negate or reattribute the declaration, and no bounded grammar
+/// proves it does not, so such a message is never admitted (it can still be proposed).
+fn blank_tail(text: &str, lines: &[Range<usize>]) -> Option<()> {
+    lines
         .iter()
-        .position(|line| !text[line.clone()].trim().is_empty())
-    else {
-        return Some(());
-    };
-    if next == 0 {
-        return None;
-    }
-    let line = &text[lines[next].clone()];
-    TASK_SECTIONS
-        .iter()
-        .any(|section| literal(line, 0, section).is_some())
+        .all(|line| text[line.clone()].trim().is_empty())
         .then_some(())
 }
 

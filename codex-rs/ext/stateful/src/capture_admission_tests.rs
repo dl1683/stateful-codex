@@ -44,8 +44,14 @@ fn project_lists_admit_every_whole_unit_in_order() {
 }
 
 #[test]
-fn original_horizon_session_admits_four_rules_and_excludes_the_task() {
-    let text = "Hi. I maintain an internal fork of python-humanize for our dashboards, and I'll be working on it with you over the next few weeks, roughly one session a day. Standing rules for this project, please follow them in every session:\n1. Only run the tests relevant to what you changed, never the whole suite.\n2. Never install anything into my global Python. If you need an environment, make a local venv inside the repo.\n3. Don't touch docs/ or any changelog.\n4. End every reply with one line starting with `Next:` that suggests the next step.\n\nToday's task: our dashboards show durations from precisedelta and the output is too long for table cells. Add a compact output style to precisedelta so that, for example, 1 hour 2 minutes 5 seconds can render as `1h 2m 5s`. The default output must stay exactly as it is.\n";
+fn original_horizon_session_admits_its_four_rules_only_without_the_task() {
+    let rules = "Hi. I maintain an internal fork of python-humanize for our dashboards, and I'll be working on it with you over the next few weeks, roughly one session a day. Standing rules for this project, please follow them in every session:\n1. Only run the tests relevant to what you changed, never the whole suite.\n2. Never install anything into my global Python. If you need an environment, make a local venv inside the repo.\n3. Don't touch docs/ or any changelog.\n4. End every reply with one line starting with `Next:` that suggests the next step.\n";
+    // The original session's task paragraph follows the rules; any tail holds them back.
+    let with_task = format!(
+        "{rules}\nToday's task: our dashboards show durations from precisedelta and the output is too long for table cells. Add a compact output style to precisedelta so that, for example, 1 hour 2 minutes 5 seconds can render as `1h 2m 5s`. The default output must stay exactly as it is.\n"
+    );
+    assert_eq!(units(&with_task), None);
+    let text = rules;
     let declaration = project_declaration(text).unwrap();
     assert_eq!(
         &text[declaration.envelope],
@@ -72,8 +78,25 @@ fn scoped_imperatives_admit_one_project_unit() {
         units("Never push for this project."),
         Some(vec!["Never push"])
     );
+}
+
+#[test]
+fn any_text_after_a_declaration_holds_it_back() {
+    for text in [
+        // Scope narrowing and negated adoption after a task prefix.
+        "Ground rules for this project:\n- Never push.\n\nFor today, the above rule applies only to today's task; it is not a standing rule.",
+        // Reported attribution after a task section.
+        "Ground rules for this project:\n- Never push.\n\nFirst task: investigate this.\nThe rules above are Priya's quoted policy, not my instructions to you.",
+        // Even a plain task request.
+        "Ground rules for this project:\n- Never push.\n\nFor today, inspect the tests.",
+        "Ground rules for this project:\n- Never push.\n\nToday's task: inspect the tests.",
+        "For this project, Never push.\n\nFirst task: fix the failing parser test.",
+    ] {
+        assert_eq!(units(text), None, "{text:?}");
+    }
+    // A bare declaration, trailing blank lines included, is still admitted.
     assert_eq!(
-        units("For this project, Never push.\n\nFirst task: fix the failing parser test."),
+        units("Ground rules for this project:\n- Never push.\n\n  \n"),
         Some(vec!["Never push."])
     );
 }
