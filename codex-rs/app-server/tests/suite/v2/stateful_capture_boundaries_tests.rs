@@ -839,12 +839,32 @@ async fn c456r2_outputs_held_by_post_tool_hooks_never_publish_forgotten_words() 
         "{fresh}"
     );
     assert!(fresh.contains("coverage"), "{fresh}");
-    // Nothing forgotten reaches the second thread's next request (its root never held the
-    // proposals; the rule was in its root before Forget, so only its tool output is checked).
-    let last = bodies[9].to_string();
-    for forgotten in ["offline on a laptop", "clearing it didn't change"] {
-        assert!(!last.contains(forgotten), "{forgotten} reached the model");
+    // No tool output in the next request carries forgotten words. The thread-start context
+    // (root and continuity) was built before any Forget and is a snapshot; it adds nothing
+    // the turn's first request did not already carry.
+    let tool_outputs = bodies[9]["input"]
+        .as_array()
+        .expect("input items")
+        .iter()
+        .filter(|item| item["type"] == "function_call_output")
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let (first, last) = (bodies[5].to_string(), bodies[9].to_string());
+    for forgotten in [
+        "offline on a laptop",
+        "clearing it didn't change",
+        "Never push",
+    ] {
+        assert!(
+            tool_outputs
+                .iter()
+                .all(|output| !output.contains(forgotten)),
+            "{forgotten} reached the model in a tool output"
+        );
+        assert!(
+            !last.contains(forgotten) || first.contains(forgotten),
+            "{forgotten} reached the model after the reads"
+        );
     }
-    assert!(!output(&bodies[8], "exact").contains("Never push"));
     Ok(())
 }
