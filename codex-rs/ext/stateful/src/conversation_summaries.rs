@@ -1,18 +1,15 @@
 //! Reads of the thread store's per-turn summaries (each turn's first user message and
 //! final answer) for the selected project's top-level threads.
 
-use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_thread_store::ListThreadsParams;
-use codex_thread_store::ReadThreadParams;
 use codex_thread_store::SortDirection;
 use codex_thread_store::StoredThread;
 use codex_thread_store::StoredThreadItem;
 use codex_thread_store::StoredTurn;
 use codex_thread_store::StoredTurnStatus;
 use codex_thread_store::ThreadSortKey;
-use codex_thread_store::ThreadStore;
 use serde_json::Value;
 
 /// The project's unarchived threads, most recently updated first.
@@ -97,27 +94,4 @@ pub(super) fn turn_status(turn: &StoredTurn) -> Option<&'static str> {
         StoredTurnStatus::Failed => Some("failed"),
         StoredTurnStatus::InProgress => Some("in progress"),
     }
-}
-
-/// Reads a thread and checks that it is an unarchived top-level thread of `project_id`.
-pub(super) async fn project_thread(
-    threads: &dyn ThreadStore,
-    project_id: &str,
-    thread_id: &str,
-) -> Result<StoredThread, String> {
-    let parsed = ThreadId::from_string(thread_id).map_err(|error| error.to_string())?;
-    let thread = threads
-        .read_thread(ReadThreadParams {
-            thread_id: parsed,
-            include_archived: false,
-            include_history: false,
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-    if thread.project_id.as_deref() != Some(project_id) || !is_top_level(&thread) {
-        return Err(format!(
-            "thread {thread_id} is not a conversation of this project"
-        ));
-    }
-    Ok(thread)
 }

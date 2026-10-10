@@ -1,14 +1,15 @@
-//! One host-assembled recall of earlier work: matching knowledge with its status, history,
-//! provenance and evidence routes, and the earlier turns that match, in one bounded result.
+//! One host-assembled recall of earlier work: matching recorded knowledge with its status,
+//! history, provenance and evidence routes, in one bounded result.
 //!
-//! It replaces chains of query, read and conversation calls for questions such as "what is
-//! the default and why" or "summarize what we decided since Monday". Nothing here calls a
-//! model; everything is read from the project's stores within fixed scan bounds, and the
-//! result says what it covered.
+//! It replaces chains of query and read calls for questions such as "what is the default and
+//! why" or "summarize what we recorded since Monday". Nothing here calls a model; everything is
+//! read from the project store within fixed scan bounds, and the result says what it covered.
+//! Memory the user can forget (their own rules, decisions and corrections) and earlier
+//! conversation are never returned: a tool result can be held after a Forget commits, so that
+//! memory reaches the model only through the thread-start root and continuity snapshots.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use codex_extension_api::FunctionCallError;
 use codex_extension_api::ResponsesApiTool;
@@ -25,19 +26,10 @@ use codex_project_intelligence::BlackboardKind;
 use codex_project_intelligence::BlackboardProvenanceKind;
 use codex_project_intelligence::BlackboardQuery;
 use codex_project_intelligence::BlackboardStore;
-use codex_thread_store::ListTurnsParams;
-use codex_thread_store::SortDirection;
-use codex_thread_store::StoredTurnItemsView;
-use codex_thread_store::ThreadStore;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
 
-use crate::conversation_summaries::is_top_level;
-use crate::conversation_summaries::project_threads_params;
-use crate::conversation_summaries::turn_status;
-use crate::conversation_summaries::turn_texts;
-use crate::conversation_summaries::turn_time_ms;
 use crate::services::ProjectIntelligenceServices;
 
 use super::MAX_RESPONSE_BYTES;
@@ -62,18 +54,8 @@ const MAX_RELATION_EXCERPT_BYTES: usize = 160;
 const MAX_RELATIONS_PER_ENTRY: usize = 4;
 /// Entries changed in the requested period that are ranked by the question.
 const MAX_SINCE_CANDIDATES: u32 = 200;
-const MAX_THREADS: usize = 20;
-const MAX_TURNS_PER_THREAD: usize = 30;
-const MAX_TURNS_SCANNED: usize = 300;
-const MAX_TURNS_RETURNED: usize = 12;
-const MAX_USER_BYTES: usize = 320;
-const MAX_ANSWER_BYTES: usize = 480;
 /// Serialized bytes kept free for coverage, routes and closing fields.
 const RESERVED_BYTES: usize = 900;
-/// Serialized bytes entries may use before turns are added.
-const ENTRY_BUDGET_BYTES: usize = 5_000;
-const ANSWER_LABEL: &str =
-    "assistant's final answer (reported history, not evidence of the user's preferences)";
 
 const STOPWORDS: &[&str] = &[
     "the", "and", "for", "are", "was", "were", "what", "why", "how", "did", "does", "our", "you",
@@ -96,19 +78,13 @@ struct MemoryReadArguments {
 pub(super) struct MemoryReadTool {
     project_id: String,
     services: ProjectIntelligenceServices,
-    threads: Arc<dyn ThreadStore>,
 }
 
 impl MemoryReadTool {
-    pub(super) fn new(
-        project_id: String,
-        services: ProjectIntelligenceServices,
-        threads: Arc<dyn ThreadStore>,
-    ) -> Self {
+    pub(super) fn new(project_id: String, services: ProjectIntelligenceServices) -> Self {
         Self {
             project_id,
             services,
-            threads,
         }
     }
 
@@ -138,20 +114,18 @@ impl MemoryReadTool {
         let (groups, knowledge_truncated) = self
             .knowledge(store, &terms, since_ms, include_history)
             .await?;
-        let (turns, coverage) = self.conversation(&terms, since_ms).await;
 
         let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
         let mut result = json!({
-            "answeredFrom": "host stores (no model call): project knowledge with its status and history, and the first user message and final answer of matching earlier turns",
+            "answeredFrom": "the project store (no model call): recorded project knowledge with its status and history",
             "entries": [],
-            "turns": [],
-            "coverage": coverage,
-            "use": "This evidence needs no confirmation read. Read more only when an omitted part is critical to the answer: conversation_read with a threadId and turnId for a full turn, evidence_read for an entry's source, git show for a commit.",
-            "unavailable": "automatic proposal recall and original-source search/exact recall",
+            "coverage": {
+                "noMatchMeans": "nothing matched within this coverage, not that nothing happened",
+            },
+            "use": "This evidence needs no confirmation read. Read more only when an omitted part is critical to the answer: evidence_read for an entry's source, git show for a commit.",
+            "unavailable": "the user's own memory (rules, decisions, corrections: see the root packet), earlier conversation (see the thread-start continuity record), proposal recall and original-source recall",
         });
-        let entry_limit = budget
-            .saturating_sub(RESERVED_BYTES)
-            .min(ENTRY_BUDGET_BYTES + result.to_string().len());
+        let entry_limit = budget.saturating_sub(RESERVED_BYTES);
         let mut omitted_entries = 0usize;
         for group in &groups {
             for item in group {
@@ -166,29 +140,12 @@ impl MemoryReadTool {
                 }
             }
         }
-        let turn_limit = budget.saturating_sub(RESERVED_BYTES);
-        let mut omitted_turns = 0usize;
-        for turn in turns {
-            if let Some(list) = result["turns"].as_array_mut() {
-                list.push(turn);
-            }
-            if result.to_string().len() > turn_limit {
-                if let Some(list) = result["turns"].as_array_mut() {
-                    list.pop();
-                }
-                omitted_turns += 1;
-            }
-        }
         result["coverage"]["entriesOmittedBySize"] = json!(omitted_entries);
         result["coverage"]["moreMatchingKnowledge"] = json!(knowledge_truncated);
-        result["coverage"]["turnsOmittedBySize"] = json!(omitted_turns);
         if !fits_response(&result, budget) {
             return Err(super::bounded_respond(&call, "budget_insufficient"));
         }
-        if result["entries"].as_array().is_some_and(Vec::is_empty)
-            && result["turns"].as_array().is_some_and(Vec::is_empty)
-            && (omitted_entries > 0 || omitted_turns > 0)
-        {
+        if result["entries"].as_array().is_some_and(Vec::is_empty) && omitted_entries > 0 {
             return Err(super::bounded_respond(&call, "budget_insufficient"));
         }
         bounded_json_output(&call, result)
@@ -353,142 +310,6 @@ impl MemoryReadTool {
             }
         }
         Ok((groups, truncated))
-    }
-
-    /// Earlier turns of the project that match, newest first, and what the scan covered.
-    async fn conversation(&self, terms: &[String], since_ms: Option<i64>) -> (Vec<Value>, Value) {
-        let mut turns = Vec::new();
-        let mut threads_scanned = 0usize;
-        let mut threads_not_scanned = 0usize;
-        let mut threads_with_more_turns = 0usize;
-        let mut turns_scanned = 0usize;
-        let mut unreadable_threads = 0usize;
-        let page = match self
-            .threads
-            .list_threads(project_threads_params(&self.project_id, MAX_THREADS, None))
-            .await
-        {
-            Ok(page) => page,
-            Err(error) => {
-                return (
-                    Vec::new(),
-                    json!({"conversation": format!("history unavailable: {error}")}),
-                );
-            }
-        };
-        let more_threads = page.next_cursor.is_some();
-        for thread in page.items.iter().filter(|thread| is_top_level(thread)) {
-            if since_ms.is_some_and(|since| thread.updated_at.timestamp_millis() < since) {
-                continue;
-            }
-            if turns_scanned >= MAX_TURNS_SCANNED {
-                threads_not_scanned += 1;
-                continue;
-            }
-            threads_scanned += 1;
-            let listed = match self
-                .threads
-                .list_turns(ListTurnsParams {
-                    thread_id: thread.thread_id,
-                    include_archived: false,
-                    cursor: None,
-                    page_size: MAX_TURNS_PER_THREAD,
-                    sort_direction: SortDirection::Desc,
-                    items_view: StoredTurnItemsView::Summary,
-                })
-                .await
-            {
-                Ok(listed) => listed,
-                Err(_) => {
-                    unreadable_threads += 1;
-                    continue;
-                }
-            };
-            let mut stopped_early = listed.next_cursor.is_some();
-            for turn in &listed.turns {
-                if turns_scanned >= MAX_TURNS_SCANNED {
-                    stopped_early = true;
-                    break;
-                }
-                turns_scanned += 1;
-                let at = turn_time_ms(turn);
-                if since_ms.is_some_and(|since| at.is_none_or(|at| at < since)) {
-                    continue;
-                }
-                let Ok(store) = self.services.blackboard().await else {
-                    unreadable_threads += 1;
-                    continue;
-                };
-                if !store
-                    .source_turn_eligible(&self.project_id, &turn.turn_id)
-                    .await
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-                let (user, answer) = turn_texts(&turn.items);
-                let mut user = user;
-                let mut answer = answer;
-                if let Some(text) = &user
-                    && !store
-                        .source_text_eligible(&self.project_id, text)
-                        .await
-                        .unwrap_or(false)
-                {
-                    user = None;
-                }
-                if let Some(text) = &answer
-                    && !store
-                        .source_text_eligible(&self.project_id, text)
-                        .await
-                        .unwrap_or(false)
-                {
-                    answer = None;
-                }
-                let matches = terms.is_empty()
-                    || [user.as_deref(), answer.as_deref()]
-                        .into_iter()
-                        .flatten()
-                        .any(|text| mentions_any(text, terms));
-                if !matches {
-                    continue;
-                }
-                turns.push((
-                    at.unwrap_or_default(),
-                    json!({
-                        "threadId": thread.thread_id.to_string(),
-                        "turnId": turn.turn_id,
-                        "at": at.map(crate::continuity::format_time),
-                        "status": turn_status(turn).unwrap_or("completed"),
-                        "user": user.as_deref().map(|text| excerpt(text, terms, MAX_USER_BYTES)),
-                        "answer": answer.as_deref().map(|text| excerpt(text, terms, MAX_ANSWER_BYTES)),
-                    }),
-                ));
-            }
-            if stopped_early {
-                threads_with_more_turns += 1;
-            }
-        }
-        turns.sort_by_key(|turn| std::cmp::Reverse(turn.0));
-        let matched = turns.len();
-        let turns = turns
-            .into_iter()
-            .take(MAX_TURNS_RETURNED)
-            .map(|(_, turn)| turn)
-            .collect::<Vec<_>>();
-        let coverage = json!({
-            "threadsScanned": threads_scanned,
-            "threadsNotScanned": threads_not_scanned,
-            "moreThreadsBeyondTheFirstPage": more_threads,
-            "threadsWithUnscannedOlderTurns": threads_with_more_turns,
-            "unreadableThreads": unreadable_threads,
-            "turnsScanned": turns_scanned,
-            "turnsMatched": matched,
-            "turnsReturned": turns.len(),
-            "turnsLabel": format!("each turn shows the user's first message and the {ANSWER_LABEL}; steering messages and intermediate answers are not included"),
-            "noMatchMeans": "nothing matched within this coverage, not that nothing happened",
-        });
-        (turns, coverage)
     }
 }
 
@@ -696,7 +517,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Recall missing earlier work once: matching knowledge, status/history, sources/dates and turns. Evidence needs no confirmation read. Automatic proposal recall, original-source search and exact-source recall are unavailable.".to_string(),
+            description: "Recall missing earlier work once: matching recorded findings, status/history and sources/dates. Evidence needs no confirmation read. Never returns the user's own memory (see the root packet), past conversation, proposals or original sources.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

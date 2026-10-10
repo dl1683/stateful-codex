@@ -291,9 +291,8 @@ async fn c3r2_public_memory_read_matching_entry_advances_or_terminally_refuses_c
                     (
                         output["entries"].as_array().unwrap().len(),
                         output["entries"][0]["entryId"].clone(),
-                        output["turns"].clone()
                     ),
-                    (1, written["results"][0]["entryId"].clone(), json!([]))
+                    (1, written["results"][0]["entryId"].clone())
                 );
             }
             assert_eq!(snapshot(&sqlite).await?, before);

@@ -290,11 +290,7 @@ async fn c3r2_automatic_proposal_recall_cut_keeps_storage_and_agent_control_cold
                 }
             }
         }
-        let memory = memory_read::MemoryReadTool::new(
-            project_id.clone(),
-            services.clone(),
-            Arc::new(InMemoryThreadStore::default()),
-        );
+        let memory = memory_read::MemoryReadTool::new(project_id.clone(), services.clone());
         for arguments in [
             json!({"question":"needle", "includeHistory":false}),
             json!({"question":"needle", "since":"2020-01-01"}),
@@ -309,10 +305,7 @@ async fn c3r2_automatic_proposal_recall_cut_keeps_storage_and_agent_control_cold
                 .await
                 .unwrap();
             let value: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
-            assert_eq!(
-                (value["entries"].clone(), value["turns"].clone()),
-                (json!([]), json!([]))
-            );
+            assert_eq!(value["entries"], json!([]));
             assert!(!output.log_output().contains("needle prototype purchase"));
         }
         let store = services.blackboard().await.unwrap();

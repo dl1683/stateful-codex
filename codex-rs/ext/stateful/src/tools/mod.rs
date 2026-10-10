@@ -7,7 +7,6 @@ mod blackboard_supersede;
 mod blackboard_update;
 mod blackboard_write;
 mod context_map;
-mod conversation_read;
 mod entry_read;
 mod evidence;
 mod memory_read;
@@ -78,15 +77,9 @@ pub(super) fn project_intelligence_tools(
             services.clone(),
             event_sink.clone(),
         )),
-        Arc::new(conversation_read::ConversationReadTool::new(
-            project_id.clone(),
-            projects.clone(),
-            services.clone(),
-        )),
         Arc::new(memory_read::MemoryReadTool::new(
             project_id.clone(),
             services.clone(),
-            projects.clone(),
         )),
         Arc::new(context_map::ContextMapQueryTool::new(
             project_id.clone(),

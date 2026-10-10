@@ -225,10 +225,7 @@ async fn c3r2_public_automatic_proposal_recall_cut_and_storage_replay_cold() -> 
                     json!({"question":"budget witness", "includeHistory":false}),
                 )
                 .await?;
-                assert_eq!(
-                    (output["entries"].clone(), output["turns"].clone()),
-                    (json!([]), json!([]))
-                );
+                assert_eq!(output["entries"], json!([]));
             }
             assert_eq!(snapshot(&sqlite).await?, before);
         }
@@ -912,95 +909,6 @@ async fn c2r1_public_evidence_query_excludes_forgotten_before_limit_and_cold_reo
             1
         );
         assert_eq!(snapshot(&sqlite).await?, before);
-        if attempt == 0 {
-            reopen(&mut server, &home, &thread).await?;
-        }
-    }
-    assert!(server.shutdown_gracefully().await?.success());
-    Ok(())
-}
-
-#[tokio::test]
-async fn c2r1_public_conversation_fallbacks_exclude_forgotten_bytes_after_restart() -> Result<()> {
-    let (home, mut server, project, thread, responses_server) = setup().await?;
-    let text = "Private meridian receipt QX704.";
-    let log = responses::mount_sse_once(
-        &responses_server,
-        responses::sse(vec![responses::ev_completed("original")]),
-    )
-    .await;
-    let original = server
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.clone(),
-            input: vec![UserInput::Text {
-                text: text.to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    assert_eq!(log.requests().len(), 1);
-    let _: codex_app_server_protocol::ThreadSetNameResponse = server
-        .request(|request_id| ClientRequest::ThreadSetName {
-            request_id,
-            params: codex_app_server_protocol::ThreadSetNameParams {
-                thread_id: thread.clone(),
-                name: text.to_string(),
-            },
-        })
-        .await?;
-    let added: StatefulMemoryAddResponse = server
-        .request(|request_id| ClientRequest::StatefulMemoryAdd {
-            request_id,
-            params: StatefulMemoryAddParams {
-                expected_project_id: project.clone(),
-                thread_id: thread.clone(),
-                kind: StatefulMemoryAddKind::Note,
-                content: text.to_string(),
-                scope: None,
-                reason: None,
-                client_action_id: "forget-conversation-words".to_string(),
-                background_section: true,
-            },
-        })
-        .await?;
-    forget(
-        &mut server,
-        &project,
-        &thread,
-        &added.item.entry_id,
-        added.item.revision,
-    )
-    .await?;
-    for attempt in 0..2 {
-        let threads = model_call(
-            &mut server,
-            &responses_server,
-            &thread,
-            "conversation_read",
-            json!({}),
-        )
-        .await?;
-        assert!(!threads.to_string().contains("QX704"));
-        let turns = model_call(
-            &mut server,
-            &responses_server,
-            &thread,
-            "conversation_read",
-            json!({"threadId":thread}),
-        )
-        .await?;
-        assert!(!turns.to_string().contains("QX704"));
-        let exact = model_output(
-            &mut server,
-            &responses_server,
-            &thread,
-            "conversation_read",
-            json!({"threadId":thread,"turnId":original.turn.id,"part":"user"}),
-        )
-        .await?;
-        assert!(!exact.contains("QX704"));
-        assert!(exact.contains("retirement"), "{exact}");
         if attempt == 0 {
             reopen(&mut server, &home, &thread).await?;
         }

@@ -54,23 +54,11 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
                     responses::sse(vec![responses::ev_function_call("proposal", "blackboard_record_batch", &args.to_string()), responses::ev_completed("propose")])
                 }
                 1 => responses::sse(vec![responses::ev_assistant_message("answer", "The note records the purchase."), responses::ev_completed("answer")]),
-                2 => responses::sse(vec![responses::ev_function_call("sources", "conversation_read", &json!({"sourceQuery":"QX-704"}).to_string()), responses::ev_completed("search")]),
-                3 => {
-                    let handles = source_handles(&calls[0]).unwrap();
-                    let seal = &handles["handles"][0];
-                    responses::sse(vec![responses::ev_function_call("exact", "conversation_read", &json!({
-                        "sourceId":seal[0],"digest":seal[1],"sourceRevision":seal[2]
-                    }).to_string()),responses::ev_completed("read")])
-                }
+                2 => responses::sse(vec![responses::ev_function_call("sources", "memory_read", &json!({"question":"QX-704 receipt"}).to_string()), responses::ev_completed("search")]),
+                3 => responses::sse(vec![responses::ev_function_call("exact", "blackboard_query", &json!({"text":"QX-704 Meridian"}).to_string()), responses::ev_completed("read")]),
                 4 => responses::sse(vec![responses::ev_function_call("recall", "memory_read", &json!({"question":"Mara prototype"}).to_string()),responses::ev_completed("recall")]),
-                6 => responses::sse(vec![responses::ev_function_call("excluded-search", "conversation_read", &json!({"sourceQuery":"QX-704"}).to_string()), responses::ev_completed("excluded-search")]),
-                7 => {
-                    let handles = source_handles(&calls[0]).unwrap();
-                    let seal = &handles["handles"][0];
-                    responses::sse(vec![responses::ev_function_call("excluded-exact", "conversation_read", &json!({
-                        "sourceId":seal[0],"digest":seal[1],"sourceRevision":seal[2]
-                    }).to_string()),responses::ev_completed("excluded-exact")])
-                }
+                6 => responses::sse(vec![responses::ev_function_call("excluded-search", "memory_read", &json!({"question":"QX-704 receipt"}).to_string()), responses::ev_completed("excluded-search")]),
+                7 => responses::sse(vec![responses::ev_function_call("excluded-exact", "blackboard_query", &json!({"text":"QX-704 Meridian"}).to_string()), responses::ev_completed("excluded-exact")]),
                 _ => responses::sse(vec![responses::ev_assistant_message("answer", "The attributed note names QX-704."), responses::ev_completed("answer")]),
             };
             ResponseTemplate::new(200).insert_header("content-type","text/event-stream").set_body_string(response)
@@ -154,8 +142,10 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
             .unwrap()["output"]
             .as_str()
             .unwrap();
-        assert!(output.contains("unknown field"), "{output}");
-        assert!(!output.contains("QX-704") && !output.contains("Meridian M-17"));
+        assert!(
+            !output.contains("QX-704") && !output.contains("Meridian M-17"),
+            "{output}"
+        );
     }
     let recall = tool_output(&bodies[5], "recall").unwrap();
     assert_eq!(recall["entries"], json!([]));
@@ -191,8 +181,10 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
             .unwrap()["output"]
             .as_str()
             .unwrap();
-        assert!(output.contains("unknown field"));
-        assert!(!output.contains("QX-704") && !output.contains("Meridian M-17"));
+        assert!(
+            !output.contains("QX-704") && !output.contains("Meridian M-17"),
+            "{output}"
+        );
     }
     assert_eq!(
         super::model_retirement_tests::snapshot(&sqlite).await?,

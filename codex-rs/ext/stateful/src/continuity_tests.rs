@@ -79,7 +79,7 @@ fn renders_exact_turn_summaries_newest_first_with_a_pending_question() {
         [
             "Project ID: project-1",
             HEADER,
-            "Captured at 2025-10-01 18:04 UTC; newer turns may exist. conversation_read lists this project's threads and turns and returns any turn in full.",
+            "Captured at 2025-10-01 18:04 UTC; newer turns may exist.",
             NEWEST_ASKED,
             "Latest Stateful run: \"run-ab12\" (collaborative, completed). Next: \"Add the \\u003ccrepes\\u003e after approval.\" Strategy: \"Ask first.\"",
             "- 2025-10-01 18:03 UTC, thread \"thread-b\" titled \"Crepes\", turn \"turn-2\", no Stateful run recorded:\n  User: \"Add my grandma's crepes: 1 cup flour.\"\n  Answer: \"May I modify recipes.json with:\\n- Flour: 125 g\\n- Milk: 300 ml?\"",
@@ -136,15 +136,22 @@ fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
         "{} bytes",
         fragment_bytes(&rendered)
     );
-    for expected in [
-        "this thread \"thread-a\", turn \"turn-0\", run binding unknown:\n  User: \"",
-        "of 5000 bytes; conversation_read threadId=\"thread-a\" turnId=\"turn-0\" part=user returns it in full]",
-        "of 5000 bytes; conversation_read threadId=\"thread-a\" turnId=\"turn-0\" part=answer returns it in full]",
-    ] {
-        assert!(rendered.contains(expected), "missing {expected:?}");
-    }
+    assert!(
+        rendered.contains(
+            "this thread \"thread-a\", turn \"turn-0\", run binding unknown:\n  User: \""
+        ),
+        "{rendered}"
+    );
+    // The newest turn's user message and answer are both marked shortened.
+    assert!(
+        rendered
+            .split("turn \"turn-1\"")
+            .next()
+            .is_some_and(|newest| newest.matches(" of 5000 bytes]").count() == 2),
+        "{rendered}"
+    );
     assert!(rendered.ends_with(
-        "gathered turns did not fit this bounded view; older turns or threads were not scanned; 12 threads have no readable turn summaries. conversation_read lists and returns them."
+        "gathered turns did not fit this bounded view; older turns or threads were not scanned; 12 threads have no readable turn summaries."
     ));
 }
 
@@ -158,7 +165,7 @@ fn empty_and_unavailable_history_are_told_apart() {
     unavailable.history_unavailable = true;
     assert_eq!(
         unavailable.render(super::MAX_FRAGMENT_BYTES),
-        "Project ID: project-1\nThe project's conversation history could not be read when this record was built; earlier turns may exist. conversation_read may retrieve them."
+        "Project ID: project-1\nThe project's conversation history could not be read when this record was built; earlier turns may exist."
     );
 }
 
@@ -197,9 +204,9 @@ fn a_small_budget_keeps_the_newest_turn_in_compact_form() {
         "{rendered}"
     );
     assert!(rendered.contains("turn \"turn-0\""));
-    assert!(rendered.contains("of 5000 bytes; conversation_read"));
+    assert!(rendered.contains(" of 5000 bytes]"));
     assert!(!rendered.contains("turn \"turn-1\""));
-    assert!(rendered.ends_with("conversation_read lists and returns them."));
+    assert!(rendered.ends_with("did not fit this bounded view."));
 }
 
 #[test]
@@ -241,7 +248,8 @@ fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
     );
     assert!(rendered.contains(NEWEST_ASKED));
     assert!(rendered.contains("turn \"01a0fbad-1689-75e3-ac68-867cb758f500\""));
-    assert!(rendered.contains("part=answer returns it in full]"));
+    assert!(rendered.contains("\n  Answer: \""), "{rendered}");
+    assert!(rendered.contains(" bytes]"), "{rendered}");
 }
 
 #[test]

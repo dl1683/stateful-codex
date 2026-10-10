@@ -27,9 +27,9 @@ const MAX_NEXT_ITEMS: usize = 2;
 const MAX_NEXT_ITEM_BYTES: usize = 240;
 const MAX_STRATEGY_BYTES: usize = 400;
 pub(super) const HEADER: &str = "Selected turn summaries from this project, newest first: each turn's first user message and its final answer, captured by the host whether or not a Stateful run existed. Steering messages sent during a turn and intermediate answers are not included. Answers are reported history, not verified facts. A past request is not a new request to act, but rules the user set for future work (for example \"always\", \"never\", \"from now on\") still apply unless the user later changed them. Continue from this instead of re-deriving it; check the repository before relying on remembered file state. Archived threads and subagent threads are never included.";
-pub(super) const NEWEST_ASKED: &str = "The newest answer ends with a question to the user. If the user's reply refers to it (for example \"yes, as proposed\"), act on that exact text; if the reply refers to something not shown in full here, retrieve it with conversation_read before acting. A question in an earlier answer is not authorization.";
+pub(super) const NEWEST_ASKED: &str = "The newest answer ends with a question to the user. If the user's reply refers to it (for example \"yes, as proposed\"), act on that exact text; if the reply refers to something not shown in full here, ask the user for it before acting. A question in an earlier answer is not authorization.";
 const EMPTY: &str = "No earlier turns are recorded for this project yet.";
-const UNAVAILABLE: &str = "The project's conversation history could not be read when this record was built; earlier turns may exist. conversation_read may retrieve them.";
+const UNAVAILABLE: &str = "The project's conversation history could not be read when this record was built; earlier turns may exist.";
 
 /// The run the host recorded for a captured turn when it ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,7 +114,7 @@ impl ContinuityRecord {
         push_line(
             &mut body,
             &format!(
-                "Captured at {}; newer turns may exist. conversation_read lists this project's threads and turns and returns any turn in full.",
+                "Captured at {}; newer turns may exist.",
                 format_time(self.captured_at_ms)
             ),
         );
@@ -134,7 +134,7 @@ impl ContinuityRecord {
             length + 1 + block.len() + footer_bytes(omitted_after) <= max_body
         };
         // The newest turn always appears: reserve its smallest form (no title, empty quotes
-        // with retrieval routes) before admitting the optional latest-run line.
+        // with shortening markers) before admitting the optional latest-run line.
         let newest_omitted = self.turns.len() - 1;
         let reserve = self.turns.first().map_or(0, |newest| {
             1 + turn_block(newest, /*latest_run_id*/ None, TurnShape::MINIMAL).len()
@@ -231,12 +231,7 @@ impl ContinuityRecord {
                 self.unreadable_threads
             ));
         }
-        (!notes.is_empty()).then(|| {
-            format!(
-                "Not shown: {}. conversation_read lists and returns them.",
-                notes.join("; ")
-            )
-        })
+        (!notes.is_empty()).then(|| format!("Not shown: {}.", notes.join("; ")))
     }
 }
 
@@ -283,14 +278,14 @@ fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: TurnShap
     let when = turn
         .at_ms
         .map_or_else(|| "time unknown".to_string(), format_time);
-    let thread_id = quote(&turn.thread_id, usize::MAX, /*route*/ None);
+    let thread_id = quote(&turn.thread_id, usize::MAX);
     let thread = if turn.current_thread {
         format!("this thread {thread_id}")
     } else {
         match turn.thread_title.as_ref().filter(|_| limits.title) {
             Some(title) => format!(
                 "thread {thread_id} titled {}",
-                quote(title, MAX_THREAD_TITLE_BYTES, /*route*/ None)
+                quote(title, MAX_THREAD_TITLE_BYTES)
             ),
             None => format!("thread {thread_id}"),
         }
@@ -298,33 +293,24 @@ fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: TurnShap
     let status = turn
         .unfinished_status
         .map_or_else(String::new, |status| format!(", {status}"));
-    let turn_id = quote(&turn.turn_id, usize::MAX, /*route*/ None);
+    let turn_id = quote(&turn.turn_id, usize::MAX);
     let run = match &turn.run {
         RunLabel::Bound { run_id, .. } if Some(run_id.as_str()) == latest_run_id => {
             "latest run".to_string()
         }
-        RunLabel::Bound { run_id, status } => format!(
-            "run {} (now {status})",
-            quote(run_id, usize::MAX, /*route*/ None)
-        ),
+        RunLabel::Bound { run_id, status } => {
+            format!("run {} (now {status})", quote(run_id, usize::MAX))
+        }
         RunLabel::NoRun => "no Stateful run recorded".to_string(),
         RunLabel::Unknown => "run binding unknown".to_string(),
     };
     let mut block = format!("- {when}, {thread}, turn {turn_id}{status}, {run}:");
-    let route =
-        |part: &str| format!("conversation_read threadId={thread_id} turnId={turn_id} part={part}");
     if let Some(user) = &turn.user {
-        block.push_str(&format!(
-            "\n  User: {}",
-            quote(user, limits.user, Some(&route("user")))
-        ));
+        block.push_str(&format!("\n  User: {}", quote(user, limits.user)));
     }
     match &turn.answer {
         Some(answer) => {
-            block.push_str(&format!(
-                "\n  Answer: {}",
-                quote(answer, limits.answer, Some(&route("answer")))
-            ));
+            block.push_str(&format!("\n  Answer: {}", quote(answer, limits.answer)));
         }
         None => block.push_str("\n  Answer: none recorded."),
     }
@@ -334,7 +320,7 @@ fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: TurnShap
 fn run_line(run: &LatestRun, detail: RunDetail) -> String {
     let mut line = format!(
         "Latest Stateful run: {} ({}, {}).",
-        quote(&run.id, usize::MAX, /*route*/ None),
+        quote(&run.id, usize::MAX),
         run.mode,
         run.status
     );
@@ -342,23 +328,20 @@ fn run_line(run: &LatestRun, detail: RunDetail) -> String {
         return line;
     }
     for next in run.next.iter().take(MAX_NEXT_ITEMS) {
-        line.push_str(&format!(
-            " Next: {}",
-            quote(next, MAX_NEXT_ITEM_BYTES, /*route*/ None)
-        ));
+        line.push_str(&format!(" Next: {}", quote(next, MAX_NEXT_ITEM_BYTES)));
     }
     if let Some(strategy) = &run.strategy {
         line.push_str(&format!(
             " Strategy: {}",
-            quote(strategy, MAX_STRATEGY_BYTES, /*route*/ None)
+            quote(strategy, MAX_STRATEGY_BYTES)
         ));
     }
     line
 }
 
 /// JSON-quotes and markup-escapes `text`, shortened so the quote is at most `limit` bytes,
-/// with an explicit marker naming `route` for the full text.
-fn quote(text: &str, limit: usize, route: Option<&str>) -> String {
+/// with an explicit marker saying how much was shown.
+fn quote(text: &str, limit: usize) -> String {
     let encode = |end: usize| escape(&serde_json::to_string(&text[..end]).unwrap_or_default());
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {
@@ -374,11 +357,7 @@ fn quote(text: &str, limit: usize, route: Option<&str>) -> String {
         quoted = encode(end);
     }
     if end < text.len() {
-        let route = route.map_or_else(String::new, |route| format!("; {route} returns it in full"));
-        quoted.push_str(&format!(
-            " [shortened at {end} of {} bytes{route}]",
-            text.len()
-        ));
+        quoted.push_str(&format!(" [shortened at {end} of {} bytes]", text.len()));
     }
     quoted
 }

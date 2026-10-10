@@ -74,11 +74,7 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
     for _ in 0..2 {
         let services = crate::services::ProjectIntelligenceServices::new(sqlite.clone());
         let store = services.blackboard().await.unwrap();
-        let tool = super::MemoryReadTool::new(
-            "project-1".into(),
-            services.clone(),
-            Arc::new(codex_thread_store::InMemoryThreadStore::default()),
-        );
+        let tool = super::MemoryReadTool::new("project-1".into(), services.clone());
         for include_history in [false, true] {
             let (groups, more) = tool
                 .knowledge(
@@ -286,11 +282,7 @@ async fn matches_of_one_chain_share_a_group_and_since_filters_first() {
         )
         .await
         .expect("C");
-    let tool = super::MemoryReadTool::new(
-        "project-1".to_string(),
-        services.clone(),
-        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
-    );
+    let tool = super::MemoryReadTool::new("project-1".to_string(), services.clone());
     let terms = question_terms("rounding decimal places");
     let (groups, _) = tool
         .knowledge(
@@ -363,11 +355,7 @@ async fn a_long_chain_joins_the_group_that_already_shows_it() {
             .await
             .expect("successor");
     }
-    let tool = super::MemoryReadTool::new(
-        "project-1".to_string(),
-        services.clone(),
-        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
-    );
+    let tool = super::MemoryReadTool::new("project-1".to_string(), services.clone());
     let (groups, truncated) = tool
         .knowledge(
             store,
@@ -411,11 +399,7 @@ async fn since_matches_beyond_the_hit_cap_are_reported() {
             .await
             .expect("entry");
     }
-    let tool = super::MemoryReadTool::new(
-        "project-1".to_string(),
-        services.clone(),
-        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
-    );
+    let tool = super::MemoryReadTool::new("project-1".to_string(), services.clone());
     let (groups, truncated) = tool
         .knowledge(
             store,
@@ -470,11 +454,7 @@ async fn retired_matches_are_withheld_and_current_wording_remains_readable() {
             .await
             .expect("successor");
     }
-    let tool = super::MemoryReadTool::new(
-        "project-1".to_string(),
-        services.clone(),
-        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
-    );
+    let tool = super::MemoryReadTool::new("project-1".to_string(), services.clone());
     let mut heads = Vec::new();
     for include_history in [false, true] {
         let (groups, _) = tool
@@ -508,10 +488,10 @@ async fn retired_matches_are_withheld_and_current_wording_remains_readable() {
     );
 }
 
-/// A replaced entry keeps the authorship of its own words: a user-authored entry replaced by
-/// an agent record is still labelled as the user's.
+/// A user-authored entry replaced by an agent record stays out of recall: memory the user can
+/// forget never enters a tool result, so only the agent's current wording is returned.
 #[tokio::test]
-async fn replaced_entries_keep_their_own_authorship() {
+async fn user_authored_predecessors_stay_out_of_recall() {
     let state_home = tempfile::TempDir::new().expect("state home");
     let services = crate::services::ProjectIntelligenceServices::new(
         codex_state::SqliteConfig::new_for_testing(
@@ -535,11 +515,7 @@ async fn replaced_entries_keep_their_own_authorship() {
         )
         .await
         .expect("B");
-    let tool = super::MemoryReadTool::new(
-        "project-1".to_string(),
-        services.clone(),
-        std::sync::Arc::new(codex_thread_store::InMemoryThreadStore::default()),
-    );
+    let tool = super::MemoryReadTool::new("project-1".to_string(), services.clone());
     let (groups, _) = tool
         .knowledge(
             store,
@@ -558,11 +534,5 @@ async fn replaced_entries_keep_their_own_authorship() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        sources,
-        vec![
-            ("b".to_string(), "agent record".to_string()),
-            ("a".to_string(), "user".to_string()),
-        ]
-    );
+    assert_eq!(sources, vec![("b".to_string(), "agent record".to_string())]);
 }

@@ -51,12 +51,6 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
     );
     tracker.record_tool_outcome(
         "turn-1",
-        "call-5",
-        "conversation_read",
-        ToolCallOutcome::Completed { success: true },
-    );
-    tracker.record_tool_outcome(
-        "turn-1",
         "call-3",
         "evidence_read",
         ToolCallOutcome::Failed {
@@ -102,10 +96,9 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
                 root_evidence_routes_stale: 1,
                 root_unique_sources_observed: 2,
                 root_source_bytes_hashed: 42,
-                stateful_tool_calls: 5,
+                stateful_tool_calls: 4,
                 failed_stateful_tool_calls: 1,
                 knowledge_query_calls: 1,
-                conversation_read_calls: 1,
                 blackboard_write_calls: 1,
                 run_update_calls: 1,
                 material_findings_reused: 2,
@@ -116,13 +109,5 @@ fn tracker_reports_bounded_state_reads_writes_and_reuse() {
     assert_eq!(
         tracker.finish("turn-1", StatefulAttributionStatus::Completed),
         None
-    );
-}
-
-#[test]
-fn conversation_read_is_a_counted_stateful_tool() {
-    assert_eq!(
-        super::stateful_tool_name(&codex_extension_api::ToolName::plain("conversation_read")),
-        Some("conversation_read")
     );
 }

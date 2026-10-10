@@ -100,11 +100,7 @@ async fn c3r2_memory_read_omitted_matches_refuse_without_progress_cold() {
         let services = ProjectIntelligenceServices::new(sqlite.clone());
         let store = services.blackboard().await.unwrap();
         let before = store.project_revision("project-1").await.unwrap();
-        let tool = memory_read::MemoryReadTool::new(
-            "project-1".into(),
-            services.clone(),
-            Arc::new(InMemoryThreadStore::default()),
-        );
+        let tool = memory_read::MemoryReadTool::new("project-1".into(), services.clone());
         let mut refused = false;
         let mut delivered = false;
         for budget in [20, 100, 800, 1200, 1600, 2000, 4000, 9000] {
@@ -146,10 +142,7 @@ async fn c3r2_memory_read_omitted_matches_refuse_without_progress_cold() {
             .await
             .unwrap();
         let result: serde_json::Value = serde_json::from_str(&output.log_output()).unwrap();
-        assert_eq!(
-            (result["entries"].clone(), result["turns"].clone()),
-            (json!([]), json!([]))
-        );
+        assert_eq!(result["entries"], json!([]));
         assert_eq!(store.project_revision("project-1").await.unwrap(), before);
     }
 }

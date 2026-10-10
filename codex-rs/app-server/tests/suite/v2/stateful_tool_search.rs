@@ -202,7 +202,6 @@ async fn deferred_stateful_tools_load_through_tool_search() -> Result<()> {
         "blackboard_update_batch",
         "steering_reconcile",
         "blackboard_query",
-        "conversation_read",
     ] {
         assert!(
             !initial.iter().any(|name| name == deferred),

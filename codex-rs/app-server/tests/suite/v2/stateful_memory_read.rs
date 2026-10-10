@@ -1,6 +1,6 @@
 //! One evidence-bearing recall (council slice 4): a question about a changed decision is
-//! answered from one memory_read result carrying eligible current wording and the earlier
-//! turn where the user changed it. Retired Agent wording remains archival.
+//! answered from one memory_read result carrying eligible current wording. Retired Agent
+//! wording remains archival; earlier conversation is never part of a tool result.
 
 use std::collections::BTreeMap;
 
@@ -132,13 +132,7 @@ async fn one_memory_read_returns_current_decision_and_reason_without_retired_his
         })
         .collect::<Vec<_>>();
     assert_eq!(statuses, vec![(TWO.to_string(), "current".to_string())]);
-    let turns = recall["turns"].as_array().expect("turns");
-    assert!(
-        turns
-            .iter()
-            .any(|turn| turn["user"].as_str() == Some(CHANGE_REQUEST)),
-        "{turns:?}"
-    );
+    assert!(!recall.to_string().contains(CHANGE_REQUEST), "{recall}");
     assert_eq!(entries[0]["source"], json!("agent record"));
     // The retained current row keeps its authority fields.
     assert_eq!(
@@ -154,7 +148,6 @@ async fn one_memory_read_returns_current_decision_and_reason_without_retired_his
             .iter()
             .any(|entry| entry["content"] == json!(TWO))
     );
-    assert!(since["turns"].as_array().expect("turns").len() >= 3);
     assert!(since.to_string().len() <= 9_000);
     Ok(())
 }
