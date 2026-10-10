@@ -8,15 +8,6 @@ use crate::CaptureGroupMember;
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
 
-pub(super) async fn retirement_generation_on(
-    connection: &mut SqliteConnection,
-    project_id: &str,
-) -> Result<u64, BlackboardStoreError> {
-    let generation: i64 = sqlx::query_scalar("SELECT COALESCE((SELECT MAX(sequence) FROM memory_changes WHERE project_id = ? AND operation IN ('forgotten', 'corrected', 'invalidated', 'scope_ended')), 0) + (SELECT COUNT(*) FROM capture_source_exclusions WHERE project_id = ?)")
-        .bind(project_id).bind(project_id).fetch_one(&mut *connection).await?;
-    unsigned(generation)
-}
-
 impl BlackboardStore {
     /// A stored capture group with its members in order, so a receipt can be replayed.
     pub async fn capture_group(
@@ -28,19 +19,6 @@ impl BlackboardStore {
         let result = capture_group_on(&mut tx, project_id, group_id).await?;
         tx.commit().await?;
         Ok(result)
-    }
-
-    /// A value that grows whenever memory stops applying in the project: a user's Forget, an
-    /// Undo, a correction (which retires its predecessor), a scope end, or any retirement that
-    /// excludes a captured source (both only ever grow). Outputs read before a later
-    /// retirement may quote words that no longer apply; publication fences compare this
-    /// generation with the one captured before their read.
-    pub async fn retirement_generation(
-        &self,
-        project_id: &str,
-    ) -> Result<u64, BlackboardStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        retirement_generation_on(&mut connection, project_id).await
     }
 
     /// The proposal group (the receipt) that committed proposal `entry_id`.

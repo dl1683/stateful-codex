@@ -15,7 +15,6 @@ mod multi_agent_tool;
 pub(crate) mod network_approval;
 pub(crate) mod orchestrator;
 pub(crate) mod parallel;
-pub(crate) mod publication;
 pub(crate) mod registry;
 pub(crate) mod router;
 pub(crate) mod runtimes;

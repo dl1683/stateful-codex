@@ -6,8 +6,7 @@ use sqlx::Sqlite;
 use sqlx::SqlitePool;
 use sqlx::pool::PoolConnection;
 
-/// A database-wide SQLite writer fence held across completion validation and persistence,
-/// or across the recording of a memory-bearing tool result into model history.
+/// A database-wide SQLite writer fence held across completion validation and persistence.
 #[must_use]
 pub struct CompletionFence {
     connection: PoolConnection<Sqlite>,
@@ -54,16 +53,6 @@ impl CompletionFence {
     ) -> Result<bool, BlackboardStoreError> {
         agent_knowledge_changed_since_on_connection(&mut self.connection, project_id, since_ms)
             .await
-    }
-
-    /// The project's retirement generation (see `BlackboardStore::retirement_generation`),
-    /// read while the fence holds the writer lock: no Forget, Undo or correction can commit
-    /// until the fence is released or dropped.
-    pub async fn retirement_generation(
-        &mut self,
-        project_id: &str,
-    ) -> Result<u64, BlackboardStoreError> {
-        super::source_group_read::retirement_generation_on(&mut self.connection, project_id).await
     }
 
     pub async fn release(mut self) -> Result<(), BlackboardStoreError> {

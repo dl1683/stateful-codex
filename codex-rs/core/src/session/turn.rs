@@ -2484,14 +2484,19 @@ async fn drain_in_flight(
     let turn_context = &step_context.turn;
     while let Some(res) = in_flight.next().await {
         match res {
-            Ok(delivery) => {
+            Ok(envelope) => {
                 mark_thread_memory_mode_polluted_if_external_context(
                     sess.as_ref(),
                     turn_context.as_ref(),
-                    &delivery.envelope.item,
+                    &envelope.item,
                 )
                 .await;
-                crate::tools::publication::record(&sess, step_context, delivery).await;
+                sess.record_annotated_conversation_items(
+                    turn_context,
+                    &step_context.settings.model_info,
+                    vec![envelope],
+                )
+                .await;
             }
             Err(err) => {
                 error_or_panic(format!("in-flight tool future failed during drain: {err}"));

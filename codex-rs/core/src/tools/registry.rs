@@ -747,24 +747,14 @@ impl ToolRegistry {
         } else {
             None
         };
-        let hook_contexts = post_tool_use_outcome
-            .as_ref()
-            .map(|outcome| outcome.additional_contexts.clone())
-            .unwrap_or_default();
-        // A checked result and its hook context are published together at recording time.
-        let withheld = match tool.publication_check(&invocation.call_id) {
-            Some(check) => super::publication::defer(
-                check,
-                hook_contexts,
-                &invocation.source,
-                call_state.as_deref(),
-            ),
-            None => {
-                record_additional_contexts(&invocation.session, &invocation.turn, hook_contexts)
-                    .await;
-                None
-            }
-        };
+        if let Some(outcome) = &post_tool_use_outcome {
+            record_additional_contexts(
+                &invocation.session,
+                &invocation.turn,
+                outcome.additional_contexts.clone(),
+            )
+            .await;
+        }
 
         // A PostToolUse block rejects the result, not the already-completed tool execution.
         let lifecycle_outcome = match &result {
@@ -775,11 +765,6 @@ impl ToolRegistry {
         };
         notify_tool_finish_if_unclaimed(&invocation, call_state.as_deref(), lifecycle_outcome)
             .await;
-        if let Some(withheld) = withheld {
-            let err = FunctionCallError::RespondToModel(withheld);
-            dispatch_trace.record_failed(&err);
-            return Err(err);
-        }
 
         match result {
             Ok(mut result) => {

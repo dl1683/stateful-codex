@@ -68,10 +68,6 @@ impl ToolExecutor<ToolInvocation> for ExtensionToolAdapter {
     {
         Box::pin(async move { self.0.handle(to_extension_call(&invocation).await).await })
     }
-
-    fn publication_check(&self, call_id: &str) -> Option<codex_tools::ToolPublicationCheck> {
-        self.0.publication_check(call_id)
-    }
 }
 
 impl CoreToolRuntime for ExtensionToolAdapter {
