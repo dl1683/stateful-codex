@@ -261,11 +261,17 @@ mod grammar_tests;
 #[path = "offline_tests.rs"]
 mod offline_tests;
 #[cfg(test)]
+#[path = "piggyback_tests.rs"]
+mod piggyback_tests;
+#[cfg(test)]
 #[path = "reduce_tests.rs"]
 mod reduce_tests;
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod render_tests;
+#[cfg(test)]
+#[path = "semantic_tests.rs"]
+mod semantic_tests;
 #[cfg(test)]
 #[path = "source_validation_tests.rs"]
 mod source_validation_tests;
