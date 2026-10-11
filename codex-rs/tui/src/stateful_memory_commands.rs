@@ -46,8 +46,7 @@ const PAGE_SIZE: u32 = 50;
 /// A Forget cannot remove what a thread's conversation already holds, so every receipt states
 /// the contract and what a new thread does and does not leave behind.
 const FORGET_TAKES_EFFECT: &str = "Forget removes the entry from memory reads, the session-start memory and the digest. Text the agent already wrote into its own run notes, strategy or findings before the Forget, and earlier messages in existing threads, are derivatives and are not removed.";
-const FORGET_HINT: &str =
-    "A new thread starts without this conversation's history; notes the agent already wrote are not removed.";
+const FORGET_HINT: &str = "A new thread starts without this conversation's history; notes the agent already wrote are not removed.";
 const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory apply <ID@REV> <rule|decision|ruled-out>, /memory undo <receipt-id>, /memory help";
 
 /// What the user asked `/memory` to do.
