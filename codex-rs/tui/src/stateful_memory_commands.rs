@@ -28,6 +28,7 @@ use codex_app_server_protocol::StatefulRun;
 use codex_app_server_protocol::StatefulRunReadParams;
 use codex_app_server_protocol::StatefulRunReadResponse;
 use codex_protocol::ThreadId;
+use ratatui::style::Stylize;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -42,9 +43,10 @@ use crate::stateful_memory::section_rank;
 
 /// Entries one page shows.
 const PAGE_SIZE: u32 = 50;
-/// A Forget cannot reach a tool result already read in a turn in flight on any thread of the
-/// project, and the TUI cannot see other threads' turns, so every receipt says so.
-const FORGET_TAKES_EFFECT: &str = "Forget takes effect from the next turn. Within the current turn, content already read (including held tool results and hook copies) may still reach the model. No new read after the Forget is admitted at a later epoch.";
+/// A Forget cannot remove what a thread's conversation already holds, so every receipt states
+/// the next-turn contract and points at a new thread for a clean context.
+const FORGET_TAKES_EFFECT: &str = "Forget takes effect from the next turn: no new read, root, digest or new thread admits the content. Content already delivered into a thread's conversation (including tool results, hook copies and compaction summaries of them) remains in that thread's history; start a new thread for a clean context.";
+const FORGET_HINT: &str = "Start a new thread for a clean context.";
 const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory apply <ID@REV> <rule|decision|ruled-out>, /memory undo <receipt-id>, /memory help";
 
 /// What the user asked `/memory` to do.
@@ -589,12 +591,19 @@ async fn forget(request: &Requests<'_>, target: EntryTarget) -> Result<PlainHist
         })
         .await
         .map_err(|error| format!("Nothing was forgotten: {error}"))?;
-    Ok(new_info_event(
-        format!("Forgot {}@{}", target.entry_id, target.revision),
-        Some(format!(
-            "It stays in history but no longer applies. {FORGET_TAKES_EFFECT} Run /memory refresh to update the list."
-        )),
-    ))
+    Ok(PlainHistoryCell::new(vec![
+        vec![
+            "• ".dim(),
+            format!("Forgot {}@{}", target.entry_id, target.revision).into(),
+            " ".into(),
+            format!(
+                "It stays in history but no longer applies. {FORGET_TAKES_EFFECT} Run /memory refresh to update the list."
+            )
+            .dark_gray(),
+        ]
+        .into(),
+        vec!["  ".into(), FORGET_HINT.cyan()].into(),
+    ]))
 }
 
 async fn correct(

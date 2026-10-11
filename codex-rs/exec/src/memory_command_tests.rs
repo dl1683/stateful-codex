@@ -44,7 +44,8 @@ fn forget_receipt_says_when_it_takes_effect() {
             entry_id: "rule-1".to_string(),
             revision: 3,
         }),
-        "Forgot rule-1@3. It stays in history but no longer applies. Forget takes effect from the next turn. Within the current turn, content already read (including held tool results and hook copies) may still reach the model. No new read after the Forget is admitted at a later epoch."
+        "Forgot rule-1@3. It stays in history but no longer applies. Forget takes effect from the next turn: no new read, root, digest or new thread admits the content. Content already delivered into a thread's conversation (including tool results, hook copies and compaction summaries of them) remains in that thread's history; start a new thread for a clean context.
+Start a new thread for a clean context."
     );
 }
 
