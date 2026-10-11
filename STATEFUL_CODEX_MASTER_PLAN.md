@@ -239,3 +239,21 @@ Order from here:
 - epoch-first, if the capsule cannot be invalidated safely;
 - reads-first, if the capsule lacks evidence;
 - a capsule plus exact-event retrieval hybrid, if 512 tokens is too small.
+
+### Capsule: measure before finishing infrastructure (Codex step-back 2026-10-11b)
+
+Sequence:
+1. Finish stage (a)'s bounded review; keep it inactive and don't expand it.
+2. Make stage (b)'s generic reducer runnable offline.
+3. **Offline content test** on the recorded within1 rollouts:
+   - render the capsule at every real compaction and resume boundary, at both 2,048 B and 512 tokens;
+   - score N1, N2, N5, N6 and N7 at their probes while keeping N3 and N4;
+   - classify each failure as missing source, extraction miss, packing omission, or failure to use.
+4. **Frozen continuation probes** with and without the capsule.
+5. **Scoped experimental paired within1 replay**, with unsupported paths named. This is a provisional measurement.
+6. **Production completion only after that:** stage (c), every native boundary, crash and fork safety.
+
+Branches on the result:
+- capture works but cost fails: trimming comes first;
+- the cap is too small: try a larger capsule or a retrieval hybrid;
+- the evidence is absent: Forget plus restored reads comes first.
