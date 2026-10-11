@@ -15,13 +15,13 @@ use super::grammar::is_locator;
 
 pub(crate) const MAX_CAPSULE_BYTES: usize = 2048;
 pub(crate) const MAX_CAPSULE_TOKENS: usize = 512;
-const OPEN: &str = "<stateful_capsule>";
-const CLOSE: &str = "</stateful_capsule>";
-const QUALIFICATION: &str =
+pub(super) const OPEN: &str = "<stateful_capsule>";
+pub(super) const CLOSE: &str = "</stateful_capsule>";
+pub(super) const QUALIFICATION: &str =
     "Historical observations; proposals are not authorization. File state needs checking.";
 /// (bytes, tokens) reserved per slot, in packing order after the envelope; the first two
 /// (next action, unavailable route) are required slots.
-const ENVELOPE: (usize, usize) = (224, 56);
+pub(super) const ENVELOPE: (usize, usize) = (224, 56);
 const SLOTS: [(CandidateKind, (usize, usize)); 4] = [
     (CandidateKind::Next, (288, 72)),
     // Unavailable programs, with a same-purpose replacement when one is known.
@@ -69,28 +69,8 @@ pub(crate) fn render_capsule<'a>(
     counter: TokenCounter<'_>,
 ) -> Result<RenderedCapsule, CapsuleError> {
     let count = |text: &str| counter.map_or(text.len(), |count| count(text));
-    let ids = |short: bool| {
-        let cut = |id: &str| {
-            if short {
-                id.chars().take(8).collect()
-            } else {
-                id.to_string()
-            }
-        };
-        format!(
-            "P={} T={} W={} E={} S={}",
-            escape(&cut(header.project)),
-            escape(&cut(header.thread)),
-            escape(&cut(header.window)),
-            header.eligibility_generation,
-            header.watermark
-        )
-    };
     let envelope = |ids: &str| format!("{OPEN}\n{ids}\n{QUALIFICATION}\n{CLOSE}");
-    let mut id_line = ids(false);
-    if envelope(&id_line).len() > ENVELOPE.0 {
-        id_line = ids(true);
-    }
+    let id_line = id_line(header);
     let base = envelope(&id_line);
     let (base_bytes, base_tokens) = (base.len(), count(&base));
     if base_bytes > ENVELOPE.0 || base_tokens + COVERAGE.1 > MAX_CAPSULE_TOKENS {
@@ -200,8 +180,39 @@ pub(crate) fn render_capsule<'a>(
     }
 }
 
+/// The identity line, shortened to 8-character ids when the full envelope exceeds its
+/// reservation.
+pub(super) fn id_line(header: &CapsuleHeader<'_>) -> String {
+    let ids = |short: bool| {
+        let cut = |id: &str| {
+            if short {
+                id.chars().take(8).collect()
+            } else {
+                id.to_string()
+            }
+        };
+        format!(
+            "P={} T={} W={} E={} S={}",
+            escape(&cut(header.project)),
+            escape(&cut(header.thread)),
+            escape(&cut(header.window)),
+            header.eligibility_generation,
+            header.watermark
+        )
+    };
+    let full = ids(false);
+    if format!("{OPEN}\n{full}\n{QUALIFICATION}\n{CLOSE}").len() > ENVELOPE.0 {
+        ids(true)
+    } else {
+        full
+    }
+}
+
 /// Records of one slot, highest priority first; each is one or two linked candidates.
-fn slot_records<'a>(kind: CandidateKind, visible: &[&'a Candidate]) -> Vec<Vec<&'a Candidate>> {
+pub(super) fn slot_records<'a>(
+    kind: CandidateKind,
+    visible: &[&'a Candidate],
+) -> Vec<Vec<&'a Candidate>> {
     let newest = visible
         .iter()
         .rev()
@@ -238,7 +249,7 @@ fn slot_records<'a>(kind: CandidateKind, visible: &[&'a Candidate]) -> Vec<Vec<&
     }
 }
 
-fn record_line(
+pub(super) fn record_line(
     record: &[&Candidate],
     visible: &[&Candidate],
     suspended: bool,

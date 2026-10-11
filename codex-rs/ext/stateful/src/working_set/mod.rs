@@ -12,6 +12,7 @@ mod commands;
 mod directives;
 mod grammar;
 mod offline;
+mod pack;
 mod piggyback;
 mod reduce;
 mod render;
@@ -30,6 +31,7 @@ pub use offline::OfflineCapsule;
 pub use offline::OfflineCapsuleInput;
 pub use offline::OfflineFileWitness;
 pub use offline::offline_capsule;
+pub use offline::offline_composed_capsule;
 
 /// Version of the finite extraction grammar and payload schema; a change invalidates caches.
 pub(crate) const GRAMMAR_VERSION: u32 = 1;
@@ -280,6 +282,9 @@ mod grammar_tests;
 #[cfg(test)]
 #[path = "offline_tests.rs"]
 mod offline_tests;
+#[cfg(test)]
+#[path = "pack_tests.rs"]
+mod pack_tests;
 #[cfg(test)]
 #[path = "piggyback_tests.rs"]
 mod piggyback_tests;
