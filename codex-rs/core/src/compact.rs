@@ -275,6 +275,8 @@ async fn run_compact_task_inner_impl(
     // request tracking) survives retries within this compact turn.
     let mut client_session = sess.services.model_client.new_session();
     let mut native_attempts: u32 = 0;
+    // Cleared when the addition alone overflows the window: sources are never trimmed for it.
+    let mut extraction_fits = true;
     let (mut compaction_response, extraction) = loop {
         // Clone is required because of the loop
         let annotated_input = history
@@ -282,13 +284,17 @@ async fn run_compact_task_inner_impl(
             .for_prompt_annotated(&turn_context.model_info().input_modalities);
         native_attempts = native_attempts.saturating_add(1);
         // Rebuilt for every attempt: a trimmed or retried request gets a fresh map and marker.
-        let extraction = CompactionExtraction::prepare(
-            sess.as_ref(),
-            &turn_context.sub_id,
-            native_attempts,
-            history.annotated_items(),
-            &annotated_input,
-        );
+        let extraction = if extraction_fits {
+            CompactionExtraction::prepare(
+                sess.as_ref(),
+                turn_context.as_ref(),
+                native_attempts,
+                history.annotated_items(),
+                &annotated_input,
+            )
+        } else {
+            None
+        };
         let mut turn_input = annotated_input
             .into_iter()
             .map(ResponseItemEnvelope::into_item)
@@ -341,6 +347,11 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) if matches!(e.details(), CodexErrorDetails::ContextWindowExceeded) => {
+                if extraction.is_some() {
+                    extraction_fits = false;
+                    retries = 0;
+                    continue;
+                }
                 if turn_input_len > 1 {
                     // Trim from the beginning to preserve cache (prefix-based) and keep recent messages intact.
                     error!(
@@ -377,6 +388,15 @@ async fn run_compact_task_inner_impl(
         .as_ref()
         .map(|extraction| extraction.separate_trailer(&mut compaction_response.output))
         .transpose()?;
+    // The augmented path takes its summary only from this response, never from older history.
+    let buffered_summary = extraction
+        .as_ref()
+        .map(|_| {
+            get_last_assistant_message_from_turn(compaction_response.output.iter()).ok_or_else(
+                || CodexErr::Stream("compaction completed without a native summary".to_string()),
+            )
+        })
+        .transpose()?;
     if extraction.is_some() && !matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
         let output = std::mem::take(&mut compaction_response.output)
             .into_iter()
@@ -388,7 +408,9 @@ async fn run_compact_task_inner_impl(
 
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.annotated_items();
-    let summary_suffix = if matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
+    let summary_suffix = if let Some(summary) = buffered_summary {
+        summary
+    } else if matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
         get_last_assistant_message_from_turn(compaction_response.output.iter())
             .filter(|summary| !summary.trim().is_empty())
             .ok_or_else(|| {

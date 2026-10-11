@@ -19,6 +19,7 @@ use codex_extension_api::CompactionSourcePart;
 use codex_extension_api::CompactionTrailer;
 use codex_extension_api::MAX_COMPACTION_EXTRACTION_INSTRUCTION_BYTES;
 use codex_extension_api::MAX_COMPACTION_EXTRACTION_TRAILER_BYTES;
+use codex_history::AssistantDeliveryClassification;
 use codex_history::ResponseItemEnvelope;
 use codex_history::RetainedSourceRole;
 use codex_protocol::error::CodexErr;
@@ -30,6 +31,7 @@ use codex_protocol::models::ResponseItem;
 
 use crate::compact::is_summary_message;
 use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
 
 /// One attempt's frozen request and the contributor addition it carries.
 pub(crate) struct CompactionExtraction {
@@ -41,9 +43,10 @@ pub(crate) struct CompactionExtraction {
 impl CompactionExtraction {
     /// Freezes `request` (the attempt's final normalized input, whose last item is the native
     /// compaction instruction) and asks contributors, in registration order, for one addition.
+    /// Withheld for Responses Lite, whose request prefix shifts wire positions.
     pub(crate) fn prepare(
         sess: &Session,
-        turn_id: &str,
+        turn_context: &TurnContext,
         attempt: u32,
         recorded: &[ResponseItemEnvelope],
         request: &[ResponseItemEnvelope],
@@ -52,15 +55,27 @@ impl CompactionExtraction {
             .services
             .extensions
             .compaction_extraction_contributors();
-        if contributors.is_empty() {
+        let model_info = turn_context.model_info();
+        if contributors.is_empty() || model_info.use_responses_lite {
             return None;
         }
+        // Mirrors the request builder: these items never reach the wire.
+        let configuration_updates = if sess
+            .services
+            .model_client
+            .reasoning_effort_override_enabled(model_info)
+        {
+            ConfigurationUpdates::Sent
+        } else {
+            ConfigurationUpdates::Filtered
+        };
         let snapshot = Arc::new(snapshot_request(
             sess.thread_id,
-            turn_id,
+            &turn_context.sub_id,
             attempt,
             recorded,
             request,
+            configuration_updates,
         ));
         contributors.iter().find_map(|contributor| {
             let preparation =
@@ -116,11 +131,17 @@ fn admissible(
         && preparation.instruction.len() <= MAX_COMPACTION_EXTRACTION_INSTRUCTION_BYTES
         && !opening.trim().is_empty()
         && !opening.contains(['\n', '\r'])
-        && !preparation.instruction.contains(opening)
         && request
             .parts
             .iter()
             .all(|part| !part.text.contains(opening))
+}
+
+/// Whether the request builder drops configuration-update items from the wire input.
+#[derive(Clone, Copy)]
+enum ConfigurationUpdates {
+    Sent,
+    Filtered,
 }
 
 fn snapshot_request(
@@ -129,6 +150,7 @@ fn snapshot_request(
     attempt: u32,
     recorded: &[ResponseItemEnvelope],
     request: &[ResponseItemEnvelope],
+    configuration_updates: ConfigurationUpdates,
 ) -> CompactionRequestSnapshot {
     let recorded_by_revision = recorded
         .iter()
@@ -138,9 +160,17 @@ fn snapshot_request(
         })
         .collect::<HashMap<_, _>>();
     let mut parts = Vec::new();
-    for (item_index, envelope) in request.iter().enumerate() {
+    let mut wire_index = 0;
+    for (position, envelope) in request.iter().enumerate() {
+        if matches!(configuration_updates, ConfigurationUpdates::Filtered)
+            && matches!(envelope.item, ResponseItem::ConfigurationUpdate { .. })
+        {
+            continue;
+        }
+        let item_index = wire_index;
+        wire_index += 1;
         // The final item is the native compaction instruction, never a source.
-        let class = if item_index + 1 == request.len() {
+        let class = if position + 1 == request.len() {
             CompactionSourceClass::HostContext
         } else {
             source_class(envelope)
@@ -241,7 +271,17 @@ fn source_origin(
                 RetainedSourceRole::Assistant
             )
     );
-    if !role_matches {
+    // Recorded assistant bytes prove nothing about what the user saw unless delivery resolution
+    // established that the finalized visible text equals them.
+    let published = class != CompactionSourceClass::Assistant
+        || matches!(
+            metadata.assistant_delivery_classification,
+            Some(
+                AssistantDeliveryClassification::Final
+                    | AssistantDeliveryClassification::Commentary
+            )
+        );
+    if !role_matches || !published {
         return None;
     }
     let recorded_text = recorded_by_revision

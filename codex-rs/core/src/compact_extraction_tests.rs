@@ -79,21 +79,39 @@ fn part(
     }
 }
 
+fn published(mut envelope: ResponseItemEnvelope) -> ResponseItemEnvelope {
+    if let Some(metadata) = &mut envelope.metadata {
+        metadata.assistant_delivery_classification = Some(AssistantDeliveryClassification::Final);
+    }
+    envelope
+}
+
+fn at_part(mut part: CompactionSourcePart, part_index: usize) -> CompactionSourcePart {
+    part.part_index = part_index;
+    part
+}
+
 #[test]
 fn snapshot_maps_sent_parts_to_recorded_originals_and_fails_closed() {
     let thread_id = ThreadId::new();
+    // Dropped by the request builder, so later wire positions shift down by one.
+    let configuration = ResponseItemEnvelope::new(ResponseItem::ConfigurationUpdate {
+        reasoning: codex_protocol::models::ConfigurationReasoning {
+            effort: codex_protocol::openai_models::ReasoningEffort::High,
+        },
+    });
     let user = sourced(
-        message("user", &["use sqlite"]),
+        message("user", &["use sqlite", "second part"]),
         RetainedSourceRole::User,
         "r1",
         1,
     );
-    let assistant = sourced(
+    let assistant = published(sourced(
         message("assistant", &["done"]),
         RetainedSourceRole::Assistant,
         "r2",
         2,
-    );
+    ));
     // Recorded original differs from the sent bytes: mapping exists but is not identical.
     let changed_recorded = sourced(
         message("user", &["full text"]),
@@ -110,60 +128,98 @@ fn snapshot_maps_sent_parts_to_recorded_originals_and_fails_closed() {
         "r4",
         4,
     );
+    // Delivery never proved these recorded bytes were what the user saw.
+    let unpublished = sourced(
+        message("assistant", &["hidden"]),
+        RetainedSourceRole::Assistant,
+        "r5",
+        5,
+    );
     let summary = ResponseItemEnvelope::new(message(
         "user",
         &[&format!("{}\nold summary", crate::compact::SUMMARY_PREFIX)],
     ));
     let prompt = ResponseItemEnvelope::new(message("user", &["summarize"]));
-    let recorded = vec![
-        user.clone(),
-        assistant.clone(),
-        changed_recorded,
-        spoofed.clone(),
-        summary.clone(),
-        prompt.clone(),
+    let sent = vec![
+        configuration,
+        user,
+        assistant,
+        changed_sent,
+        spoofed,
+        unpublished,
+        summary,
+        prompt,
     ];
-    let sent = vec![user, assistant, changed_sent, spoofed, summary, prompt];
+    let mut recorded = sent.clone();
+    recorded[3] = changed_recorded;
 
-    let snapshot = snapshot_request(thread_id, "turn-9", 2, &recorded, &sent);
-
-    assert_eq!(
-        snapshot,
-        CompactionRequestSnapshot {
-            thread_id,
-            turn_id: "turn-9".to_string(),
-            attempt: 2,
-            sequence_watermark: Some(4),
-            parts: vec![
-                part(
-                    0,
-                    CompactionSourceClass::User,
-                    "use sqlite",
-                    origin("r1", 1, true)
-                ),
-                part(
-                    1,
-                    CompactionSourceClass::Assistant,
-                    "done",
-                    origin("r2", 2, true)
-                ),
-                part(
-                    2,
-                    CompactionSourceClass::User,
-                    "full",
-                    origin("r3", 3, false)
-                ),
-                part(3, CompactionSourceClass::User, "approved", None),
-                part(
-                    4,
-                    CompactionSourceClass::CompactionOutput,
-                    &format!("{}\nold summary", crate::compact::SUMMARY_PREFIX),
-                    None,
-                ),
-                part(5, CompactionSourceClass::HostContext, "summarize", None),
-            ],
-        }
+    let filtered = snapshot_request(
+        thread_id,
+        "turn-9",
+        2,
+        &recorded,
+        &sent,
+        ConfigurationUpdates::Filtered,
     );
+    let sent_updates = snapshot_request(
+        thread_id,
+        "turn-9",
+        2,
+        &recorded,
+        &sent,
+        ConfigurationUpdates::Sent,
+    );
+
+    let expected = |shift: usize| CompactionRequestSnapshot {
+        thread_id,
+        turn_id: "turn-9".to_string(),
+        attempt: 2,
+        sequence_watermark: Some(5),
+        parts: vec![
+            part(
+                shift,
+                CompactionSourceClass::User,
+                "use sqlite",
+                origin("r1", 1, true),
+            ),
+            at_part(
+                part(
+                    shift,
+                    CompactionSourceClass::User,
+                    "second part",
+                    origin("r1", 1, true),
+                ),
+                1,
+            ),
+            part(
+                shift + 1,
+                CompactionSourceClass::Assistant,
+                "done",
+                origin("r2", 2, true),
+            ),
+            part(
+                shift + 2,
+                CompactionSourceClass::User,
+                "full",
+                origin("r3", 3, false),
+            ),
+            part(shift + 3, CompactionSourceClass::User, "approved", None),
+            part(shift + 4, CompactionSourceClass::Assistant, "hidden", None),
+            part(
+                shift + 5,
+                CompactionSourceClass::CompactionOutput,
+                &format!("{}\nold summary", crate::compact::SUMMARY_PREFIX),
+                None,
+            ),
+            part(
+                shift + 6,
+                CompactionSourceClass::HostContext,
+                "summarize",
+                None,
+            ),
+        ],
+    };
+    assert_eq!((filtered, sent_updates), (expected(0), expected(1)));
 }
 
 #[test]
@@ -234,5 +290,28 @@ fn oversize_trailer_is_discarded() {
             CompactionTrailer::Oversize,
             vec![message("assistant", &["Summary"])]
         )
+    );
+}
+
+#[test]
+fn opening_may_appear_in_the_instruction_but_not_in_sources() {
+    let preparation = CompactionExtractionPreparation {
+        instruction: format!("End with:\n{OPENING}\n{{\"version\":1}}\n</capsule_sidecar_v1>"),
+        trailer_opening: OPENING.to_string(),
+    };
+    let request = |text: &str| CompactionRequestSnapshot {
+        thread_id: ThreadId::new(),
+        turn_id: "turn-1".to_string(),
+        attempt: 1,
+        sequence_watermark: None,
+        parts: vec![part(0, CompactionSourceClass::User, text, None)],
+    };
+
+    assert_eq!(
+        (
+            admissible(&preparation, &request("plain")),
+            admissible(&preparation, &request(&format!("quoted {OPENING}"))),
+        ),
+        (true, false)
     );
 }

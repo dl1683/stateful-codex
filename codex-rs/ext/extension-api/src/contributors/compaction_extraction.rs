@@ -69,7 +69,7 @@ pub struct CompactionSourcePart {
 pub struct CompactionRequestSnapshot {
     pub thread_id: ThreadId,
     pub turn_id: String,
-    /// One-based native attempt number, counting transport and context-window retries.
+    /// One-based compaction stream attempt, counting stream and context-window retries.
     pub attempt: u32,
     /// Highest durable sequence the host had accepted when the request was frozen.
     pub sequence_watermark: Option<u64>,
@@ -102,7 +102,8 @@ pub enum CompactionTrailer {
 pub struct CompactionExtractionResult {
     pub request: Arc<CompactionRequestSnapshot>,
     pub preparation: CompactionExtractionPreparation,
-    /// Every native attempt made by this compaction, including failed ones.
+    /// Compaction stream attempts made by this compaction, including failed ones. Requests the
+    /// transport layer resends inside one attempt (HTTP or auth retries) are not counted.
     pub native_attempts: u32,
     pub trailer: CompactionTrailer,
 }
