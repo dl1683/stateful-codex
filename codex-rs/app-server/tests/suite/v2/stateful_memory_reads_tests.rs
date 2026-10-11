@@ -21,6 +21,10 @@ use codex_app_server_protocol::StatefulMemoryApplyCategory;
 use codex_app_server_protocol::StatefulMemoryApplyResponse;
 use codex_app_server_protocol::StatefulMemoryCorrectParams;
 use codex_app_server_protocol::StatefulMemoryCorrectResponse;
+use codex_app_server_protocol::StatefulRunBudget;
+use codex_app_server_protocol::StatefulRunStartParams;
+use codex_app_server_protocol::StatefulRunStartResponse;
+use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -456,5 +460,106 @@ async fn reads_return_only_current_user_words_and_attribute_the_returned_revisio
         ),
         (json!("Push only from CI."), json!("agent"), None)
     );
+    Ok(())
+}
+
+/// A work turn reads the user's rule and copies it into its run strategy; after the user
+/// forgets the rule, a fresh thread's complete model input (root, continuity record with the
+/// latest run's strategy and next steps, everything else) carries none of its words.
+#[tokio::test]
+async fn forgotten_words_copied_into_a_run_strategy_never_reach_a_fresh_thread() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let (home, root) = (TempDir::new()?, TempDir::new()?);
+    let (mut server, project, thread) = project_with_notes(&home, &root, &responses_server).await?;
+    let script_reads = Arc::new(Mutex::new(vec![(
+        "declare-end".to_string(),
+        String::new(),
+        Value::Null,
+    )]));
+    let scripted = script_reads.clone();
+    let calls = mount(
+        &responses_server,
+        Box::new(
+            move |sequence, _| match scripted.lock().expect("targets lock").get(sequence) {
+                Some((id, tool, args)) if !tool.is_empty() => call(id, tool, args.clone()),
+                _ => message("Done."),
+            },
+        ),
+    )
+    .await;
+    turn(&mut server, &thread, &[RULE]).await?;
+    let rule = kept(&mut server).await?.members[0]
+        .entry_id
+        .clone()
+        .expect("admitted rule");
+    let work = start_thread(&mut server, &project).await?;
+    let started: StatefulRunStartResponse = server
+        .request(|request_id| ClientRequest::StatefulRunStart {
+            request_id,
+            params: StatefulRunStartParams {
+                project_id: project.clone(),
+                thread_id: work.clone(),
+                goal: "Prepare the release.".to_string(),
+                mode: StatefulWorkflowMode::Collaborative,
+                budget: StatefulRunBudget {
+                    max_continuations: 4,
+                    max_elapsed_seconds: 3_600,
+                },
+                idempotency_key: "copied-strategy-run".to_string(),
+            },
+        })
+        .await?;
+    script_reads.lock().expect("targets lock").extend([
+        (
+            "read-rule".to_string(),
+            "blackboard_query".to_string(),
+            json!({"entryId": rule}),
+        ),
+        (
+            "copy-rule".to_string(),
+            "stateful_run_update".to_string(),
+            json!({
+                "expectedRevision": started.run.revision,
+                "status": "running",
+                "strategy": "Never push.",
+            }),
+        ),
+        ("work-end".to_string(), String::new(), Value::Null),
+    ]);
+    turn(&mut server, &work, &["Prepare the release."]).await?;
+    let copied = output(
+        calls
+            .lock()
+            .expect("request log lock")
+            .iter()
+            .rev()
+            .find(|body| body.to_string().contains("\"call_id\":\"copy-rule\""))
+            .expect("strategy update delivered"),
+        "copy-rule",
+    );
+    assert!(copied.contains("running"), "{copied}");
+    let _: StatefulMemoryForgetResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryForget {
+            request_id,
+            params: StatefulMemoryForgetParams {
+                thread_id: thread.clone(),
+                expected_project_id: project.clone(),
+                entry_id: rule,
+                expected_revision: 1,
+            },
+        })
+        .await?;
+    let before = calls.lock().expect("request log lock").len();
+    let fresh = start_thread(&mut server, &project).await?;
+    turn(&mut server, &fresh, &["Continue the earlier release work."]).await?;
+    let bodies = calls.lock().expect("request log lock")[before..].to_vec();
+    assert!(!bodies.is_empty());
+    let input = bodies
+        .iter()
+        .map(|body| body["input"].to_string() + &body["instructions"].to_string())
+        .collect::<String>();
+    // Positive control: the continuity record named the run, with its strategy withheld.
+    assert!(input.contains("withheld: memory changed"), "{input}");
+    assert!(!input.contains("Never push"), "{input}");
     Ok(())
 }

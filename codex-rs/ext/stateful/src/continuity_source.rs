@@ -34,6 +34,8 @@ const MAX_TURNS_PER_THREAD: usize = 8;
 const MAX_TURNS: usize = 10;
 /// Recorded turn bindings read per thread; older turns of busier threads get "unknown".
 const MAX_TURN_RUNS_PER_THREAD: u32 = 100;
+/// Replaces run text whose memory eligibility changed or could not be checked.
+const WITHHELD_RUN_TEXT: &str = "withheld: memory changed";
 
 /// Reads the newest turn summaries of the project's top-level, unarchived threads, labelled
 /// with the run inferred to own each turn, and the project's latest run.
@@ -139,6 +141,26 @@ pub(super) async fn gather_continuity(
         turns.truncate(MAX_TURNS);
         more_turns = true;
     }
+    let mut latest_run = match (runtime, newest_bound_run(&turns)) {
+        (Some(runtime), Some(run_id)) => latest_run(runtime, &run_id).await,
+        _ => None,
+    };
+    // A run's strategy and next steps can hold words copied from memory the user has since
+    // forgotten; they are admitted only while current memory eligibility allows them.
+    if let Some(run) = latest_run.as_mut() {
+        for text in run.next.iter_mut().chain(run.strategy.iter_mut()) {
+            let eligible = match blackboard {
+                Some(store) => store
+                    .source_text_eligible(project_id, text)
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            };
+            if !eligible {
+                *text = WITHHELD_RUN_TEXT.to_string();
+            }
+        }
+    }
     ContinuityRecord {
         project_id: project_id.to_string(),
         captured_at_ms: SystemTime::now()
@@ -149,10 +171,7 @@ pub(super) async fn gather_continuity(
         more_turns,
         unreadable_threads,
         history_unavailable,
-        latest_run: match (runtime, newest_bound_run(&turns)) {
-            (Some(runtime), Some(run_id)) => latest_run(runtime, &run_id).await,
-            _ => None,
-        },
+        latest_run,
         turns,
     }
 }
