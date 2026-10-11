@@ -314,3 +314,30 @@ Contract for this slice: Forget removes the entry from memory reads, the session
 - This is stated on the receipts.
 
 Literal-overlap withholding for derivatives moves to the successor Forget lifecycle.
+
+### Process and order reset (Codex step-back 2026-10-11e)
+
+**Process.** Every slice freezes these BEFORE implementation:
+- one capability;
+- its disclosure contract;
+- its supported surfaces;
+- an acceptance journey;
+- its fallback.
+
+It also gets a producer-to-consumer matrix (entry reads, history, root, digest, derivatives × supersession, attribution, paging, concurrent Forget, store unavailable). Discovered failures become shared executable regressions, and the implementer runs them before review.
+
+The review budget is one implementation review plus one confirmation; a further fundamental failure means the pre-agreed cut. A changed contract starts a new slice and never converts a failed acceptance into a pass.
+
+**Delivery.**
+- Stop growing the unshipped stack. Freeze the 45-commit candidate, check its exact HEAD locally, resolve auth, gate it in the cloud, and push.
+- While blocked: offline evaluation and the E2 pre-implementation freeze only, with no new production code on main.
+- The metric is shipped, hands-on-qualified journeys.
+
+**Order.**
+1. E2 (bounded exact conversation history).
+2. Immediate measurement: frozen continuation probes, then the same-build paired within1 run, measuring prefix trimming alongside.
+3. The digest, only if evidence is available but not retrieved or applied.
+4. A narrow cross-app journey (Codex → Droid → Codex with an attributed decision and rejection packet, minimal export and import) right after the first qualified local recall journey.
+5. Honest "unknown / needs-check" freshness wording now. Broader freshness only when it blocks a journey.
+
+**Wording.** Correct the "new thread gives clean context" hint, since derivatives survive.
