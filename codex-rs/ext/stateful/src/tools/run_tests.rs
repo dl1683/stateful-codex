@@ -38,10 +38,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
-    fixture_for("Answer a lookup.").await
+    fixture_for("Answer a lookup.", WorkflowMode::Collaborative).await
 }
 
-async fn fixture_for(goal: &str) -> Fixture {
+async fn fixture_for(goal: &str, mode: WorkflowMode) -> Fixture {
     let state_home = TempDir::new().expect("temporary state home");
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
@@ -55,7 +55,7 @@ async fn fixture_for(goal: &str) -> Fixture {
                 project_id: PROJECT_ID.to_string(),
                 thread_ids: vec![THREAD_ID.to_string()],
                 goal: goal.to_string(),
-                mode: WorkflowMode::Collaborative,
+                mode,
                 budget: RunBudget {
                     max_continuations: 1,
                     max_elapsed_seconds: 3_600,
@@ -240,7 +240,7 @@ async fn a_collaborative_plain_question_can_still_end_blocked_through_run_update
     const QUESTION: &str = "What is the capital of France?";
     let mut statuses = Vec::new();
 
-    let direct = fixture_for(QUESTION).await;
+    let direct = fixture_for(QUESTION, WorkflowMode::Collaborative).await;
     let blocked = json!({
         "expectedRevision": direct.run.revision,
         "status": "blocked",
@@ -253,7 +253,7 @@ async fn a_collaborative_plain_question_can_still_end_blocked_through_run_update
         .expect("a direct blocked update is accepted");
     statuses.push(stored_run(&direct).await.status);
 
-    let open_issue = fixture_for(QUESTION).await;
+    let open_issue = fixture_for(QUESTION, WorkflowMode::Collaborative).await;
     let mut completion = lookup_completion(open_issue.run.revision);
     completion["openIssues"] = json!(["The answer was not checked."]);
     open_issue
@@ -263,7 +263,7 @@ async fn a_collaborative_plain_question_can_still_end_blocked_through_run_update
         .expect("a completion with an open issue ends blocked");
     statuses.push(stored_run(&open_issue).await.status);
 
-    let refused = fixture_for(QUESTION).await;
+    let refused = fixture_for(QUESTION, WorkflowMode::Collaborative).await;
     for attempt in 1..=super::run_acceptance::MAX_STALLED_COMPLETIONS {
         let revision = stored_run(&refused).await.revision;
         let outcome = refused
@@ -288,5 +288,40 @@ async fn a_collaborative_plain_question_can_still_end_blocked_through_run_update
                 StatefulRunStatus::Blocked,
             ]
         )
+    );
+}
+
+/// An Autonomous run's refused completion tells the model that a plain question needs no
+/// acceptance work and ends answered, never blocked; other modes get the plain refusal.
+#[tokio::test]
+async fn an_autonomous_refusal_points_a_plain_question_at_the_answered_outcome() {
+    const QUESTION: &str = "What is the capital of France?";
+    let mut refusals = Vec::new();
+    for mode in [WorkflowMode::Autonomous, WorkflowMode::Collaborative] {
+        let fixture = fixture_for(QUESTION, mode).await;
+        let decision = fixture
+            .tool
+            .acceptance_decision(
+                &fixture.run,
+                Some("Paris."),
+                /*local_executor*/ true,
+                /*validated_obligation_sequence*/ None,
+            )
+            .await
+            .expect("the gate decides");
+        let super::run_acceptance::AcceptanceDecision::Refused(message) = decision else {
+            panic!("a criterion-free completion is refused");
+        };
+        refusals.push(message);
+    }
+    let refusal = "completion refused; the run stays running (refusal 1 of 3 without acceptance progress before the host blocks it as partial). Unmet acceptance gates: C1 (What is the capital of France?): omission proposal awaiting review: accept it as a criterion, or dismiss it only as coveredBy a user criterion. Settle each gate: repair the work and run its exact checkCommand with the shell tool, accept each omission proposal (dismiss only as covered by a user criterion), give each check its checker files and have the host admit its plan (admit). noCheck settles only optional criteria. Required work never completes unverified: if it cannot be verified or finished, set status blocked with a partial result that names the unmet criteria. Otherwise complete again";
+    assert_eq!(
+        refusals,
+        vec![
+            format!(
+                "{refusal}. If the request is a plain question that needs no work, it needs no acceptance work either: do not call stateful_run_update again and do not set blocked for it; give the answer as your final message, ending with the four lines [stateful-outcome], disposition: answer, open-issues: none, [/stateful-outcome], and the run ends answered, not verified"
+            ),
+            refusal.to_string(),
+        ]
     );
 }
