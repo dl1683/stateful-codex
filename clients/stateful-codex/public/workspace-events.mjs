@@ -46,71 +46,65 @@ export function applyWorkspaceEvent(state, message) {
     );
     return { render: true, refresh: false };
   }
-  // Orders this workspace's events against history snapshots (see reconcileAskStream).
+  // Orders this workspace's events against the history pages it requests (see askAnswer).
   state.eventSeq = (state.eventSeq ?? 0) + 1;
   let render = false;
+  let completed = false;
   if (message.method === "item/agentMessage/delta") {
     const delta = message.params?.delta ?? "";
-    const itemId = message.params?.itemId ?? null;
     state.liveText += delta;
-    // The message now streaming, by item, so its completed text can replace what arrived.
-    if (itemId !== state.liveItemId) {
-      state.liveItemId = itemId;
-      state.liveItemText = "";
-    }
-    state.liveItemText += delta;
+    noteLocalAnswer(state, message.params?.itemId ?? null).text += delta;
     render = true;
   }
   if (
     message.method === "item/started" &&
     message.params?.item?.type === "agentMessage"
   ) {
-    // A newer assistant message starts: it is the one now streaming.
-    state.liveItemId = message.params.item.id;
-    state.liveItemText = "";
+    noteLocalAnswer(state, message.params.item.id);
     render = true;
   }
   if (
     message.method === "item/completed" &&
     message.params?.item?.type === "agentMessage"
   ) {
-    const { id, text } = message.params.item;
-    state.completedAnswer = { id, text, seq: state.eventSeq };
-    // A completion ends that stream; the completion of a different item means it is newer
-    // than an earlier stream whose completion was missed.
-    state.liveItemId = null;
-    state.liveItemText = "";
+    const local = noteLocalAnswer(state, message.params.item.id);
+    local.text = message.params.item.text ?? "";
+    local.completed = true;
+    completed = true;
     render = true;
   }
-  if (message.method === "turn/started") {
-    state.liveText = "";
-    state.liveItemId = null;
-    state.liveItemText = "";
-  }
-  // A reconnect may have missed deltas or a completion: re-read the thread's items.
+  if (message.method === "turn/started") state.liveText = "";
   const reconnected = message.method === "gateway/connected";
+  // Deltas or a completion may have been missed while disconnected: nothing local is trusted.
+  if (reconnected) state.localAnswer = null;
+  // A reconnect re-reads the thread's items, and so does every completion, so the panel always
+  // converges to authoritative history.
   return {
-    render,
-    refresh: reconnected || REFRESH_METHODS.test(message.method ?? ""),
+    render: render || reconnected,
+    refresh: reconnected || completed || REFRESH_METHODS.test(message.method ?? ""),
   };
 }
 
-// After the thread's items are re-read (refresh, reconnect). `snapshotSeq` is the event count
-// when that history request was issued. The history page is bounded (newest items only), so an
-// item's absence from it proves nothing; ordering decides instead:
-// - a completion observed before the request is older than the snapshot, which supersedes it
-//   whenever the page lists any answer;
-// - a completion that arrived while the request was in flight is newer and is kept;
-// - a streaming item that the page lists as completed is no longer streaming; a stream the page
-//   does not list is kept.
-export function reconcileAskStream(state, snapshotSeq = state.eventSeq ?? 0) {
-  const items = state.activity.map((entry) => entry?.item ?? entry);
-  if (state.liveItemId && items.some((item) => item?.id === state.liveItemId)) {
-    state.liveItemId = null;
-    state.liveItemText = "";
+// The newest assistant item this client saw through events: its id, the sequence number of its
+// first event, its text so far and whether it completed. A different item's event replaces it.
+function noteLocalAnswer(state, id) {
+  if (state.localAnswer?.id !== id) {
+    state.localAnswer = { id, firstSeq: state.eventSeq, text: "", completed: false };
   }
-  const pageHasAnswer = items.some((item) => item?.type === "agentMessage");
-  if (state.completedAnswer && state.completedAnswer.seq <= snapshotSeq && pageHasAnswer) {
-    state.completedAnswer = null;
-  }
+  return state.localAnswer;
+}
+
+// Applies a history page requested when the event count was `requestSeq`. A page that lists an
+// assistant answer decides the Answer panel: the local item survives only if its first event
+// arrived after the page was requested AND the page does not list it; otherwise the page's
+// newest completed answer wins, whatever the local event order. A page with no answer decides
+// nothing.
+export function applyHistoryPage(state, items, requestSeq) {
+  state.activity = items;
+  const listed = items.map((entry) => entry?.item ?? entry);
+  if (!listed.some((item) => item?.type === "agentMessage") || !state.localAnswer) return;
+  const local = state.localAnswer;
+  const newer = local.firstSeq > requestSeq;
+  const unlisted = !listed.some((item) => item?.id === local.id);
+  if (!(newer && unlisted)) state.localAnswer = null;
 }

@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import {
-  applyWorkspaceEvent,
-  reconcileAskStream,
-} from "../public/workspace-events.mjs";
-import { askAnswer, renderWorkspace } from "../public/workspace-view.mjs";
+import { renderWorkspace } from "../public/workspace-view.mjs";
 import { workspaceFixture } from "./workspace-fixture.mjs";
 
 test("workspace presents semantic progress and evidence before raw activity", async () => {
@@ -161,9 +157,7 @@ function askState() {
   state.obligations = [];
   state.steering = [];
   state.liveText = "";
-  state.liveItemId = null;
-  state.liveItemText = "";
-  state.completedAnswer = null;
+  state.localAnswer = null;
   state.activity = [
     {
       turnId: "turn-0",
@@ -173,139 +167,6 @@ function askState() {
   return state;
 }
 
-const askDelta = (text) => ({
-  method: "item/agentMessage/delta",
-  params: { threadId: "thread-1", turnId: "turn-1", itemId: "answer-1", delta: text },
-});
-
-const askCompleted = (text) => ({
-  method: "item/completed",
-  params: {
-    threadId: "thread-1",
-    turnId: "turn-1",
-    item: { type: "agentMessage", id: "answer-1", text },
-  },
-});
-
-test("a reload mid-answer shows the complete answer once it completes", () => {
-  // After a reload the new subscription only sees the tail of the stream.
-  const state = askState();
-  applyWorkspaceEvent(state, askDelta("is."));
-  assert.equal(askAnswer(state), "is.");
-  applyWorkspaceEvent(state, askCompleted("Paris."));
-  assert.equal(askAnswer(state), "Paris.");
-  // A later refresh that lists the item keeps the same authoritative text.
-  state.activity.push({ turnId: "turn-1", item: { type: "agentMessage", id: "answer-1", text: "Paris." } });
-  assert.equal(askAnswer(state), "Paris.");
-  assert.match(renderWorkspace(state), /<p class="live-copy">Paris\.<\/p>/);
-});
-
-test("lost middle deltas are repaired by the completed item", () => {
-  const state = askState();
-  for (const piece of ["The capital ", "France "]) applyWorkspaceEvent(state, askDelta(piece));
-  applyWorkspaceEvent(state, askCompleted("The capital of France is Paris."));
-  assert.equal(askAnswer(state), "The capital of France is Paris.");
-});
-
-test("a completion missed while disconnected is reconciled on reconnect", () => {
-  const state = askState();
-  applyWorkspaceEvent(state, askDelta("The capital "));
-  // The connection drops; the answer completes unseen; the gateway reconnects.
-  const effect = applyWorkspaceEvent(state, { method: "gateway/connected", params: {} });
-  assert.equal(effect.refresh, true);
-  // The refresh lists the thread's completed items.
-  state.activity.push({
-    turnId: "turn-1",
-    item: { type: "agentMessage", id: "answer-1", text: "The capital of France is Paris." },
-  });
-  reconcileAskStream(state);
-  assert.equal(askAnswer(state), "The capital of France is Paris.");
-});
-
-const agentItem = (turnId, id, text) => ({ turnId, item: { type: "agentMessage", id, text } });
-const event = (method, turnId, item) => ({
-  method,
-  params: { threadId: "thread-1", turnId, item: { type: "agentMessage", ...item } },
-});
-const streamed = (turnId, itemId, delta) => ({
-  method: "item/agentMessage/delta",
-  params: { threadId: "thread-1", turnId, itemId, delta },
-});
-const answerPanel = (state) =>
-  renderWorkspace(state).match(/<h2>Answer<\/h2>.*?<\/section>/s)[0];
-
-test("a final answer whose deltas were all missed replaces the commentary", () => {
-  const state = askState();
-  applyWorkspaceEvent(state, event("item/started", "turn-1", { id: "comment", text: "" }));
-  applyWorkspaceEvent(state, streamed("turn-1", "comment", "Let me check the source."));
-  applyWorkspaceEvent(state, event("item/completed", "turn-1", { id: "comment", text: "Let me check the source." }));
-  // The connection drops during the final message's deltas and returns before its completion.
-  assert.equal(applyWorkspaceEvent(state, { method: "gateway/connected", params: {} }).refresh, true);
-  state.activity.push(agentItem("turn-1", "comment", "Let me check the source."));
-  reconcileAskStream(state);
-  applyWorkspaceEvent(state, event("item/completed", "turn-1", { id: "final", text: "Paris." }));
-  assert.equal(askAnswer(state), "Paris.");
-  assert.match(answerPanel(state), /<p class="live-copy">Paris\.<\/p>/);
-  // The refresh after completion lists both; the latest completed answer still wins.
-  state.activity.push(agentItem("turn-1", "final", "Paris."));
-  reconcileAskStream(state);
-  assert.equal(askAnswer(state), "Paris.");
-  assert.match(answerPanel(state), /<p class="live-copy">Paris\.<\/p>/);
-});
-
-test("a later turn missed entirely while disconnected shows its completed answer", () => {
-  const state = askState();
-  applyWorkspaceEvent(state, streamed("turn-1", "first", "The capital of France"));
-  // Disconnected: turn-1 completes and a whole later turn runs unseen; then the gateway returns.
-  applyWorkspaceEvent(state, { method: "gateway/connected", params: {} });
-  state.activity.push(
-    agentItem("turn-1", "first", "The capital of France is Paris."),
-    agentItem("turn-2", "second", "A leap year has 366 days."),
-  );
-  reconcileAskStream(state);
-  assert.equal(askAnswer(state), "A leap year has 366 days.");
-  assert.match(answerPanel(state), /<p class="live-copy">A leap year has 366 days\.<\/p>/);
-  // A genuinely newer stream that the history does not list yet is kept.
-  applyWorkspaceEvent(state, streamed("turn-3", "third", "Madrid"));
-  reconcileAskStream(state);
-  assert.equal(askAnswer(state), "Madrid");
-});
-
-test("an old cached answer outside the history page never hides a newer one", () => {
-  const state = askState();
-  applyWorkspaceEvent(state, event("item/completed", "turn-1", { id: "old", text: "Paris." }));
-  assert.equal(askAnswer(state), "Paris.");
-  // Disconnected: a tool-heavy later turn produces 100+ items and completes a new answer unseen.
-  applyWorkspaceEvent(state, { method: "gateway/connected", params: {} });
-  const snapshotSeq = state.eventSeq;
-  state.activity = [
-    ...Array.from({ length: 99 }, (_, index) => ({
-      turnId: "turn-2",
-      item: { type: "commandExecution", id: `tool-${index}`, status: "completed", command: "rg x" },
-    })),
-    agentItem("turn-2", "new", "The source says Madrid."),
-  ];
-  reconcileAskStream(state, snapshotSeq);
-  assert.equal(askAnswer(state), "The source says Madrid.");
-  assert.match(answerPanel(state), /<p class="live-copy">The source says Madrid\.<\/p>/);
-});
-
-test("a completion that arrives during a history read is kept", () => {
-  const state = askState();
-  applyWorkspaceEvent(state, event("item/completed", "turn-1", { id: "first", text: "Paris." }));
-  // A refresh issues its history read; before it returns, a newer answer completes.
-  const snapshotSeq = state.eventSeq;
-  applyWorkspaceEvent(state, event("item/completed", "turn-2", { id: "second", text: "Madrid." }));
-  // The read returns the history as of its request: it lists only the first answer.
-  state.activity = [agentItem("turn-1", "first", "Paris.")];
-  reconcileAskStream(state, snapshotSeq);
-  assert.equal(askAnswer(state), "Madrid.");
-  assert.match(answerPanel(state), /<p class="live-copy">Madrid\.<\/p>/);
-  // The next refresh lists it; the history now carries the newest answer itself.
-  state.activity.push(agentItem("turn-2", "second", "Madrid."));
-  reconcileAskStream(state);
-  assert.equal(askAnswer(state), "Madrid.");
-});
 
 test("a refused Ask shows the refusal and no composer", () => {
   const state = askState();

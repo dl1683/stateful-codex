@@ -6,7 +6,7 @@ import {
 } from "./ask-route.mjs";
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
-import { applyWorkspaceEvent, reconcileAskStream } from "./workspace-events.mjs";
+import { applyHistoryPage, applyWorkspaceEvent } from "./workspace-events.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -42,9 +42,8 @@ const state = {
   evidence: null,
   pendingRequests: [],
   liveText: "",
-  liveItemId: null,
-  liveItemText: "",
-  completedAnswer: null,
+  localAnswer: null,
+  requestedPageSeq: 0,
   selectedNodeId: null,
   loading: true,
   busyAction: null,
@@ -157,8 +156,9 @@ async function ensureRun() {
 }
 
 async function refreshWorkspace() {
-  // Events applied after this point are newer than the history read below.
-  const snapshotSeq = state.eventSeq ?? 0;
+  // Events applied after this point arrived after the history page below was requested.
+  const requestSeq = state.eventSeq ?? 0;
+  state.requestedPageSeq = requestSeq;
   state.loading = !state.project;
   state.error = null;
   render();
@@ -212,8 +212,7 @@ async function refreshWorkspace() {
   state.obligations = obligations.data;
   state.steering = steering.data;
   state.measurementSummary = measurementSummary.summary;
-  state.activity = activity.data.reverse();
-  reconcileAskStream(state, snapshotSeq);
+  applyHistoryPage(state, activity.data.reverse(), requestSeq);
   state.loading = false;
   state.busyAction = null;
   render();
