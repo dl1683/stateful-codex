@@ -69,7 +69,6 @@ mod codex_apps_protocol;
 mod codex_delegate;
 mod collaboration_instructions;
 mod compact;
-mod compact_extraction;
 mod compact_remote;
 mod compact_resume_fork;
 mod context_annotations;

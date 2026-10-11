@@ -13,12 +13,8 @@ use super::Exclusions;
 use super::Observation;
 use super::Projection;
 use super::SourceRef;
-use super::pack::ComposeInput;
-use super::pack::compose_capsule;
 use super::render::CapsuleHeader;
 use super::render::render_capsule;
-use super::semantic::ExtractionBatch;
-use super::semantic::SemanticLedger;
 use super::working_files::WitnessOutcome;
 use super::working_files::compare_samples;
 use super::working_files::sample_file;
@@ -58,71 +54,6 @@ pub struct OfflineCapsule {
 /// Reduces a recorded rollout (JSONL, `{"type":"event_msg","payload":...}` lines; other
 /// lines are skipped) up to a compaction or resume boundary, and renders its capsule.
 pub fn offline_capsule(rollout_jsonl: &str, input: &OfflineCapsuleInput<'_>) -> OfflineCapsule {
-    let (projection, events, unreadable) = reduce_rollout(rollout_jsonl, input);
-    let rendered = render_capsule(
-        &projection,
-        &header(input, events),
-        &Exclusions::default(),
-        input.count_tokens,
-    )
-    .ok();
-    OfflineCapsule {
-        projection_json: projection.to_payload(),
-        tokens: rendered.as_ref().map_or(0, |capsule| capsule.tokens),
-        omitted: rendered.as_ref().map_or(0, |capsule| capsule.omitted),
-        capsule: rendered.map(|capsule| capsule.text),
-        events,
-        unreadable_lines: unreadable,
-    }
-}
-
-/// Like `offline_capsule`, but packs the structural floor, current direction and the semantic
-/// records of `batches` (serialized extraction batches of the compaction boundaries up to this
-/// one, oldest first) into one capsule. An unreadable batch counts as semantic unavailable.
-pub fn offline_composed_capsule(
-    rollout_jsonl: &str,
-    input: &OfflineCapsuleInput<'_>,
-    batches: &[&str],
-) -> OfflineCapsule {
-    let (projection, events, unreadable) = reduce_rollout(rollout_jsonl, input);
-    let mut ledger = SemanticLedger::default();
-    for batch in batches {
-        ledger.merge(serde_json::from_str::<ExtractionBatch>(batch).unwrap_or_default());
-    }
-    let header = header(input, events);
-    let composed = compose_capsule(&ComposeInput {
-        projection: &projection,
-        header: &header,
-        exclusions: &Exclusions::default(),
-        rules: &[],
-        ledger: &ledger,
-        counter: input.count_tokens,
-    })
-    .ok();
-    OfflineCapsule {
-        projection_json: projection.to_payload(),
-        tokens: composed.as_ref().map_or(0, |capsule| capsule.tokens),
-        omitted: composed.as_ref().map_or(0, |capsule| capsule.omitted),
-        capsule: composed.map(|capsule| capsule.text),
-        events,
-        unreadable_lines: unreadable,
-    }
-}
-
-fn header<'a>(input: &OfflineCapsuleInput<'a>, events: usize) -> CapsuleHeader<'a> {
-    CapsuleHeader {
-        project: input.project_id,
-        thread: input.thread_id,
-        window: input.window_id,
-        eligibility_generation: 0,
-        watermark: events as u64,
-    }
-}
-
-fn reduce_rollout(
-    rollout_jsonl: &str,
-    input: &OfflineCapsuleInput<'_>,
-) -> (Projection, usize, usize) {
     let mut projection = Projection::new();
     let (mut turn, mut events, mut unreadable) = (String::from("unknown"), 0, 0);
     let witness = |projection: &mut Projection, file: &OfflineFileWitness<'_>, turn: &str| {
@@ -226,7 +157,28 @@ fn reduce_rollout(
     for file in input.files.iter().filter(|file| file.after_line >= lines) {
         witness(&mut projection, file, &turn);
     }
-    (projection, events, unreadable)
+    let header = CapsuleHeader {
+        project: input.project_id,
+        thread: input.thread_id,
+        window: input.window_id,
+        eligibility_generation: 0,
+        watermark: events as u64,
+    };
+    let rendered = render_capsule(
+        &projection,
+        &header,
+        &Exclusions::default(),
+        input.count_tokens,
+    )
+    .ok();
+    OfflineCapsule {
+        projection_json: projection.to_payload(),
+        tokens: rendered.as_ref().map_or(0, |capsule| capsule.tokens),
+        omitted: rendered.as_ref().map_or(0, |capsule| capsule.omitted),
+        capsule: rendered.map(|capsule| capsule.text),
+        events,
+        unreadable_lines: unreadable,
+    }
 }
 
 fn touch<'a>(projection: &mut Projection, paths: impl Iterator<Item = &'a std::path::PathBuf>) {

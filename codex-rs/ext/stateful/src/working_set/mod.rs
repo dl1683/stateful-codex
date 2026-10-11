@@ -9,16 +9,11 @@
 #![allow(dead_code)]
 
 mod commands;
-mod directives;
 mod grammar;
 mod offline;
-mod pack;
-mod piggyback;
 mod reduce;
 mod render;
 mod retain;
-mod semantic;
-mod source_validation;
 mod working_files;
 
 use codex_project_intelligence::MAX_WORKING_SET_PAYLOAD_BYTES;
@@ -31,7 +26,6 @@ pub use offline::OfflineCapsule;
 pub use offline::OfflineCapsuleInput;
 pub use offline::OfflineFileWitness;
 pub use offline::offline_capsule;
-pub use offline::offline_composed_capsule;
 
 /// Version of the finite extraction grammar and payload schema; a change invalidates caches.
 pub(crate) const GRAMMAR_VERSION: u32 = 1;
@@ -145,22 +139,6 @@ pub(crate) struct Projection {
     pub capacity_debt: u32,
     /// Completed items whose middle was not inspected.
     pub uninspected_items: u32,
-    /// The newest accepted user messages, captured whole with no word list.
-    #[serde(default)]
-    pub statements: Vec<UserStatement>,
-    /// Every accepted user message seen, including those no longer retained.
-    #[serde(default)]
-    pub statements_seen: u32,
-}
-
-/// One accepted user message. It is a user statement, not by itself an adopted rule.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct UserStatement {
-    pub source: SourceRef,
-    /// The exact message; `None` when it exceeds the per-statement bound (reference only).
-    pub text: Option<String>,
-    /// `Projection::next_id` when it arrived: candidates with an id up to it came before it.
-    pub after_candidate: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -274,32 +252,17 @@ impl Projection {
 #[path = "commands_tests.rs"]
 mod commands_tests;
 #[cfg(test)]
-#[path = "directives_tests.rs"]
-mod directives_tests;
-#[cfg(test)]
 #[path = "grammar_tests.rs"]
 mod grammar_tests;
 #[cfg(test)]
 #[path = "offline_tests.rs"]
 mod offline_tests;
 #[cfg(test)]
-#[path = "pack_tests.rs"]
-mod pack_tests;
-#[cfg(test)]
-#[path = "piggyback_tests.rs"]
-mod piggyback_tests;
-#[cfg(test)]
 #[path = "reduce_tests.rs"]
 mod reduce_tests;
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod render_tests;
-#[cfg(test)]
-#[path = "semantic_tests.rs"]
-mod semantic_tests;
-#[cfg(test)]
-#[path = "source_validation_tests.rs"]
-mod source_validation_tests;
 #[cfg(test)]
 #[path = "working_files_tests.rs"]
 mod working_files_tests;
