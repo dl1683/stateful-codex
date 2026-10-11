@@ -20,6 +20,14 @@ use crate::storage::DATABASE_NAME;
 use crate::storage::HierarchyStoreError;
 use crate::storage::unix_timestamp_millis;
 
+mod publication;
+
+pub use publication::PublicationAdmission;
+pub use publication::PublicationRefusal;
+pub use publication::PublicationRequest;
+pub use publication::PublicationTicket;
+pub use publication::TicketStatus;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 pub const MAX_WORKING_SET_PAYLOAD_BYTES: usize = 128 * 1024;
 pub const MAX_WORKING_SET_FILES: usize = 8;

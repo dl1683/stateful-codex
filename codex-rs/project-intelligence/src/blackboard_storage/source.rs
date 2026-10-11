@@ -127,12 +127,8 @@ impl BlackboardStore {
         project_id: &str,
         turn_id: &str,
     ) -> Result<bool, BlackboardStoreError> {
-        if [project_id, turn_id].iter().any(|id| id.len() > 512) {
-            return Ok(false);
-        }
-        let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_sources AS source JOIN capture_source_exclusions AS excluded ON excluded.project_id = source.project_id AND excluded.digest = source.digest WHERE source.project_id = ? AND source.turn_id = ?)")
-            .bind(project_id).bind(turn_id).fetch_one(&self.pool).await?;
-        Ok(!excluded)
+        let mut connection = self.pool.acquire().await?;
+        source_turn_eligible_on(&mut connection, project_id, turn_id).await
     }
 
     /// Guards retained conversation fallbacks. Unknown or oversized original parts fail closed.
@@ -154,7 +150,20 @@ impl BlackboardStore {
     }
 }
 
-pub(super) async fn text_eligible_on(
+pub(crate) async fn source_turn_eligible_on(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    turn_id: &str,
+) -> Result<bool, BlackboardStoreError> {
+    if [project_id, turn_id].iter().any(|id| id.len() > 512) {
+        return Ok(false);
+    }
+    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM capture_sources AS source JOIN capture_source_exclusions AS excluded ON excluded.project_id = source.project_id AND excluded.digest = source.digest WHERE source.project_id = ? AND source.turn_id = ?)")
+        .bind(project_id).bind(turn_id).fetch_one(connection).await?;
+    Ok(!excluded)
+}
+
+pub(crate) async fn text_eligible_on(
     connection: &mut SqliteConnection,
     project_id: &str,
     text: &str,
