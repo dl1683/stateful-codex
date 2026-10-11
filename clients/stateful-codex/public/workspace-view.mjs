@@ -61,7 +61,7 @@ function renderHeader(state) {
   if (state.ask) {
     return `<header class="workspace-header">
     <div><p class="eyebrow">Stateful Codex · ask</p><h1>${escapeHtml(state.project?.name ?? "Project")}</h1><p class="path">${escapeHtml(state.project?.roots?.map((root) => root.path).join(" · ") ?? "")}</p></div>
-    <div class="run-summary"><span class="badge ask">ask · no run</span><button class="text-button" data-action="refresh">Refresh</button></div>
+    <div class="run-summary"><span class="badge ask">${state.askRefusal ? "ask · refused: open run" : "ask · no run"}</span><button class="text-button" data-action="refresh">Refresh</button></div>
   </header>`;
   }
   return `<header class="workspace-header">
@@ -196,13 +196,34 @@ function renderLive(state) {
     : "";
 }
 
-// Ask: the latest answer, streaming or from the thread's history after a refresh.
-function renderAnswer(state) {
-  const latest = state.activity
+// Ask: the latest answer. A completed answer always comes from its authoritative item (the
+// completion event or the thread's items after a refresh or reconnect), never from the deltas
+// that happened to arrive; only a message still streaming shows its received text.
+export function askAnswer(state) {
+  const completed = state.activity
     .map(normalizeThreadItem)
-    .filter((item) => item?.type === "agentMessage")
-    .at(-1);
-  const answer = state.liveText || (latest?.text ?? "");
+    .filter((item) => item?.type === "agentMessage");
+  const byId = (id) =>
+    state.completedAnswer?.id === id
+      ? state.completedAnswer
+      : completed.find((item) => item.id === id);
+  if (state.liveItemId) {
+    return byId(state.liveItemId)?.text ?? state.liveItemText ?? "";
+  }
+  const fresh =
+    state.completedAnswer &&
+    !completed.some((item) => item.id === state.completedAnswer.id);
+  return fresh ? state.completedAnswer.text : (completed.at(-1)?.text ?? "");
+}
+
+function renderAnswer(state) {
+  if (state.askRefusal) {
+    return panel(
+      "Ask refused",
+      `<p class="banner">${escapeHtml(state.askRefusal)}</p>${newOutcomeLink()}`,
+    );
+  }
+  const answer = askAnswer(state);
   return panel(
     "Answer",
     answer
@@ -333,6 +354,12 @@ function renderInstructionForm(state) {
     return panel(
       "Continue the work",
       `<p class="microcopy">Create a new outcome to continue or fork this thread with a fresh explicit goal.</p>${newOutcomeLink()}`,
+    );
+  }
+  if (state.ask && state.askRefusal) {
+    return panel(
+      "Ask another question",
+      `<p class="microcopy">Questions are closed on this thread because it has an open run.</p>${newOutcomeLink()}`,
     );
   }
   if (state.ask) {

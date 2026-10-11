@@ -1,4 +1,9 @@
-import { askRefusal, isAskWorkspace, sendInitialQuestion } from "./ask-route.mjs";
+import {
+  AskRefused,
+  createAskGate,
+  isAskWorkspace,
+  sendInitialQuestion,
+} from "./ask-route.mjs";
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyWorkspaceEvent } from "./workspace-events.mjs";
@@ -15,11 +20,14 @@ if (!projectId || !threadId || !selectedMode || !initialGoal) {
 }
 
 const ask = isAskWorkspace(selectedMode);
+// Every Ask send goes through this gate; Work threads have none.
+const askGate = ask ? createAskGate({ rpc, storage: sessionStorage, threadId }) : null;
 
 const state = {
   projectId,
   threadId,
   ask,
+  askRefusal: askGate?.refusal() ?? null,
   project: null,
   run: null,
   recovery: null,
@@ -34,6 +42,9 @@ const state = {
   evidence: null,
   pendingRequests: [],
   liveText: "",
+  liveItemId: null,
+  liveItemText: "",
+  completedAnswer: null,
   selectedNodeId: null,
   loading: true,
   busyAction: null,
@@ -74,12 +85,9 @@ async function openProject() {
 
 // Ask: a run-less thread with the project's memory. It never creates or adopts a run.
 async function openAsk() {
-  const [runResponse] = await Promise.all([
-    rpc("statefulRun/read", { threadId }),
-    openProject(),
-  ]);
-  const refusal = askRefusal(runResponse.run);
-  if (refusal) throw new Error(refusal);
+  const [refusal] = await Promise.all([askGate.admit(), openProject()]);
+  state.askRefusal = refusal;
+  if (refusal) return;
   state.busyAction = "Asking your question";
   render();
   await sendInitialQuestion({
@@ -379,6 +387,16 @@ async function action(label, operation) {
 }
 
 async function sendTurn(text) {
+  if (ask) {
+    try {
+      return await askGate.send(text);
+    } catch (error) {
+      if (!(error instanceof AskRefused)) throw error;
+      state.askRefusal = error.message;
+      render();
+      return null;
+    }
+  }
   return rpc("turn/start", {
     threadId,
     input: [{ type: "text", text, text_elements: [] }],

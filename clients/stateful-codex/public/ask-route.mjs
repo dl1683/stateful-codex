@@ -5,6 +5,7 @@
 
 export const ASK_MODE = "ask";
 export const ASK_SENT_KEY = "stateful-ask-sent";
+export const ASK_REFUSED_KEY = "stateful-ask-refused";
 
 const OPEN_RUN_STATUSES = ["pending", "running", "paused", "blocked"];
 
@@ -33,4 +34,41 @@ export async function sendInitialQuestion({ storage, threadId, question, sendTur
     throw error;
   }
   return true;
+}
+
+// A send the Ask gate refused because the thread has an open run.
+export class AskRefused extends Error {}
+
+// The one path every Ask question takes. Before each send it re-reads the thread's run (another
+// client may have started Work on it); an open run refuses the send, and the refusal is kept in
+// storage, so a refresh shows the same refusal and never sends.
+export function createAskGate({ rpc, storage, threadId }) {
+  const refusal = () => {
+    try {
+      const stored = JSON.parse(storage.getItem(ASK_REFUSED_KEY) ?? "null");
+      return stored?.threadId === threadId ? stored.message : null;
+    } catch {
+      return null;
+    }
+  };
+  const admit = async () => {
+    const stored = refusal();
+    if (stored) return stored;
+    const { run } = await rpc("statefulRun/read", { threadId });
+    const message = askRefusal(run);
+    if (message) storage.setItem(ASK_REFUSED_KEY, JSON.stringify({ threadId, message }));
+    return message;
+  };
+  return {
+    refusal,
+    admit,
+    async send(text) {
+      const refused = await admit();
+      if (refused) throw new AskRefused(refused);
+      return rpc("turn/start", {
+        threadId,
+        input: [{ type: "text", text, text_elements: [] }],
+      });
+    },
+  };
 }

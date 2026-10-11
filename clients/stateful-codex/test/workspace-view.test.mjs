@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { renderWorkspace } from "../public/workspace-view.mjs";
+import { applyWorkspaceEvent } from "../public/workspace-events.mjs";
+import { askAnswer, renderWorkspace } from "../public/workspace-view.mjs";
 import { workspaceFixture } from "./workspace-fixture.mjs";
 
 test("workspace presents semantic progress and evidence before raw activity", async () => {
@@ -147,6 +148,84 @@ test("an Ask workspace shows the answer with no run controls", () => {
   ]) {
     assert.doesNotMatch(actual, absent);
   }
+});
+
+function askState() {
+  const state = workspaceFixture();
+  state.threadId = "thread-1";
+  state.ask = true;
+  state.run = null;
+  state.obligations = [];
+  state.steering = [];
+  state.liveText = "";
+  state.liveItemId = null;
+  state.liveItemText = "";
+  state.completedAnswer = null;
+  state.activity = [
+    {
+      turnId: "turn-0",
+      item: { type: "agentMessage", id: "earlier", text: "An earlier answer." },
+    },
+  ];
+  return state;
+}
+
+const askDelta = (text) => ({
+  method: "item/agentMessage/delta",
+  params: { threadId: "thread-1", turnId: "turn-1", itemId: "answer-1", delta: text },
+});
+
+const askCompleted = (text) => ({
+  method: "item/completed",
+  params: {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    item: { type: "agentMessage", id: "answer-1", text },
+  },
+});
+
+test("a reload mid-answer shows the complete answer once it completes", () => {
+  // After a reload the new subscription only sees the tail of the stream.
+  const state = askState();
+  applyWorkspaceEvent(state, askDelta("is."));
+  assert.equal(askAnswer(state), "is.");
+  applyWorkspaceEvent(state, askCompleted("Paris."));
+  assert.equal(askAnswer(state), "Paris.");
+  // A later refresh that lists the item keeps the same authoritative text.
+  state.activity.push({ turnId: "turn-1", item: { type: "agentMessage", id: "answer-1", text: "Paris." } });
+  assert.equal(askAnswer(state), "Paris.");
+  assert.match(renderWorkspace(state), /<p class="live-copy">Paris\.<\/p>/);
+});
+
+test("lost middle deltas are repaired by the completed item", () => {
+  const state = askState();
+  for (const piece of ["The capital ", "France "]) applyWorkspaceEvent(state, askDelta(piece));
+  applyWorkspaceEvent(state, askCompleted("The capital of France is Paris."));
+  assert.equal(askAnswer(state), "The capital of France is Paris.");
+});
+
+test("a completion missed while disconnected is reconciled on reconnect", () => {
+  const state = askState();
+  applyWorkspaceEvent(state, askDelta("The capital "));
+  // The connection drops; the answer completes unseen; the gateway reconnects.
+  const effect = applyWorkspaceEvent(state, { method: "gateway/connected", params: {} });
+  assert.equal(effect.refresh, true);
+  // The refresh lists the thread's completed items.
+  state.activity.push({
+    turnId: "turn-1",
+    item: { type: "agentMessage", id: "answer-1", text: "The capital of France is Paris." },
+  });
+  assert.equal(askAnswer(state), "The capital of France is Paris.");
+});
+
+test("a refused Ask shows the refusal and no composer", () => {
+  const state = askState();
+  state.askRefusal = "This thread has an open autonomous run, so a question here would join it.";
+  const actual = renderWorkspace(state);
+  assert.match(actual, /<h2>Ask refused<\/h2>/);
+  assert.match(actual, /ask · refused: open run/);
+  assert.doesNotMatch(actual, /id="message-form"/);
+  assert.doesNotMatch(actual, /ask · no run/);
 });
 
 function statefulFindingCount(state) {

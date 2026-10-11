@@ -48,9 +48,34 @@ export function applyWorkspaceEvent(state, message) {
   }
   let render = false;
   if (message.method === "item/agentMessage/delta") {
-    state.liveText += message.params?.delta ?? "";
+    const delta = message.params?.delta ?? "";
+    const itemId = message.params?.itemId ?? null;
+    state.liveText += delta;
+    // The message now streaming, by item, so its completed text can replace what arrived.
+    if (itemId !== state.liveItemId) {
+      state.liveItemId = itemId;
+      state.liveItemText = "";
+    }
+    state.liveItemText += delta;
     render = true;
   }
-  if (message.method === "turn/started") state.liveText = "";
-  return { render, refresh: REFRESH_METHODS.test(message.method ?? "") };
+  if (
+    message.method === "item/completed" &&
+    message.params?.item?.type === "agentMessage"
+  ) {
+    const { id, text } = message.params.item;
+    state.completedAnswer = { id, text };
+    render = true;
+  }
+  if (message.method === "turn/started") {
+    state.liveText = "";
+    state.liveItemId = null;
+    state.liveItemText = "";
+  }
+  // A reconnect may have missed deltas or a completion: re-read the thread's items.
+  const reconnected = message.method === "gateway/connected";
+  return {
+    render,
+    refresh: reconnected || REFRESH_METHODS.test(message.method ?? ""),
+  };
 }
