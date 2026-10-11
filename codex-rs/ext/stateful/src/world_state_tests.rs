@@ -81,6 +81,7 @@ fn available_at_revision(
                     revision,
                     data: Vec::new(),
                     contexts: Default::default(),
+                    statements: Default::default(),
                     omitted_entries: 0,
                     candidate_entries,
                 },

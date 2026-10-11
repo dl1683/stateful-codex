@@ -49,6 +49,7 @@ const KNOWLEDGE_HEADER: &str = "Other promoted knowledge:";
 struct EntryLayout<'a> {
     entry_aliases: &'a HashMap<String, String>,
     contexts: &'a HashMap<String, codex_project_intelligence::KnowledgeContext>,
+    statements: &'a std::collections::HashSet<String>,
     identity_aliases: HashMap<String, String>,
     identity_evidence: HashMap<ContextMapEntryId, String>,
     evidence_audit: Option<&'a EvidenceAudit>,
@@ -66,7 +67,12 @@ impl EntryLayout<'_> {
         evidence_aliases: &HashMap<ContextMapEntryId, String>,
     ) {
         let alias = format!("E{}", index + 1);
-        let said = said_by_user(self.contexts.get(hit.entry.id.as_str()));
+        // A statement is attributed to the user only while it describes these words.
+        let said = if self.statements.contains(hit.entry.id.as_str()) {
+            said_by_user(self.contexts.get(hit.entry.id.as_str()))
+        } else {
+            String::new()
+        };
         let plain = render_hit(
             &alias,
             hit,
@@ -246,6 +252,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
     let mut layout = EntryLayout {
         entry_aliases: &entry_aliases,
         contexts: &projection.contexts,
+        statements: &projection.statements,
         identity_aliases: projection
             .data
             .iter()

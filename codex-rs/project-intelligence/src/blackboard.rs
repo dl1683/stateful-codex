@@ -505,6 +505,9 @@ pub struct RootBlackboardProjection {
     pub data: Vec<BlackboardHit>,
     /// Revision-bound meanings loaded in the same snapshot as entries and scope eligibility.
     pub contexts: std::collections::HashMap<String, crate::KnowledgeContext>,
+    /// Entries whose context's user statement (declaration or Apply) still describes the
+    /// returned revision's words and authorship; only these may be attributed to the user.
+    pub statements: std::collections::HashSet<String>,
     pub omitted_entries: u64,
     pub candidate_entries: u64,
 }

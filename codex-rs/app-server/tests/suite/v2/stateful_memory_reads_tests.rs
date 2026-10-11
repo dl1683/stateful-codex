@@ -304,16 +304,17 @@ async fn agent_upsert(
     project: &str,
     entry_id: &str,
     revision: u64,
-    content: &str,
+    edit: (&str, &str, &str),
 ) -> Result<()> {
+    let (kind, content, root_promotion) = edit;
     let request = server
         .send_request(
             "blackboard/upsert",
             Some(json!({
                 "projectId": project, "entryId": entry_id, "expectedRevision": revision,
-                "nodeId": null, "kind": "instruction", "content": content,
+                "nodeId": null, "kind": kind, "content": content,
                 "confidenceBasisPoints": 9000, "verification": "unverified", "importance": "high",
-                "rootPromotion": "notPromoted", "evidence": [],
+                "rootPromotion": root_promotion, "evidence": [],
                 "provenance": {"kind": "agent", "sourceId": "agent-edit"}
             })),
         )
@@ -325,8 +326,9 @@ async fn agent_upsert(
 }
 
 /// A corrected rule's superseded words are never read again, by ID, search, history, recall or
-/// `since`; a declared rule downgraded and then edited by the Agent is returned with the Agent's
-/// words and no user statement.
+/// `since`; a declared rule downgraded, then edited by the Agent into a promoted fact, is
+/// returned by reads and rendered by a fresh thread's root with the Agent's words and no user
+/// statement.
 #[tokio::test]
 async fn reads_return_only_current_user_words_and_attribute_the_returned_revision() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
@@ -381,8 +383,10 @@ async fn reads_return_only_current_user_words_and_attribute_the_returned_revisio
             },
         })
         .await?;
-    agent_upsert(&mut server, &project, &rule, 1, "Never push.").await?;
-    agent_upsert(&mut server, &project, &rule, 2, "Push only from CI.").await?;
+    let downgrade = ("instruction", "Never push.", "promoted");
+    agent_upsert(&mut server, &project, &rule, 1, downgrade).await?;
+    let edit = ("fact", "Push only from CI.", "promoted");
+    agent_upsert(&mut server, &project, &rule, 2, edit).await?;
 
     let reads = [
         (
@@ -427,6 +431,16 @@ async fn reads_return_only_current_user_words_and_attribute_the_returned_revisio
             "{id} lacks the successor: {output}"
         );
     }
+    let bodies = calls.lock().expect("request log lock").clone();
+    let root_line = bodies
+        .iter()
+        .flat_map(|body| body["input"].as_array().cloned().unwrap_or_default())
+        .flat_map(|item| item["content"].as_array().cloned().unwrap_or_default())
+        .filter_map(|part| part["text"].as_str().map(str::to_string))
+        .flat_map(|text| text.lines().map(str::to_string).collect::<Vec<_>>())
+        .find(|line| line.contains("Push only from CI."))
+        .expect("root renders the edited entry");
+    assert!(!root_line.contains("by=user"), "{root_line}");
     let edited: Value = serde_json::from_str(
         &found
             .iter()

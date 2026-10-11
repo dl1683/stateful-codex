@@ -169,28 +169,8 @@ impl BlackboardStore {
         id: &BlackboardEntryId,
         revision: u64,
     ) -> Result<Option<KnowledgeContext>, BlackboardStoreError> {
-        let revision =
-            i64::try_from(revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
         let mut tx = self.pool.begin().await?;
-        let pinned: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM blackboard_entries AS entry
-               JOIN knowledge_context AS context ON context.entry_id = entry.id
-                AND context.project_id = entry.project_id
-               JOIN blackboard_entry_revisions AS stated
-                 ON stated.entry_id = entry.id AND stated.revision = context.revision
-               WHERE entry.project_id = ? AND entry.id = ? AND entry.revision = ?
-                 AND context.revision = (SELECT MAX(newest.revision) FROM knowledge_context AS newest
-                     WHERE newest.entry_id = entry.id AND newest.revision <= entry.revision)
-                 AND NOT EXISTS (SELECT 1 FROM blackboard_entry_revisions AS later
-                     WHERE later.entry_id = entry.id AND later.revision >= context.revision
-                       AND later.revision <= entry.revision
-                       AND (later.provenance_kind != 'user' OR later.content != stated.content)))",
-        )
-        .bind(project_id)
-        .bind(id.as_str())
-        .bind(revision)
-        .fetch_one(&mut *tx)
-        .await?;
+        let pinned = statement_pinned_on(&mut tx, project_id, id.as_str(), revision).await?;
         let context = if pinned {
             super::knowledge::context_of(&mut tx, project_id, id.as_str()).await?
         } else {
@@ -216,6 +196,36 @@ impl BlackboardStore {
         tx.commit().await?;
         Ok(entry)
     }
+}
+
+/// Whether the newest context's user statement still describes `revision`, the entry's
+/// current revision (see [`BlackboardStore::statement_context`]).
+pub(super) async fn statement_pinned_on(
+    connection: &mut SqliteConnection,
+    project_id: &str,
+    id: &str,
+    revision: u64,
+) -> Result<bool, BlackboardStoreError> {
+    let revision = i64::try_from(revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM blackboard_entries AS entry
+           JOIN knowledge_context AS context ON context.entry_id = entry.id
+            AND context.project_id = entry.project_id
+           JOIN blackboard_entry_revisions AS stated
+             ON stated.entry_id = entry.id AND stated.revision = context.revision
+           WHERE entry.project_id = ? AND entry.id = ? AND entry.revision = ?
+             AND context.revision = (SELECT MAX(newest.revision) FROM knowledge_context AS newest
+                 WHERE newest.entry_id = entry.id AND newest.revision <= entry.revision)
+             AND NOT EXISTS (SELECT 1 FROM blackboard_entry_revisions AS later
+                 WHERE later.entry_id = entry.id AND later.revision >= context.revision
+                   AND later.revision <= entry.revision
+                   AND (later.provenance_kind != 'user' OR later.content != stated.content)))",
+    )
+    .bind(project_id)
+    .bind(id)
+    .bind(revision)
+    .fetch_one(connection)
+    .await?)
 }
 
 pub(super) async fn entry_source_eligible_on(

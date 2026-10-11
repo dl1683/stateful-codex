@@ -157,21 +157,31 @@ impl BlackboardStore {
             .await?;
         let mut data = Vec::with_capacity(entry_ids.len());
         let mut contexts = std::collections::HashMap::new();
+        let mut statements = std::collections::HashSet::new();
         for raw_id in entry_ids {
             if let Some(context) =
                 super::knowledge::context_of(&mut transaction, &query.project_id, &raw_id).await?
             {
                 contexts.insert(raw_id.clone(), context);
             }
-            data.push(
-                load_hit(
-                    &mut transaction,
-                    &query.project_id,
-                    raw_id,
-                    super::identity::EntryReader::ModelTool,
-                )
-                .await?,
-            );
+            let hit = load_hit(
+                &mut transaction,
+                &query.project_id,
+                raw_id.clone(),
+                super::identity::EntryReader::ModelTool,
+            )
+            .await?;
+            if super::identity::statement_pinned_on(
+                &mut transaction,
+                &query.project_id,
+                &raw_id,
+                hit.entry.revision,
+            )
+            .await?
+            {
+                statements.insert(raw_id);
+            }
+            data.push(hit);
         }
         let revision = sqlx::query_scalar::<_, i64>(
             "SELECT revision FROM project_intelligence_revisions WHERE project_id = ?",
@@ -187,6 +197,7 @@ impl BlackboardStore {
                 .map_err(|_| BlackboardStoreError::RevisionOverflow)?,
             data,
             contexts,
+            statements,
             omitted_entries: u64::try_from(counts.promoted)
                 .map_err(|_| BlackboardStoreError::CountOverflow)?
                 .saturating_sub(u64::from(query.max_entries)),
