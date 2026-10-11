@@ -271,6 +271,42 @@ test("a later turn missed entirely while disconnected shows its completed answer
   assert.equal(askAnswer(state), "Madrid");
 });
 
+test("an old cached answer outside the history page never hides a newer one", () => {
+  const state = askState();
+  applyWorkspaceEvent(state, event("item/completed", "turn-1", { id: "old", text: "Paris." }));
+  assert.equal(askAnswer(state), "Paris.");
+  // Disconnected: a tool-heavy later turn produces 100+ items and completes a new answer unseen.
+  applyWorkspaceEvent(state, { method: "gateway/connected", params: {} });
+  const snapshotSeq = state.eventSeq;
+  state.activity = [
+    ...Array.from({ length: 99 }, (_, index) => ({
+      turnId: "turn-2",
+      item: { type: "commandExecution", id: `tool-${index}`, status: "completed", command: "rg x" },
+    })),
+    agentItem("turn-2", "new", "The source says Madrid."),
+  ];
+  reconcileAskStream(state, snapshotSeq);
+  assert.equal(askAnswer(state), "The source says Madrid.");
+  assert.match(answerPanel(state), /<p class="live-copy">The source says Madrid\.<\/p>/);
+});
+
+test("a completion that arrives during a history read is kept", () => {
+  const state = askState();
+  applyWorkspaceEvent(state, event("item/completed", "turn-1", { id: "first", text: "Paris." }));
+  // A refresh issues its history read; before it returns, a newer answer completes.
+  const snapshotSeq = state.eventSeq;
+  applyWorkspaceEvent(state, event("item/completed", "turn-2", { id: "second", text: "Madrid." }));
+  // The read returns the history as of its request: it lists only the first answer.
+  state.activity = [agentItem("turn-1", "first", "Paris.")];
+  reconcileAskStream(state, snapshotSeq);
+  assert.equal(askAnswer(state), "Madrid.");
+  assert.match(answerPanel(state), /<p class="live-copy">Madrid\.<\/p>/);
+  // The next refresh lists it; the history now carries the newest answer itself.
+  state.activity.push(agentItem("turn-2", "second", "Madrid."));
+  reconcileAskStream(state);
+  assert.equal(askAnswer(state), "Madrid.");
+});
+
 test("a refused Ask shows the refusal and no composer", () => {
   const state = askState();
   state.askRefusal = "This thread has an open autonomous run, so a question here would join it.";

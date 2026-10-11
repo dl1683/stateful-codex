@@ -157,6 +157,8 @@ async function ensureRun() {
 }
 
 async function refreshWorkspace() {
+  // Events applied after this point are newer than the history read below.
+  const snapshotSeq = state.eventSeq ?? 0;
   state.loading = !state.project;
   state.error = null;
   render();
@@ -211,7 +213,7 @@ async function refreshWorkspace() {
   state.steering = steering.data;
   state.measurementSummary = measurementSummary.summary;
   state.activity = activity.data.reverse();
-  reconcileAskStream(state);
+  reconcileAskStream(state, snapshotSeq);
   state.loading = false;
   state.busyAction = null;
   render();

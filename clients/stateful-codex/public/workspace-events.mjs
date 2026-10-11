@@ -46,6 +46,8 @@ export function applyWorkspaceEvent(state, message) {
     );
     return { render: true, refresh: false };
   }
+  // Orders this workspace's events against history snapshots (see reconcileAskStream).
+  state.eventSeq = (state.eventSeq ?? 0) + 1;
   let render = false;
   if (message.method === "item/agentMessage/delta") {
     const delta = message.params?.delta ?? "";
@@ -73,7 +75,7 @@ export function applyWorkspaceEvent(state, message) {
     message.params?.item?.type === "agentMessage"
   ) {
     const { id, text } = message.params.item;
-    state.completedAnswer = { id, text };
+    state.completedAnswer = { id, text, seq: state.eventSeq };
     // A completion ends that stream; the completion of a different item means it is newer
     // than an earlier stream whose completion was missed.
     state.liveItemId = null;
@@ -93,16 +95,22 @@ export function applyWorkspaceEvent(state, message) {
   };
 }
 
-// After the thread's items are re-read (refresh, reconnect): a streaming item that the history
-// lists as completed is no longer streaming, so the latest completed answer shows. A stream the
-// history does not list yet is newer and is kept.
-export function reconcileAskStream(state) {
-  if (!state.liveItemId) return;
-  const listed = state.activity.some(
-    (entry) => (entry?.item ?? entry)?.id === state.liveItemId,
-  );
-  if (listed) {
+// After the thread's items are re-read (refresh, reconnect). `snapshotSeq` is the event count
+// when that history request was issued. The history page is bounded (newest items only), so an
+// item's absence from it proves nothing; ordering decides instead:
+// - a completion observed before the request is older than the snapshot, which supersedes it
+//   whenever the page lists any answer;
+// - a completion that arrived while the request was in flight is newer and is kept;
+// - a streaming item that the page lists as completed is no longer streaming; a stream the page
+//   does not list is kept.
+export function reconcileAskStream(state, snapshotSeq = state.eventSeq ?? 0) {
+  const items = state.activity.map((entry) => entry?.item ?? entry);
+  if (state.liveItemId && items.some((item) => item?.id === state.liveItemId)) {
     state.liveItemId = null;
     state.liveItemText = "";
+  }
+  const pageHasAnswer = items.some((item) => item?.type === "agentMessage");
+  if (state.completedAnswer && state.completedAnswer.seq <= snapshotSeq && pageHasAnswer) {
+    state.completedAnswer = null;
   }
 }

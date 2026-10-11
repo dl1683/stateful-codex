@@ -198,18 +198,17 @@ function renderLive(state) {
 
 // Ask: the latest answer. A completed answer always comes from its authoritative item (the
 // completion event, or the thread's items after a refresh or reconnect), never from the deltas
-// that happened to arrive. The newest completed item wins; a completion or a history listing
-// ends the stream it belongs to (see workspace-events.mjs).
+// that happened to arrive. The newest completed item wins, by event/snapshot order, not by
+// presence in the bounded history page (see reconcileAskStream in workspace-events.mjs).
 export function askAnswer(state) {
   const completed = state.activity
     .map(normalizeThreadItem)
     .filter((item) => item?.type === "agentMessage");
   // Only a message still streaming (no completion seen or listed) shows its received text.
   if (state.liveItemId) return state.liveItemText ?? "";
-  const fresh =
-    state.completedAnswer &&
-    !completed.some((item) => item.id === state.completedAnswer.id);
-  return fresh ? state.completedAnswer.text : (completed.at(-1)?.text ?? "");
+  // A completion still held is newer than the last history snapshot (reconcileAskStream
+  // retires older ones); otherwise the snapshot's newest answer is authoritative.
+  return state.completedAnswer?.text ?? completed.at(-1)?.text ?? "";
 }
 
 function renderAnswer(state) {
