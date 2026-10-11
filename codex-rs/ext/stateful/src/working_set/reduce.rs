@@ -56,6 +56,13 @@ impl Projection {
                 output,
             } => self.observe_command(&source, &argv, &cwd, exit_code, &output),
             Observation::AppliedFileChange { path } => self.touch(&path),
+            Observation::FileWitness { source, witness } => {
+                self.touch(&witness.path);
+                let head = (K::Change, S::Active, O::Host);
+                let subject = (Some(witness.path.as_str()), None);
+                self.admit(head, subject, &witness.summary(), &source, (0, 0));
+                self.link_attributions();
+            }
         }
     }
 

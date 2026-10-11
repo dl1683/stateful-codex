@@ -12,10 +12,13 @@ mod commands;
 mod grammar;
 mod reduce;
 mod retain;
+mod working_files;
 
 use codex_project_intelligence::MAX_WORKING_SET_PAYLOAD_BYTES;
 use serde::Deserialize;
 use serde::Serialize;
+
+use working_files::FileWitness;
 
 /// Version of the finite extraction grammar and payload schema; a change invalidates caches.
 pub(crate) const GRAMMAR_VERSION: u32 = 1;
@@ -190,6 +193,10 @@ pub(crate) enum Observation {
     AppliedFileChange {
         path: String,
     },
+    FileWitness {
+        source: SourceRef,
+        witness: FileWitness,
+    },
 }
 
 impl Projection {
@@ -243,3 +250,6 @@ mod grammar_tests;
 #[cfg(test)]
 #[path = "reduce_tests.rs"]
 mod reduce_tests;
+#[cfg(test)]
+#[path = "working_files_tests.rs"]
+mod working_files_tests;
