@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ApprovalReviewContributor;
+use crate::CompactionExtractionContributor;
 use crate::ConfigContributor;
 use crate::ContextContributor;
 use crate::ExtensionEventSink;
@@ -43,6 +44,7 @@ impl<C: Sync> Default for ExtensionRegistryBuilder<C> {
                 tool_policy_contributors: Vec::new(),
                 model_request_contributors: Vec::new(),
                 turn_item_contributors: Vec::new(),
+                compaction_extraction_contributors: Vec::new(),
             },
         }
     }
@@ -151,6 +153,16 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
         self.registry.turn_item_contributors.push(contributor);
     }
 
+    /// Registers one contributor to native LOCAL compaction requests.
+    pub fn compaction_extraction_contributor(
+        &mut self,
+        contributor: Arc<dyn CompactionExtractionContributor>,
+    ) {
+        self.registry
+            .compaction_extraction_contributors
+            .push(contributor);
+    }
+
     /// Finishes construction and returns the immutable registry.
     pub fn build(self) -> ExtensionRegistry<C> {
         self.registry
@@ -175,6 +187,7 @@ pub struct ExtensionRegistry<C: Sync> {
     model_request_contributors: Vec<Arc<dyn ModelRequestContributor>>,
     turn_item_contributors: Vec<Arc<dyn TurnItemContributor>>,
     approval_review_contributors: Vec<Arc<dyn ApprovalReviewContributor>>,
+    compaction_extraction_contributors: Vec<Arc<dyn CompactionExtractionContributor>>,
 }
 
 impl<C: Sync> ExtensionRegistry<C> {
@@ -198,6 +211,7 @@ impl<C: Sync> ExtensionRegistry<C> {
                 model_request_contributors: self.model_request_contributors.clone(),
                 turn_item_contributors: self.turn_item_contributors.clone(),
                 approval_review_contributors: self.approval_review_contributors.clone(),
+                compaction_extraction_contributors: self.compaction_extraction_contributors.clone(),
             },
         }
     }
@@ -303,6 +317,13 @@ impl<C: Sync> ExtensionRegistry<C> {
     /// Returns the registered ordered turn-item contributors.
     pub fn turn_item_contributors(&self) -> &[Arc<dyn TurnItemContributor>] {
         &self.turn_item_contributors
+    }
+
+    /// Returns the compaction extraction contributors in registration order.
+    pub fn compaction_extraction_contributors(
+        &self,
+    ) -> &[Arc<dyn CompactionExtractionContributor>] {
+        &self.compaction_extraction_contributors
     }
 }
 
