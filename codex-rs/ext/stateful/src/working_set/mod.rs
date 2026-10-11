@@ -11,9 +11,11 @@
 mod commands;
 mod grammar;
 mod offline;
+mod piggyback;
 mod reduce;
 mod render;
 mod retain;
+mod semantic;
 mod source_validation;
 mod working_files;
 
