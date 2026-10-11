@@ -9,6 +9,8 @@
 #![allow(dead_code)]
 
 mod grammar;
+mod reduce;
+mod retain;
 
 use codex_project_intelligence::MAX_WORKING_SET_PAYLOAD_BYTES;
 use serde::Deserialize;
@@ -227,3 +229,6 @@ impl Projection {
 #[cfg(test)]
 #[path = "grammar_tests.rs"]
 mod grammar_tests;
+#[cfg(test)]
+#[path = "reduce_tests.rs"]
+mod reduce_tests;
