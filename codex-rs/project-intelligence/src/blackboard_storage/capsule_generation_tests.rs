@@ -130,13 +130,13 @@ async fn capsule_generation_advances_for_every_eligibility_writer() {
         generation(&store).await,
     );
 
-    // Observing a source is not an eligibility change; linking and forgetting it are.
+    // Observing, linking and forgetting a source each advance it.
     let text = "Keep tabs.";
     let seal = store
         .observe_source(observation("linked", text), text)
         .await
         .unwrap();
-    assert_eq!(generation(&store).await, seen, "observe_source");
+    advance(&mut seen, "observe_source", generation(&store).await);
     let user = store.get_entry(PROJECT, &user.id).await.unwrap().unwrap();
     store
         .link_entry_source(
@@ -218,4 +218,55 @@ async fn capsule_generation_advances_for_every_eligibility_writer() {
         advance(&mut seen, statement, generation(&store).await);
     }
     store.pool.close().await;
+}
+
+/// Part B of a turn whose digest is already excluded makes the whole turn ineligible, so its
+/// observation must advance the generation even though part A was eligible.
+#[tokio::test]
+async fn capsule_generation_advances_when_an_excluded_part_joins_a_turn() {
+    let home = TempDir::new().unwrap();
+    let store = store(&home).await;
+    let admission = admission(&home).await;
+    let excluded = "Never push.";
+    let seal = store
+        .observe_source(observation("forgotten", excluded), excluded)
+        .await
+        .unwrap();
+    let entry = store
+        .create_entry(
+            BlackboardEntryId::parse("forgotten").unwrap(),
+            rule(excluded),
+        )
+        .await
+        .unwrap();
+    store
+        .link_entry_source(
+            &admission,
+            &entry.id,
+            entry.revision,
+            &seal,
+            &seal.observation.ordered_spans,
+        )
+        .await
+        .unwrap();
+    store
+        .update_entry(PROJECT, &entry.id, retire(&entry))
+        .await
+        .unwrap();
+    let part = |index: u32, text: &str| {
+        let mut part = observation("multipart", text);
+        part.turn_id = "turn-2".to_string();
+        part.part_index = index;
+        part
+    };
+    let kept = "Keep tabs.";
+    store.observe_source(part(0, kept), kept).await.unwrap();
+    assert!(store.source_turn_eligible(PROJECT, "turn-2").await.unwrap());
+    let before = generation(&store).await;
+    store
+        .observe_source(part(1, excluded), excluded)
+        .await
+        .unwrap();
+    assert!(!store.source_turn_eligible(PROJECT, "turn-2").await.unwrap());
+    assert!(generation(&store).await > before);
 }

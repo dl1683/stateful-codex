@@ -227,7 +227,8 @@ impl WorkingSetStore {
         Ok(status)
     }
 
-    /// Invalidates every projection version of the thread, cancels its pending tickets and
+    /// Invalidates every projection version of the thread, cancels its pending and installed
+    /// tickets (an invalidated snapshot fails sampling admission) and
     /// keeps a bounded record (retirement, rebind/clear, archive, gap, version, corruption).
     pub async fn invalidate(
         &self,
@@ -243,7 +244,7 @@ impl WorkingSetStore {
              WHERE project_id = ?1 AND binding_generation = ?2 AND thread_id = ?3",
             "UPDATE working_set_publication_tickets SET state = 'cancelled'
              WHERE project_id = ?1 AND binding_generation = ?2 AND thread_id = ?3
-               AND state = 'admitted'",
+               AND state IN ('admitted', 'installed')",
             "INSERT INTO working_set_invalidations
              SELECT ?1, ?2, ?3, COALESCE(MAX(sequence), 0) + 1, ?4, ?5, ?6
              FROM working_set_invalidations
@@ -272,34 +273,34 @@ async fn ticket_status_on(
     connection: &mut sqlx::SqliteConnection,
     ticket: &PublicationTicket,
 ) -> Result<TicketStatus, WorkingSetStoreError> {
-    let row: Option<(String, i64, String)> = sqlx::query_as(
-        "SELECT state, eligibility_generation, capsule_digest
-         FROM working_set_publication_tickets
-         WHERE ticket_id = ? AND project_id = ? AND binding_generation = ? AND thread_id = ?",
+    // The complete stored tuple must match: an altered ticket field reads as cancelled.
+    let state: Option<String> = sqlx::query_scalar(
+        "SELECT state FROM working_set_publication_tickets
+         WHERE ticket_id = ? AND project_id = ? AND binding_generation = ? AND thread_id = ?
+           AND window_id = ? AND history_generation = ? AND projection_version = ?
+           AND projection_revision = ? AND eligibility_generation = ? AND capsule_digest = ?",
     )
     .bind(ticket.ticket_id)
     .bind(&ticket.key.project_id)
     .bind(to_i64(ticket.key.binding_generation)?)
     .bind(&ticket.key.thread_id)
+    .bind(&ticket.window_id)
+    .bind(to_i64(ticket.history_generation)?)
+    .bind(i64::from(ticket.key.projection_version))
+    .bind(to_i64(ticket.projection_revision)?)
+    .bind(to_i64(ticket.eligibility_generation)?)
+    .bind(&ticket.capsule_digest)
     .fetch_optional(&mut *connection)
     .await?;
     let current = generation_on(connection, &ticket.key.project_id).await?;
-    Ok(match row {
-        Some((state, generation, digest))
-            if state != "cancelled"
-                && digest == ticket.capsule_digest
-                && generation == to_i64(ticket.eligibility_generation)? =>
-        {
-            if current != ticket.eligibility_generation {
-                TicketStatus::Stale {
-                    current_generation: current,
-                }
-            } else if state == "installed" {
-                TicketStatus::Installed
-            } else {
-                TicketStatus::Admitted
+    Ok(match state.as_deref() {
+        Some("installed" | "admitted") if current != ticket.eligibility_generation => {
+            TicketStatus::Stale {
+                current_generation: current,
             }
         }
+        Some("installed") => TicketStatus::Installed,
+        Some("admitted") => TicketStatus::Admitted,
         _ => TicketStatus::Cancelled,
     })
 }

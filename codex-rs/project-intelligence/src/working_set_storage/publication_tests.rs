@@ -266,3 +266,55 @@ async fn corrupt_projection_refuses_admission() {
         ))
     );
 }
+
+#[tokio::test]
+async fn explicit_invalidation_cancels_installed_tickets_until_a_rebuild() {
+    use WorkingSetInvalidation::*;
+    for reason in [SourceGap, Corrupt, Version, Binding, Archive, Retirement] {
+        let fixture = fixture().await;
+        let projection = fixture.write(/*expected_revision*/ 0, &[1]).await;
+        let installed = admitted(admit(&fixture, &projection, &[]).await);
+        assert_eq!(
+            fixture.store.confirm_installed(&installed).await.unwrap(),
+            TicketStatus::Installed
+        );
+        // Ordinary eligible capture keeps the frozen installed capsule valid.
+        let captured = fixture.write(/*expected_revision*/ 1, &[2]).await;
+        assert_eq!(
+            fixture.store.ticket_status(&installed).await.unwrap(),
+            TicketStatus::Installed
+        );
+        // Any altered ticket field reads as cancelled.
+        let altered = PublicationTicket {
+            window_id: "window-2".to_string(),
+            ..installed.clone()
+        };
+        assert_eq!(
+            fixture.store.ticket_status(&altered).await.unwrap(),
+            TicketStatus::Cancelled
+        );
+
+        fixture.store.invalidate(&key(), reason).await.unwrap();
+        for status in [
+            fixture.store.ticket_status(&installed).await.unwrap(),
+            fixture.store.confirm_installed(&installed).await.unwrap(),
+        ] {
+            assert_eq!(status, TicketStatus::Cancelled, "{reason:?}");
+        }
+        assert_eq!(
+            admit(&fixture, &captured, &[]).await,
+            PublicationAdmission::Refused(PublicationRefusal::Invalidated(reason))
+        );
+        let rebuilt = fixture.write(/*expected_revision*/ 0, &[1]).await;
+        let fresh = admitted(admit(&fixture, &rebuilt, &[]).await);
+        assert_eq!(
+            fixture.store.confirm_installed(&fresh).await.unwrap(),
+            TicketStatus::Installed
+        );
+        assert_eq!(
+            fixture.store.ticket_status(&installed).await.unwrap(),
+            TicketStatus::Cancelled,
+            "{reason:?}"
+        );
+    }
+}
