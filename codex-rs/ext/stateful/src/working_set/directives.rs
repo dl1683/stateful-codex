@@ -155,24 +155,25 @@ pub(crate) fn route_withdrawal(
         .then_some(RouteWithdrawal::Unknown)
 }
 
-/// Identifying names of a route: script-like path arguments when present, else the program.
+/// Identifying name of a route: the script a program runs directly (its first argument, when
+/// that is a file path), else the program. Other arguments, such as search targets, are not the
+/// route.
 fn route_names(route: &Candidate) -> Vec<String> {
     let head = route.text.as_deref().unwrap_or_default();
-    let paths: Vec<String> = head
+    let script = head
         .split_whitespace()
+        .nth(1)
         .map(|token| token.trim_matches(|c: char| "\"'`".contains(c)))
         .filter(|token| !token.starts_with('-'))
-        .filter_map(|token| {
-            let name = token.rsplit(['/', '\\']).next()?;
-            let (stem, extension) = name.rsplit_once('.')?;
-            (!stem.is_empty() && extension.chars().all(char::is_alphanumeric))
-                .then(|| name.to_string())
-        })
-        .collect();
-    if paths.is_empty() {
-        route.subject.iter().cloned().collect()
-    } else {
-        paths
+        .and_then(|token| token.rsplit(['/', '\\']).next())
+        .filter(|name| {
+            name.rsplit_once('.').is_some_and(|(stem, extension)| {
+                !stem.is_empty() && extension.chars().all(char::is_alphanumeric)
+            })
+        });
+    match script {
+        Some(name) => vec![name.to_string()],
+        None => route.subject.iter().cloned().collect(),
     }
 }
 

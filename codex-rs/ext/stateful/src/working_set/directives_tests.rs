@@ -160,6 +160,28 @@ fn rejections_and_later_user_mentions_withdraw_a_working_replacement() {
         route_withdrawal(fix, &projection, &[&rejected]),
         Some(RouteWithdrawal::Rejected)
     );
+    // A search target named later is not the route.
+    let targeted = reduced(vec![
+        command("t1", "c1", "rg -n x .", 1, rg),
+        command(
+            "t1",
+            "c2",
+            "Select-String -Path src/a.py -Pattern x",
+            0,
+            "src/a.py:1:x",
+        ),
+        user("t2", "Priya edited src/a.py; keep her change."),
+    ]);
+    let search = &targeted.candidates[1];
+    assert_eq!(
+        (search.kind, search.status, search.text.as_deref()),
+        (
+            CandidateKind::Route,
+            Status::Active,
+            Some("Select-String -Path src/a.py -Pattern x")
+        )
+    );
+    assert_eq!(route_withdrawal(search, &targeted, &[]), None);
     let mut later = observations;
     later.push(user("t2", "Stop using git grep here."));
     let projection = reduced(later);
