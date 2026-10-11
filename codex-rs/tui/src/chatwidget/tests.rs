@@ -293,8 +293,6 @@ mod slash_commands;
 mod sparkle_submission_tests;
 #[path = "tests/startup_submission_tests.rs"]
 mod startup_submission_tests;
-#[path = "tests/stateful_outcome_tests.rs"]
-mod stateful_outcome_tests;
 mod status_and_layout;
 mod status_command_tests;
 mod status_surface_previews;

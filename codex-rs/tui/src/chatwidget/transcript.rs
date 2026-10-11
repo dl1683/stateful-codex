@@ -63,8 +63,6 @@ pub(super) struct TranscriptState {
     pub(super) plan_delta_buffer: String,
     /// True while a plan item is streaming.
     pub(super) plan_item_active: bool,
-    /// Withholds a trailing Stateful outcome block from the streaming answer.
-    pub(super) outcome_trailer: codex_app_server_client::OutcomeTrailerStream,
 }
 
 impl TranscriptState {

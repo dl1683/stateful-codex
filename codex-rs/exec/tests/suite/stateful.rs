@@ -190,61 +190,6 @@ async fn exec_stateful_ask_attaches_project_memory_without_a_run() -> anyhow::Re
     Ok(())
 }
 
-/// An Autonomous run that ends with a ready answer prints the answer without its outcome
-/// block and the calm outcome line, and exits successfully.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn exec_autonomous_ready_answer_is_calm_and_hides_the_outcome_block() -> anyhow::Result<()> {
-    let test = test_codex_exec();
-    let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_once(
-        &server,
-        responses::sse(vec![
-            responses::ev_response_created("answer"),
-            responses::ev_assistant_message(
-                "answer-message",
-                "A leap year has 366 days.
-
-[stateful-outcome]
-disposition: answer
-open-issues: none
-[/stateful-outcome]",
-            ),
-            responses::ev_completed("answer"),
-        ]),
-    )
-    .await;
-
-    let assertion = test
-        .cmd_with_server(&server)
-        .arg("--stateful")
-        .arg("autonomous")
-        .arg("--skip-git-repo-check")
-        .arg("-C")
-        .arg(test.cwd_path())
-        .arg("How many days are in a leap year?")
-        .assert()
-        .success();
-
-    response_mock.single_request();
-    let output = assertion.get_output();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        (
-            String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr.contains("run answered · not verified"),
-            stderr.contains("[stateful-outcome]"),
-        ),
-        (
-            "A leap year has 366 days.
-"
-            .to_string(),
-            true,
-            false
-        )
-    );
-    Ok(())
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_stateful_resume_starts_a_new_run_for_the_new_prompt() -> anyhow::Result<()> {
     let test = test_codex_exec();

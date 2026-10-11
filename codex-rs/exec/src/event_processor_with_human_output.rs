@@ -121,8 +121,6 @@ impl EventProcessorWithHumanOutput {
     fn render_item_completed(&mut self, item: ThreadItem) {
         match item {
             ThreadItem::AgentMessage { text, .. } => {
-                // A trailing Stateful outcome block is protocol, never shown.
-                let text = codex_app_server_client::visible_answer(&text).to_string();
                 eprintln!(
                     "{}\n{}",
                     "codex".style(self.italic).style(self.magenta),
@@ -634,9 +632,7 @@ fn final_message_from_turn_items(items: &[ThreadItem]) -> Option<String> {
         .iter()
         .rev()
         .find_map(|item| match item {
-            ThreadItem::AgentMessage { text, .. } => {
-                Some(codex_app_server_client::visible_answer(text).to_string())
-            }
+            ThreadItem::AgentMessage { text, .. } => Some(text.clone()),
             _ => None,
         })
         .or_else(|| {

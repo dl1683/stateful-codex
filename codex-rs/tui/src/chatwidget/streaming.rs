@@ -199,12 +199,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_agent_message_delta(&mut self, delta: String) {
-        // Each answer stream starts its own outcome-block filter.
-        if self.stream_controller.is_none() {
-            self.transcript.outcome_trailer = Default::default();
-        }
-        let shown = self.transcript.outcome_trailer.push(&delta);
-        self.handle_streaming_delta(shown);
+        self.handle_streaming_delta(delta);
     }
 
     pub(super) fn on_plan_delta(&mut self, delta: String) {
