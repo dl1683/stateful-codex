@@ -14,6 +14,7 @@ mod offline;
 mod reduce;
 mod render;
 mod retain;
+mod source_validation;
 mod working_files;
 
 use codex_project_intelligence::MAX_WORKING_SET_PAYLOAD_BYTES;
