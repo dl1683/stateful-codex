@@ -212,3 +212,30 @@ Order change: after Ask, land an immediate small fix so continuity truncation ne
 6. cross-app.
 
 Re-run the frozen baseline after each.
+
+### Capsule first (Codex step-back 2026-10-11a; sc_dogfood/council/council_20261011a_stepback.md)
+
+Order from here:
+1. Next-step truncation fix.
+2. **Working-set capsule.** It needs only a small consistency contract:
+   - project and thread identity without a run id;
+   - source-event references and a watermark;
+   - an eligibility recheck and invalidation;
+   - checked install.
+
+   It starts at 512 tokens / 2,048 bytes. Task-relevant entries persist until superseded, never in a recency window. It needs a changed-content witness for untracked files, and covers every compaction and resume path.
+3. Measured prefix and schema trimming: replace duplicated prose, omit unusable tools. Root subsetting stays a separate authorized arm.
+4. Minimal journal and epoch foundation.
+5. Forget plus restored reads plus the digest.
+6. The rest of slice A.
+7. Freshness.
+8. Cross-app.
+
+**Gates:**
+- Staged same-build paired replays: truncation-only, then the capsule, then trimming.
+- Reference: this baseline's plain arm, 1.94M units and 10 compactions. This replaces 3.70M/18.
+
+**Triggers for the alternatives:**
+- epoch-first, if the capsule cannot be invalidated safely;
+- reads-first, if the capsule lacks evidence;
+- a capsule plus exact-event retrieval hybrid, if 512 tokens is too small.
