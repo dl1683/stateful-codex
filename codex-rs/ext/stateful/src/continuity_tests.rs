@@ -147,7 +147,7 @@ fn long_text_is_shortened_with_a_route_and_the_whole_fragment_stays_bounded() {
         rendered
             .split("turn \"turn-1\"")
             .next()
-            .is_some_and(|newest| newest.matches(" of 5000 bytes]").count() == 2),
+            .is_some_and(|newest| newest.matches(" of 5000 bytes").count() == 2),
         "{rendered}"
     );
     assert!(rendered.ends_with(
@@ -204,7 +204,7 @@ fn a_small_budget_keeps_the_newest_turn_in_compact_form() {
         "{rendered}"
     );
     assert!(rendered.contains("turn \"turn-0\""));
-    assert!(rendered.contains(" of 5000 bytes]"));
+    assert!(rendered.contains(" of 5000 bytes"));
     assert!(!rendered.contains("turn \"turn-1\""));
     assert!(rendered.ends_with("did not fit this bounded view."));
 }
@@ -249,7 +249,10 @@ fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
     assert!(rendered.contains(NEWEST_ASKED));
     assert!(rendered.contains("turn \"01a0fbad-1689-75e3-ac68-867cb758f500\""));
     assert!(rendered.contains("\n  Answer: \""), "{rendered}");
-    assert!(rendered.contains(" bytes]"), "{rendered}");
+    assert!(
+        rendered.contains(" bytes]") || rendered.contains(" bytes omitted ...] "),
+        "{rendered}"
+    );
 }
 
 #[test]

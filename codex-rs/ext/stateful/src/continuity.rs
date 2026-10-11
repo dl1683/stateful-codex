@@ -10,6 +10,8 @@ use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
 use serde_json::json;
 
+use crate::continuity_excerpt::quote_excerpt;
+
 const WORLD_STATE_ID: &str = "stateful_continuity";
 pub(super) const START_MARKER: &str = "<stateful_continuity>";
 pub(super) const END_MARKER: &str = "</stateful_continuity>";
@@ -306,11 +308,14 @@ fn turn_block(turn: &CapturedTurn, latest_run_id: Option<&str>, limits: TurnShap
     };
     let mut block = format!("- {when}, {thread}, turn {turn_id}{status}, {run}:");
     if let Some(user) = &turn.user {
-        block.push_str(&format!("\n  User: {}", quote(user, limits.user)));
+        block.push_str(&format!("\n  User: {}", quote_excerpt(user, limits.user)));
     }
     match &turn.answer {
         Some(answer) => {
-            block.push_str(&format!("\n  Answer: {}", quote(answer, limits.answer)));
+            block.push_str(&format!(
+                "\n  Answer: {}",
+                quote_excerpt(answer, limits.answer)
+            ));
         }
         None => block.push_str("\n  Answer: none recorded."),
     }
@@ -341,7 +346,7 @@ fn run_line(run: &LatestRun, detail: RunDetail) -> String {
 
 /// JSON-quotes and markup-escapes `text`, shortened so the quote is at most `limit` bytes,
 /// with an explicit marker saying how much was shown.
-fn quote(text: &str, limit: usize) -> String {
+pub(super) fn quote(text: &str, limit: usize) -> String {
     let encode = |end: usize| escape(&serde_json::to_string(&text[..end]).unwrap_or_default());
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {

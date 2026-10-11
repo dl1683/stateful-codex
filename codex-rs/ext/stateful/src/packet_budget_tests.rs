@@ -60,7 +60,9 @@ use crate::world_state::project_world_state_section;
 /// strategy-supersession and root-relative path guidance to 13,866 (project 7,493); a
 /// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756). The
 /// Autonomous pure-answer outcome guidance took it to 14,333 (project 7,684, run 3,944).
-const MAX_FIXTURE_PACKET_BYTES: usize = 14_350;
+/// Head-and-tail excerpts fill the record's unchanged 3 KiB floor (2,705 to 3,068 bytes):
+/// 14,696.
+const MAX_FIXTURE_PACKET_BYTES: usize = 14_700;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010. The recall,
 /// truncated-rule, strategy and root-relative path guidance (field evidence from horizon2,

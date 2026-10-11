@@ -16,6 +16,7 @@ mod checkout;
 mod checkpoint;
 mod completion;
 mod continuity;
+mod continuity_excerpt;
 mod continuity_source;
 mod conversation_summaries;
 mod events;
