@@ -19,6 +19,7 @@
 mod path;
 mod remote;
 mod stateful;
+mod stateful_outcome;
 
 use std::error::Error;
 use std::fmt;
@@ -76,6 +77,8 @@ pub use crate::stateful::StatefulStartupError;
 pub use crate::stateful::prepare_stateful_startup;
 pub use crate::stateful::start_stateful_run;
 pub use crate::stateful::start_stateful_run_on_resumed_thread;
+pub use crate::stateful_outcome::OutcomeTrailerStream;
+pub use crate::stateful_outcome::visible_answer;
 
 /// Transitional access to core-only embedded app-server types.
 ///

@@ -57,6 +57,8 @@ impl ParsedAssistantMarkdown {
 }
 
 pub(crate) fn parse_assistant_markdown(markdown: &str, cwd: &Path) -> ParsedAssistantMarkdown {
+    // A trailing Stateful outcome block is protocol, never shown; the raw message keeps it.
+    let markdown = codex_app_server_client::visible_answer(markdown);
     let mut git_actions = Vec::new();
     let mut seen = HashSet::new();
     let mut visible_lines = Vec::new();
