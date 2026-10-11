@@ -348,7 +348,9 @@ class BixBenchRunnerTests(unittest.TestCase):
     def test_answered_run_is_not_a_completed_terminal_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             state_dir = Path(directory)
-            with closing(sqlite3.connect(state_dir / "stateful_runtime_1.sqlite")) as runtime:
+            with closing(
+                sqlite3.connect(state_dir / "stateful_runtime_1.sqlite")
+            ) as runtime:
                 runtime.executescript(
                     """
                     CREATE TABLE stateful_runs (
