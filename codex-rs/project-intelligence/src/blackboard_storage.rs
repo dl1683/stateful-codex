@@ -28,6 +28,9 @@ use crate::storage::HierarchyStoreError;
 use crate::storage::load_node;
 use crate::storage::unix_timestamp_millis;
 
+#[cfg(test)]
+#[path = "blackboard_storage/capsule_generation_tests.rs"]
+mod capsule_generation_tests;
 mod capture_write;
 mod context_bounds;
 mod current_words;
