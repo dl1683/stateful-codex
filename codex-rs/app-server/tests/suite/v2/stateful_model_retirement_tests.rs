@@ -166,7 +166,10 @@ pub(super) async fn snapshot(sqlite: &SqliteConfig) -> Result<Vec<Vec<String>>> 
     for table in tables {
         // Original turn observations commit independently of refused model mutations.
         // C2 source tests compare these tables too when no new native turn is submitted.
+        // The capsule eligibility generation is derived bookkeeping that every source
+        // observation advances; the semantic tables it summarizes are still compared.
         if [
+            "capsule_eligibility_generations",
             "capture_sources",
             "capture_source_chunks",
             "capture_source_terms",
