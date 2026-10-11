@@ -6,7 +6,7 @@ import {
 } from "./ask-route.mjs";
 import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
-import { applyWorkspaceEvent } from "./workspace-events.mjs";
+import { applyWorkspaceEvent, reconcileAskStream } from "./workspace-events.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
@@ -211,6 +211,7 @@ async function refreshWorkspace() {
   state.steering = steering.data;
   state.measurementSummary = measurementSummary.summary;
   state.activity = activity.data.reverse();
+  reconcileAskStream(state);
   state.loading = false;
   state.busyAction = null;
   render();

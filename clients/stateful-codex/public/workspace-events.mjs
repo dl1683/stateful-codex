@@ -60,11 +60,24 @@ export function applyWorkspaceEvent(state, message) {
     render = true;
   }
   if (
+    message.method === "item/started" &&
+    message.params?.item?.type === "agentMessage"
+  ) {
+    // A newer assistant message starts: it is the one now streaming.
+    state.liveItemId = message.params.item.id;
+    state.liveItemText = "";
+    render = true;
+  }
+  if (
     message.method === "item/completed" &&
     message.params?.item?.type === "agentMessage"
   ) {
     const { id, text } = message.params.item;
     state.completedAnswer = { id, text };
+    // A completion ends that stream; the completion of a different item means it is newer
+    // than an earlier stream whose completion was missed.
+    state.liveItemId = null;
+    state.liveItemText = "";
     render = true;
   }
   if (message.method === "turn/started") {
@@ -78,4 +91,18 @@ export function applyWorkspaceEvent(state, message) {
     render,
     refresh: reconnected || REFRESH_METHODS.test(message.method ?? ""),
   };
+}
+
+// After the thread's items are re-read (refresh, reconnect): a streaming item that the history
+// lists as completed is no longer streaming, so the latest completed answer shows. A stream the
+// history does not list yet is newer and is kept.
+export function reconcileAskStream(state) {
+  if (!state.liveItemId) return;
+  const listed = state.activity.some(
+    (entry) => (entry?.item ?? entry)?.id === state.liveItemId,
+  );
+  if (listed) {
+    state.liveItemId = null;
+    state.liveItemText = "";
+  }
 }
