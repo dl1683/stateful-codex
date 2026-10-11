@@ -341,3 +341,18 @@ The review budget is one implementation review plus one confirmation; a further 
 5. Honest "unknown / needs-check" freshness wording now. Broader freshness only when it blocks a journey.
 
 **Wording.** Correct the "new thread gives clean context" hint, since derivatives survive.
+
+### Hands-on fixes and order (council 2026-10-11g, Codex and Droid converged; sc_dogfood/council/council_20261011g_handson_FINAL.md)
+
+Each step is a separate freeze, with one review plus one confirmation and its own hands-on acceptance check:
+1. Gate the pushed head f097a8008. Repeat the passing controls on it (cold decision recall, current-rule application, Forget disclosure, the continuity banner).
+2. Origin plumbing. Legacy seals without a proven origin never gain user authority.
+3. Truthful memory presentation:
+   - "verified when recorded; current code not checked" freshness labels;
+   - proposals shown as "Awaiting review, not applied", with Apply only when applicable.
+4. Ask decision proposals: a settled choice in Ask is proposed from the same-turn sealed source.
+5. Explicit replacement: the model picks a `replaces {entryId, revision}` target, the host validates it, and Apply is atomic. No lexical inference.
+6. Close the slash-command submission escapes.
+7. E2, under its unchanged freeze, then immediately freeze E2-answers.
+8. Continuation probes, then the paired within1 run: 3 predeclared pairs, local compaction, cost decomposition.
+9. The narrow Codex → Droid → Codex journey with attributed decisions, rejections and replacement or retirement state.
