@@ -33,6 +33,7 @@ use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
+use serde_json::json;
 use wiremock::MockServer;
 
 const INSTRUCTION_LEAD: &str = "After the ordinary summary, append exactly one capsule trailer:";
@@ -657,4 +658,106 @@ async fn responses_lite_withholds_extraction() {
             completed: Vec::new(),
         }
     );
+}
+
+/// Waits for turn completion, keeping a debug rendering of every event on the way.
+async fn complete_turn(codex: &codex_core::CodexThread, events: &mut Vec<String>) {
+    wait_for_event(codex, |event| {
+        events.push(format!("{event:?}"));
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn split_or_malformed_trailer_never_reaches_history_rollout_or_events() {
+    skip_if_no_network!();
+    let (head, tail) = OPENING.split_at(12);
+    let payload = "{\"version\":1,\"records\":[],\"supersessions\":[]}";
+    let cases = [
+        (
+            "opening split across parts",
+            vec![
+                format!("{SUMMARY}\n{head}"),
+                format!("{tail}\n{payload}\n</capsule_sidecar_v1>"),
+            ],
+            format!("{OPENING}\n{payload}\n</capsule_sidecar_v1>"),
+        ),
+        (
+            "no newline after the opening",
+            vec![format!(
+                "{SUMMARY}\n{OPENING}{payload}\n</capsule_sidecar_v1>"
+            )],
+            format!("{OPENING}{payload}\n</capsule_sidecar_v1>"),
+        ),
+    ];
+    for (name, parts, expected_trailer) in cases {
+        let server = start_mock_server().await;
+        let content = parts
+            .iter()
+            .map(|text| json!({"type": "output_text", "text": text}))
+            .collect::<Vec<_>>();
+        let log = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_assistant_message("m0", "FIRST_REPLY"),
+                    ev_completed_with_tokens("r0", /*total_tokens*/ 80),
+                ]),
+                sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": {"type": "message", "role": "assistant", "id": "m1", "content": content}
+                    }),
+                    ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+                ]),
+                sse(vec![
+                    ev_assistant_message("m2", "AFTER"),
+                    ev_completed_with_tokens("r2", /*total_tokens*/ 120),
+                ]),
+            ],
+        )
+        .await;
+        let (codex, contributor) = build(&server, |_| {}).await;
+        let mut events = Vec::new();
+
+        submit(&codex, USER_MESSAGE).await;
+        codex.submit(Op::Compact).await.expect("compact");
+        complete_turn(&codex, &mut events).await;
+        codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "next".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await
+            .expect("submit turn");
+        complete_turn(&codex, &mut events).await;
+        codex.flush_rollout().await.expect("flush rollout");
+        let rollout = std::fs::read_to_string(codex.rollout_path().expect("rollout path"))
+            .expect("read rollout");
+
+        let requests = log.requests();
+        assert_eq!(requests.len(), 3, "{name}");
+        assert_summary_only(&requests[2]);
+        let leaked = |text: &str| text.contains("capsule_sidecar") || text.contains("marker-1");
+        // The installed summary is persisted and its events were observed, without the trailer.
+        assert!(rollout.contains(SUMMARY), "{name}: summary persisted");
+        assert!(!leaked(&rollout), "{name}: rollout");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.contains("RawResponseItem") && event.contains(SUMMARY)),
+            "{name}: summary raw event"
+        );
+        assert_eq!(
+            events.iter().filter(|event| leaked(event)).count(),
+            0,
+            "{name}: events"
+        );
+        assert_eq!(
+            contributor.observed().completed[0].2,
+            CompactionTrailer::Present(expected_trailer),
+            "{name}"
+        );
+    }
 }
