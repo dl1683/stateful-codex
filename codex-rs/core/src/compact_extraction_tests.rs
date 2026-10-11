@@ -242,18 +242,47 @@ fn separates_one_terminal_trailer_from_the_summary() {
 }
 
 #[test]
-fn quoted_opening_inside_a_line_is_not_a_trailer() {
-    let text = format!("The source said `{OPENING}` once.");
-    let mut output = vec![message("assistant", &[&text])];
+fn any_opening_occurrence_starts_the_trailer_even_across_parts_or_malformed() {
+    let (head, tail) = OPENING.split_at(10);
+    let split = vec![message(
+        "assistant",
+        &[
+            "Summary A.",
+            &format!(" More.\n{head}"),
+            &format!("{tail}\n{{}}"),
+            "rest",
+        ],
+    )];
+    let malformed = vec![message(
+        "assistant",
+        &[&format!("Summary B.\n{OPENING}{{}}")],
+    )];
+    let inline = vec![message(
+        "assistant",
+        &[&format!("Summary C quotes `{OPENING}` once.")],
+    )];
 
-    let separated = separate_trailer(&mut output, OPENING).expect("separable");
+    let results = [split, malformed, inline].map(|mut output| {
+        let separated = separate_trailer(&mut output, OPENING).expect("separable");
+        (separated, output)
+    });
 
     assert_eq!(
-        (separated, output),
-        (
-            CompactionTrailer::Absent,
-            vec![message("assistant", &[&text])]
-        )
+        results,
+        [
+            (
+                CompactionTrailer::Present(format!("{OPENING}\n{{}}rest")),
+                vec![message("assistant", &["Summary A.", " More."])],
+            ),
+            (
+                CompactionTrailer::Present(format!("{OPENING}{{}}")),
+                vec![message("assistant", &["Summary B."])],
+            ),
+            (
+                CompactionTrailer::Present(format!("{OPENING}` once.")),
+                vec![message("assistant", &["Summary C quotes `"])],
+            ),
+        ]
     );
 }
 
@@ -261,6 +290,7 @@ fn quoted_opening_inside_a_line_is_not_a_trailer() {
 fn ambiguous_or_summaryless_output_fails_the_attempt() {
     let repeated = format!("Summary\n{OPENING}\n{{}}\n{OPENING}\n{{}}");
     let summaryless = format!("{OPENING}\n{{}}");
+    let hidden_only = format!("<oai-mem-citation>doc</oai-mem-citation>{OPENING}\n{{}}");
     let earlier_message = vec![
         message("assistant", &[&format!("Summary\n{OPENING}\n{{}}")]),
         message("assistant", &["later"]),
@@ -268,6 +298,7 @@ fn ambiguous_or_summaryless_output_fails_the_attempt() {
     for mut output in [
         vec![message("assistant", &[&repeated])],
         vec![message("assistant", &[&summaryless])],
+        vec![message("assistant", &[&hidden_only])],
         earlier_message,
     ] {
         assert!(separate_trailer(&mut output, OPENING).is_err());

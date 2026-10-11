@@ -32,6 +32,8 @@ use codex_protocol::models::ResponseItem;
 use crate::compact::is_summary_message;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use crate::stream_events_utils::last_assistant_message_from_item;
+use crate::stream_events_utils::raw_assistant_output_text_from_item;
 
 /// One attempt's frozen request and the contributor addition it carries.
 pub(crate) struct CompactionExtraction {
@@ -305,66 +307,64 @@ fn source_origin(
     })
 }
 
-/// Splits the one trailer opening line out of the final assistant message's last text part.
-/// Several openings, an opening elsewhere, or no remaining summary fail the attempt.
+/// Cuts the trailer out of the final assistant message at any occurrence of the request-scoped
+/// opening, using the concatenated text native summary extraction reads, so an opening split
+/// across parts is still found. Everything from the opening on is removed whether or not its
+/// framing is valid; the validator judges the framing. Several openings, an opening outside the
+/// final assistant message, or no visible summary before it fail the attempt.
 pub(crate) fn separate_trailer(
     output: &mut [ResponseItem],
     opening: &str,
 ) -> CodexResult<CompactionTrailer> {
-    let mut found = Vec::new();
+    let failure = || CodexErr::Stream("compaction output has no separable summary".to_string());
+    let mut found = None;
     let mut last_assistant = None;
     for (item_index, item) in output.iter().enumerate() {
-        let ResponseItem::Message { role, content, .. } = item else {
+        let Some(text) = raw_assistant_output_text_from_item(item) else {
             continue;
         };
-        if role != "assistant" {
-            continue;
-        }
         last_assistant = Some(item_index);
-        for (part_index, part) in content.iter().enumerate() {
-            let ContentItem::OutputText { text } = part else {
-                continue;
-            };
-            for (position, _) in text.match_indices(opening) {
-                let end = position + opening.len();
-                let starts_line = position == 0 || text[..position].ends_with('\n');
-                let ends_line = end == text.len() || text[end..].starts_with(['\n', '\r']);
-                if starts_line && ends_line {
-                    found.push((item_index, part_index, position));
-                }
+        let mut positions = text.match_indices(opening).map(|(position, _)| position);
+        if let Some(position) = positions.next() {
+            if found.is_some() || positions.next().is_some() {
+                return Err(failure());
             }
+            found = Some((item_index, position));
         }
     }
-    let ambiguous = || CodexErr::Stream("compaction output has no separable summary".to_string());
-    let [(item_index, part_index, position)] = found.as_slice() else {
-        return if found.is_empty() {
-            Ok(CompactionTrailer::Absent)
-        } else {
-            Err(ambiguous())
+    let Some((item_index, position)) = found else {
+        return Ok(CompactionTrailer::Absent);
+    };
+    if last_assistant != Some(item_index) {
+        return Err(failure());
+    }
+    let ResponseItem::Message { content, .. } = &mut output[item_index] else {
+        return Err(failure());
+    };
+    // Map the concatenated offset back to the part holding it; drop every later part.
+    let mut trailer = String::new();
+    let mut offset = 0;
+    let mut cut = None;
+    for (part_index, part) in content.iter_mut().enumerate() {
+        let ContentItem::OutputText { text } = part else {
+            continue;
         };
-    };
-    if last_assistant != Some(*item_index) {
-        return Err(ambiguous());
+        if cut.is_some() {
+            trailer.push_str(text);
+        } else if offset + text.len() > position {
+            trailer = text.split_off(position - offset);
+            cut = Some(part_index);
+        } else {
+            offset += text.len();
+        }
     }
-    let ResponseItem::Message { content, .. } = &mut output[*item_index] else {
-        return Err(ambiguous());
-    };
-    let is_last_text = content[part_index + 1..]
-        .iter()
-        .all(|part| !matches!(part, ContentItem::OutputText { .. }));
-    let ContentItem::OutputText { text } = &mut content[*part_index] else {
-        return Err(ambiguous());
-    };
-    if !is_last_text {
-        return Err(ambiguous());
+    let cut = cut.ok_or_else(failure)?;
+    content.truncate(cut + 1);
+    if let Some(ContentItem::OutputText { text }) = content.last_mut() {
+        text.truncate(text.trim_end().len());
     }
-    let trailer = text.split_off(*position);
-    text.truncate(text.trim_end().len());
-    let has_summary = content
-        .iter()
-        .any(|part| matches!(part, ContentItem::OutputText { text } if !text.trim().is_empty()));
-    if !has_summary {
-        return Err(ambiguous());
+    if last_assistant_message_from_item(&output[item_index], /*plan_mode*/ false).is_none() {
+        return Err(failure());
     }
     Ok(if trailer.len() > MAX_COMPACTION_EXTRACTION_TRAILER_BYTES {
         CompactionTrailer::Oversize
