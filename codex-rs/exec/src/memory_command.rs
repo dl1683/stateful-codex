@@ -207,7 +207,7 @@ pub(crate) async fn run(client: &InProcessAppServerClient, args: MemoryArgs) -> 
 /// the next-turn contract and points at a new thread for a clean context.
 fn forget_receipt(response: &StatefulMemoryForgetResponse) -> String {
     format!(
-        "Forgot {}@{}. It stays in history but no longer applies. Forget takes effect from the next turn: no new read, root, digest or new thread admits the content. Content already delivered into a thread's conversation (including tool results, hook copies and compaction summaries of them) remains in that thread's history; start a new thread for a clean context.
+        "Forgot {}@{}. It stays in history but no longer applies. Forget removes the entry from memory reads, the session-start memory and the digest. Text the agent already wrote into its own run notes, strategy or findings before the Forget, and earlier messages in existing threads, are derivatives and are not removed.
 Start a new thread for a clean context.",
         response.entry_id, response.revision
     )

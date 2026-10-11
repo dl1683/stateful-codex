@@ -113,7 +113,7 @@ The model's Stateful memory tools (`blackboard_query`, `memory_read`,
 `evidence_read`, `context_map_query`) return the user's own rules, decisions,
 notes and the relations they recorded, with attribution, and proposals the user
 applied within the Apply bound; unapplied proposals stay out. Each read checks
-eligibility when it runs. Forget takes effect from the next turn: no new read, root, digest or new thread admits the content. Content already delivered into a thread's conversation (including tool results, hook copies and compaction summaries of them) remains in that thread's history; start a new thread for a clean context. Nested Code Mode cannot call these reads. `statefulMemory/read` remains
+eligibility when it runs. Forget removes the entry from memory reads, the session-start memory and the digest. Text the agent already wrote into its own run notes, strategy or findings before the Forget, and earlier messages in existing threads, are derivatives and are not removed. Nested Code Mode cannot call these reads. `statefulMemory/read` remains
 the user's `/memory` view.
 
 These rules govern the model's memory tools only. They are not a boundary against
