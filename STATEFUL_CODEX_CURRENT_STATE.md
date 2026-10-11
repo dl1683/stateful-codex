@@ -206,14 +206,26 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   | tui | 5,579/5,583 | Windows-local, outside the stack |
   | app-server | 1,830/1,864 | Windows-local base set; no Stateful test failed |
 
-  **OPEN:** run the cloud gate on the pushed head once gcloud auth is back.
+  **Cloud gate on the pushed head (`f097a8008`):** 0 new failures caused by the
+  stack (3 known base core failures; one app-server login-callback flake that
+  passes on rerun).
   **Named limitation:** the agent's own copies of user words survive Forget, as
   derivatives. Example: a rule containing "credential MARA-QX704" is forgotten,
   but a strategy it wrote, "Continue release checks with credential MARA-QX704.",
   still shows.
   **OPEN defect:** capture seals host text as the user's words. That covers
-  realtime delegation, heartbeat prompts and /init. The fix is the origin
-  plumbing slice, which is next.
+  realtime delegation, heartbeat prompts and /init.
+  **Origin plumbing: CUT (2026-10-11).** Three review rounds; the final
+  review returned STOP/CUT. The server, core and capture half passed static
+  review (per-input origin, downgrade-only `hostGenerated`, capture seals only
+  User). The TUI half did not: the composer-level fail-closed rule still let
+  host or restored text reach a User submission through slash-command
+  arguments and queued slash fallbacks, kill-buffer reinsertion, completion
+  insertion and long recovered question drafts. The patches are archived in
+  `sc_dogfood/integrate/wip/origin_final/` (14 patches, base `73d97824a`) and the
+  review is in `sc_dogfood/integrate/reviews/origin_rework_review.md`. A future
+  attempt should carry provenance per inserted span, not per draft, and can land
+  the additive server half first with capture unchanged.
 
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
