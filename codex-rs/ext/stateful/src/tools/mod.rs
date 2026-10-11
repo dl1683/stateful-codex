@@ -7,6 +7,7 @@ mod blackboard_supersede;
 mod blackboard_update;
 mod blackboard_write;
 mod context_map;
+mod entry_attribution;
 mod entry_read;
 mod evidence;
 mod memory_read;

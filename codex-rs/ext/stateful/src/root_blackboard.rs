@@ -541,27 +541,36 @@ fn render_hit(
 /// declaration or applied from a proposal: ` said=2026-10-09T14:03Z by=user`. Other entries,
 /// and entries whose time is unknown, render nothing (unknown is never stamped with a time).
 fn said_by_user(context: Option<&codex_project_intelligence::KnowledgeContext>) -> String {
+    user_statement(context)
+        .map(|statement| format!(" said={} by={}", statement.said, statement.by))
+        .unwrap_or_default()
+}
+
+/// Who stated an entry the user declared or applied, when it was said (`unknown` unless the
+/// host observed it) and, for an applied proposal, when the user adopted it.
+pub(crate) struct UserStatement {
+    pub(crate) by: &'static str,
+    pub(crate) said: String,
+    pub(crate) adopted: Option<String>,
+}
+
+pub(crate) fn user_statement(
+    context: Option<&codex_project_intelligence::KnowledgeContext>,
+) -> Option<UserStatement> {
     use codex_project_intelligence::KnowledgeAuthority;
     use codex_project_intelligence::SourceTime;
     use codex_project_intelligence::TemporalContext;
-    let Some(context) =
-        context.filter(|context| context.authority == KnowledgeAuthority::HumanDirect)
-    else {
-        return String::new();
-    };
-    let Some(payload) = context
+    let context = context.filter(|context| context.authority == KnowledgeAuthority::HumanDirect)?;
+    let payload = context
         .payload
         .as_deref()
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
-    else {
-        return String::new();
-    };
-    let how = if payload.get("admission").is_some() {
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())?;
+    let by = if payload.get("admission").is_some() {
         "user"
     } else if payload.get("promotion").is_some() {
         "user (applied)"
     } else {
-        return String::new();
+        return None;
     };
     let said = payload
         .get("temporal")
@@ -572,11 +581,14 @@ fn said_by_user(context: Option<&codex_project_intelligence::KnowledgeContext>) 
             SourceTime::Unknown | SourceTime::Attributed { .. } => None,
         })
         .unwrap_or_else(|| "unknown".to_string());
-    format!(" said={said} by={how}")
+    let adopted = payload["promotion"]["promotedAtMs"]
+        .as_i64()
+        .and_then(utc_minute);
+    Some(UserStatement { by, said, adopted })
 }
 
 /// `YYYY-MM-DDTHH:MMZ` for a Unix millisecond time (proleptic Gregorian, UTC).
-fn utc_minute(unix_ms: i64) -> Option<String> {
+pub(crate) fn utc_minute(unix_ms: i64) -> Option<String> {
     let minutes = unix_ms.div_euclid(60_000);
     let days = minutes.div_euclid(1_440);
     let minute_of_day = minutes.rem_euclid(1_440);

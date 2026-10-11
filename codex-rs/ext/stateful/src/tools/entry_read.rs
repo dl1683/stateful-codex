@@ -32,6 +32,7 @@ pub(super) async fn read(
     {
         return Err(FunctionCallError::RespondToModel("entry revision changed or continuation has no expectedEntryRevision; restart at contentOffset=0".to_string()));
     }
+    let attribution = super::entry_attribution::attribution(store, project_id, &entry).await;
     let words = &entry.value.content;
     if offset > words.len() || !words.is_char_boundary(offset) {
         return Err(FunctionCallError::RespondToModel(
@@ -39,7 +40,7 @@ pub(super) async fn read(
         ));
     }
     let envelope = |end| {
-        let result = json!({
+        let mut result = json!({
             "entryId": entry.id.to_string(), "revision": entry.revision,
             "state": entry.state, "source": entry.value.provenance,
             "contentOffset": offset, "content": &words[offset..end],
@@ -47,6 +48,9 @@ pub(super) async fn read(
             "complete": end == words.len(),
             "coverage": "exact stored words only; current applicability and verification are not asserted"
         });
+        if let Some(attribution) = &attribution {
+            result["attribution"] = attribution.clone();
+        }
         result
     };
     let mut end = offset;

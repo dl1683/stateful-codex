@@ -271,6 +271,13 @@ impl BlackboardQueryTool {
             let root_alias = visible_root
                 .as_ref()
                 .and_then(|visible| visible.alias_for(hit.entry.id.as_str(), hit.entry.revision));
+            let attribution = match root_alias {
+                Some(_) => None,
+                None => {
+                    super::entry_attribution::attribution(blackboard, &self.project_id, &hit.entry)
+                        .await
+                }
+            };
             let mut item = if let Some(root_alias) = root_alias {
                 json!({
                     "entryId": hit.entry.id.to_string(),
@@ -329,6 +336,9 @@ impl BlackboardQueryTool {
                     })).collect::<Vec<_>>(),
                 })
             };
+            if let Some(attribution) = attribution {
+                item["attribution"] = attribution;
+            }
             if evidence_query && root_alias.is_none() {
                 let serde_json::Value::Object(item) = &mut item else {
                     unreachable!("static blackboard query item should be an object");

@@ -378,7 +378,7 @@ async fn entry_item(
             })
         })
         .collect::<Vec<_>>();
-    json!({
+    let mut item = json!({
         "entryId": hit.entry.id.to_string(),
         "kind": value.kind,
         "status": current_status(hit),
@@ -391,7 +391,13 @@ async fn entry_item(
         "relations": relations,
         "relationsOmitted": hit.relations.len().saturating_sub(MAX_RELATIONS_PER_ENTRY),
         "evidence": evidence,
-    })
+    });
+    if let Some(attribution) =
+        super::entry_attribution::attribution(store, project_id, &hit.entry).await
+    {
+        item["attribution"] = attribution;
+    }
+    item
 }
 
 /// How many distinct terms `text` mentions.
