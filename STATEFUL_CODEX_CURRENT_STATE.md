@@ -180,6 +180,41 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   answered. The journal and epoch foundation step replaces this with a
   first-class status through an additive migration.
 
+- **Stack pushed 2026-10-11 on local evidence only** (stateful/main `ebac34e91` to
+  this commit; the user approved pushing without the cloud gate while gcloud
+  auth was unavailable). It contains:
+  - capsule stage (a): an eligibility generation, a projection store and a
+    publication ticket, inactive;
+  - the structural working-set floor and its offline driver, inactive;
+  - the piggyback stages and their revert, so their net effect is zero;
+  - reads slice E1, under this contract: "Forget removes the entry from memory
+    reads, the session-start memory and the digest. Text the agent already wrote
+    into its own run notes, strategy or findings before the Forget, and earlier
+    messages in existing threads, are derivatives and are not removed.";
+  - the Forget receipt hint;
+  - a continuity fix that reports withheld turns as withheld rather than as
+    unreadable history;
+  - the plan docs.
+
+  Local tests at the frozen head (Windows):
+
+  | Crate | Result | Failures |
+  | --- | --- | --- |
+  | project-intelligence | 144/144 | none |
+  | stateful-extension | 235/236 | known fan-in timeout |
+  | exec | 134/136 | load timeouts |
+  | tui | 5,579/5,583 | Windows-local, outside the stack |
+  | app-server | 1,830/1,864 | Windows-local base set; no Stateful test failed |
+
+  **OPEN:** run the cloud gate on the pushed head once gcloud auth is back.
+  **Named limitation:** the agent's own copies of user words survive Forget, as
+  derivatives. Example: a rule containing "credential MARA-QX704" is forgotten,
+  but a strategy it wrote, "Continue release checks with credential MARA-QX704.",
+  still shows.
+  **OPEN defect:** capture seals host text as the user's words. That covers
+  realtime delegation, heartbeat prompts and /init. The fix is the origin
+  plumbing slice, which is next.
+
 The table below describes the branch tips as paused; rows are consumed as their
 checkpoints land.
 
