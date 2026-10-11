@@ -27,7 +27,7 @@ use crate::source_freshness::audited_verification;
 use crate::source_freshness::observe_evidence;
 use crate::visible_root::VisibleRootRegistry;
 
-use super::MAX_RESPONSE_BYTES;
+use super::MAX_MEMORY_READ_BYTES;
 use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
@@ -145,7 +145,7 @@ impl BlackboardQueryTool {
                 id,
                 expected_entry_revision,
                 content_offset.unwrap_or_default(),
-                call.response_byte_budget(MAX_RESPONSE_BYTES),
+                call.response_byte_budget(MAX_MEMORY_READ_BYTES),
             )
             .await
             .map_err(|error| match error {
@@ -255,7 +255,7 @@ impl BlackboardQueryTool {
                 .map(|_| visible),
             None => None,
         };
-        let byte_budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let byte_budget = call.response_byte_budget(MAX_MEMORY_READ_BYTES);
         let hit_count = result.data.len();
         let mut data = Vec::new();
         let mut truncated = result.truncated;

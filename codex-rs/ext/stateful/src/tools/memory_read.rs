@@ -33,7 +33,7 @@ use serde_json::json;
 
 use crate::services::ProjectIntelligenceServices;
 
-use super::MAX_RESPONSE_BYTES;
+use super::MAX_MEMORY_READ_BYTES;
 use super::bounded_json_output;
 use super::fits_response;
 use super::parse_arguments;
@@ -116,7 +116,7 @@ impl MemoryReadTool {
             .knowledge(store, &terms, since_ms, include_history)
             .await?;
 
-        let budget = call.response_byte_budget(MAX_RESPONSE_BYTES);
+        let budget = call.response_byte_budget(MAX_MEMORY_READ_BYTES);
         let mut result = json!({
             "answeredFrom": "the project store (no model call): recorded project knowledge with its status and history",
             "entries": [],
@@ -555,4 +555,4 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
 
 #[cfg(test)]
 #[path = "memory_read_tests.rs"]
-mod tests;
+pub(super) mod tests;

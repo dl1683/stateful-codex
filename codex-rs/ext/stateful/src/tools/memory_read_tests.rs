@@ -216,7 +216,7 @@ fn excerpts_stay_centred_when_lowercasing_changes_byte_lengths() {
     assert!(cut.contains("The decision: hints are opt-in."), "{cut}");
 }
 
-fn decision(
+pub(in crate::tools) fn decision(
     node_id: &codex_project_intelligence::HierarchyNodeId,
     content: &str,
 ) -> codex_project_intelligence::NewBlackboardEntry {

@@ -35,6 +35,10 @@ use crate::visible_root::VisibleRootRegistry;
 /// Serialized bound for every Stateful tool result: one UTF-8 byte is the worst case per
 /// token, so 9,000 bytes stays under the 10K-token model item limit with framing room.
 const MAX_RESPONSE_BYTES: usize = MAX_MODEL_ITEM_BYTES;
+/// Serialized bound for a memory read (`blackboard_query` in every mode, `memory_read`): the
+/// read envelope of the restored-reads design. One UTF-8 byte is the worst case per token, so a
+/// result is at most 8,192 tokens and, for prose and JSON, typically about a quarter of that.
+const MAX_MEMORY_READ_BYTES: usize = 8_192;
 /// Serialized bound for one error string inside a result receipt.
 const MAX_RECEIPT_ERROR_BYTES: usize = 240;
 /// Serialized bound for a decoding diagnostic echoed to the model. Serde diagnostics can
@@ -352,6 +356,10 @@ mod provider_call_id_tests;
 #[cfg(test)]
 #[path = "schema_portability_tests.rs"]
 mod schema_portability_tests;
+
+#[cfg(test)]
+#[path = "memory_read_cap_tests.rs"]
+mod memory_read_cap_tests;
 
 #[cfg(test)]
 #[path = "capture_repair_tests.rs"]
