@@ -211,16 +211,12 @@ pub(super) fn server_notification_thread_target(
                 None => return ServerNotificationThreadTarget::AppScoped,
             }
         }
-        // Project-scoped Stateful notifications carry no thread; the Stateful UI decides
-        // whether one belongs to the displayed thread.
         ServerNotification::ProjectChanged(_)
         | ServerNotification::StatefulRunUpdated(_)
         | ServerNotification::ObligationUpdated(_)
         | ServerNotification::SteeringUpdated(_)
-        | ServerNotification::BlackboardUpdated(_) => {
-            return ServerNotificationThreadTarget::AppScoped;
-        }
-        ServerNotification::SkillsChanged(_)
+        | ServerNotification::BlackboardUpdated(_)
+        | ServerNotification::SkillsChanged(_)
         | ServerNotification::AccountUpdated(_)
         | ServerNotification::GatewayOAuthChanged(_)
         | ServerNotification::AccountRateLimitsUpdated(_)

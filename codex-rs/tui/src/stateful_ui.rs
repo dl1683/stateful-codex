@@ -135,11 +135,8 @@ pub(crate) async fn handle_app_scoped_notification(
         ServerNotification::StatefulRunUpdated(notification) => {
             let result = read_run(&request_handle, &notification.run_id).await;
             match result {
-                // Only the notification of the run's current revision renders it, so a burst
-                // of updates read after the run ended shows its outcome once.
                 Ok(Some(run))
-                    if run.revision == notification.revision
-                        && run_is_for_thread(&run, primary_thread_id)
+                    if run_is_for_thread(&run, primary_thread_id)
                         && is_terminal_status(run.status) =>
                 {
                     app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
