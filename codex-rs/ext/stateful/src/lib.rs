@@ -625,8 +625,8 @@ impl ToolContributor for StatefulExtension {
         ) else {
             return Vec::new();
         };
-        // Tools are built per step, after the turn bound itself to the thread's open run.
-        let run_tools = if thread_store.get::<autonomy::ActiveRunTurn>().is_some() {
+        // Tools are built per step, after the turn start recorded whether the thread has a run.
+        let run_tools = if thread_store.get::<autonomy::RunAttached>().is_some() {
             tools::RunTools::Offered
         } else {
             tools::RunTools::Hidden

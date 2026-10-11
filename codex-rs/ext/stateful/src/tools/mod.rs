@@ -42,8 +42,8 @@ const MAX_RECEIPT_ERROR_BYTES: usize = 240;
 const MAX_DECODE_ERROR_BYTES: usize = 640;
 
 /// Whether the run-bound tools (obligation, run update and read, acceptance, steering) are
-/// offered. A thread without an open run gets only the project tools, so nothing it does can
-/// move a run's lifecycle.
+/// offered. A thread that never had a run (Ask) gets only the project tools, so nothing it
+/// does can move a run's lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RunTools {
     Offered,

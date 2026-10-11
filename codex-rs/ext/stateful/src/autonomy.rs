@@ -87,10 +87,13 @@ pub struct AutonomousContinuation {
     pub(crate) admission: RunAdmissionFence,
 }
 
-/// The open run the thread's current turn was bound to when it started; absent on a thread
-/// without an open run.
+/// Marks a thread that has, or had, a run when its current turn started: only such a thread
+/// is offered the run-bound tools. An Ask thread never has a run, so it never gets them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RunAttached;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ActiveRunTurn {
+struct ActiveRunTurn {
     run_id: StatefulRunId,
     turn_id: String,
 }
@@ -279,12 +282,14 @@ impl TurnLifecycleContributor for StatefulExtension {
                 self.services.as_ref(),
             ) else {
                 input.thread_store.remove::<ActiveRunTurn>();
+                input.thread_store.remove::<RunAttached>();
                 return;
             };
             let store = match services.runtime().await {
                 Ok(store) => store,
                 Err(error) => {
                     input.thread_store.remove::<ActiveRunTurn>();
+                    input.thread_store.remove::<RunAttached>();
                     tracing::warn!(%error, "failed to open Stateful run store at turn start");
                     return;
                 }
@@ -298,12 +303,28 @@ impl TurnLifecycleContributor for StatefulExtension {
                         run_id: run.id,
                         turn_id: input.turn_id.to_string(),
                     });
+                    input.thread_store.insert(RunAttached);
                 }
                 Ok(_) => {
                     input.thread_store.remove::<ActiveRunTurn>();
+                    // A thread whose run ended keeps the run tools, so it can still read
+                    // that run (for example its paged result).
+                    match store.thread_has_run(&thread.thread_id).await {
+                        Ok(true) => {
+                            input.thread_store.insert(RunAttached);
+                        }
+                        Ok(false) => {
+                            input.thread_store.remove::<RunAttached>();
+                        }
+                        Err(error) => {
+                            input.thread_store.remove::<RunAttached>();
+                            tracing::warn!(%error, "failed to read the thread's run history");
+                        }
+                    }
                 }
                 Err(error) => {
                     input.thread_store.remove::<ActiveRunTurn>();
+                    input.thread_store.remove::<RunAttached>();
                     tracing::warn!(
                         thread_id = %thread.thread_id,
                         %error,

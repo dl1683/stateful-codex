@@ -1,4 +1,5 @@
-//! Read-only run attribution used to label captured turns with the run that owned them.
+//! Read-only run history of a thread: whether it ever had a run, and the run that owned each
+//! captured turn.
 
 use sqlx::FromRow;
 
@@ -26,6 +27,17 @@ struct StoredTurnRun {
 }
 
 impl StatefulRunStore {
+    /// Whether `thread_id` was ever bound to a run, in any status.
+    pub async fn thread_has_run(&self, thread_id: &str) -> Result<bool, StatefulRunStoreError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(SELECT 1 FROM stateful_run_threads WHERE thread_id = ?)",
+        )
+        .bind(thread_id)
+        .fetch_one(&self.pool)
+        .await?
+            != 0)
+    }
+
     /// The recorded run of each finished turn of `thread_id`, newest first.
     pub async fn turn_runs_for_thread(
         &self,

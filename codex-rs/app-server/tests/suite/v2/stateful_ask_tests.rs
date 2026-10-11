@@ -1,6 +1,7 @@
-//! Ask: a project-attached thread without a run gets the project's memory but no run-bound
-//! tool and no run guidance, so nothing it does can move a run's lifecycle. A thread with an
-//! open run keeps every tool.
+//! Ask: a project-attached thread that never had a run gets the project's memory but no
+//! run-bound tool and no run guidance, so nothing it does can move a run's lifecycle. A thread
+//! with a run keeps every tool (also after the run ended, so it can still read that run; the
+//! paged-result tests in stateful_run.rs cover that).
 
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
