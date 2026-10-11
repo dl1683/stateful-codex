@@ -306,7 +306,7 @@ fn withheld_turns_are_not_reported_as_unreadable_history() {
     let rendered = continuity.render(MAX_FRAGMENT_BYTES);
     assert!(!rendered.contains("could not be read"), "{rendered}");
     assert!(
-        rendered.contains("2 turns or turn fields withheld because memory changed"),
+        rendered.contains("2 turns or turn fields withheld by memory eligibility checks"),
         "{rendered}"
     );
 }

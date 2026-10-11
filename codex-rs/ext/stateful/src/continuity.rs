@@ -237,7 +237,7 @@ impl ContinuityRecord {
         }
         if self.withheld > 0 {
             notes.push(format!(
-                "{} turns or turn fields withheld because memory changed",
+                "{} turns or turn fields withheld by memory eligibility checks",
                 self.withheld
             ));
         }
