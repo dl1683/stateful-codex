@@ -3,4 +3,4 @@ source: tui/src/app/tests/memory_results_tests.rs
 expression: "cell.display_lines(200).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\n\").replace(added.item.entry_id.as_str(),\n\"<entry>\")"
 ---
 • Forgot <entry>@1 It stays in history but no longer applies. Forget removes the entry from memory reads, the session-start memory and the digest. Text the agent already wrote into its own run notes, strategy or findings before the Forget, and earlier messages in existing threads, are derivatives and are not removed. Run /memory refresh to update the list.
-  Start a new thread for a clean context.
+  A new thread starts without this conversation's history; notes the agent already wrote are not removed.

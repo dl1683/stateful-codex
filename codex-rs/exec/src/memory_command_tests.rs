@@ -45,7 +45,7 @@ fn forget_receipt_says_when_it_takes_effect() {
             revision: 3,
         }),
         "Forgot rule-1@3. It stays in history but no longer applies. Forget removes the entry from memory reads, the session-start memory and the digest. Text the agent already wrote into its own run notes, strategy or findings before the Forget, and earlier messages in existing threads, are derivatives and are not removed.
-Start a new thread for a clean context."
+A new thread starts without this conversation's history; notes the agent already wrote are not removed."
     );
 }
 
