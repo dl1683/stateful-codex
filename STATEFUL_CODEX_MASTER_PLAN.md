@@ -304,3 +304,13 @@ The contract: "Forget takes effect from the next turn. Within the current turn, 
 - The in-turn route is a named limitation.
 
 Gate: the frozen restricted-read within1 baseline, re-run with reads restored, paired against plain.
+
+### Forget contract amendment for restored reads (2026-10-11)
+
+E1 review 4 reproduced agent-authored durable text carrying copies of user memory: run strategy, next items, findings. The repair cap is reached.
+
+Contract for this slice: Forget removes the entry from memory reads, the session-start root and the digest.
+- Derivatives are not removed: text the agent wrote into its own run notes, strategy or findings before the Forget, and earlier messages in existing threads.
+- This is stated on the receipts.
+
+Literal-overlap withholding for derivatives moves to the successor Forget lifecycle.
