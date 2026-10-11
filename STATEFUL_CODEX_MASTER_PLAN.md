@@ -356,3 +356,15 @@ Each step is a separate freeze, with one review plus one confirmation and its ow
 7. E2, under its unchanged freeze, then immediately freeze E2-answers.
 8. Continuation probes, then the paired within1 run: 3 predeclared pairs, local compaction, cost decomposition.
 9. The narrow Codex → Droid → Codex journey with attributed decisions, rejections and replacement or retirement state.
+
+### Origin cut; ship-first order (step-backs 2026-10-11h and 2026-10-11i)
+
+Origin plumbing was CUT after 3 reviews: composer bypasses kept appearing, and provenance per span would be needed. The C4-C6 host-text-authority risk is instead closed for FUTURE rules by step 3: rule activation becomes explicit-Apply-only. Legacy auto-admitted rules get a read-time "saved automatically (not reviewed)" label. E2 attribution stays open.
+
+Order:
+1. **3b:** the final message must carry the deliverable. Land it first and re-measure on the ladder tasks.
+2. **Lean 3a:** explicit activation, an Apply route, truthful receipts and the history framing; the F1 whole-message fallback is allowed.
+3. **The capture usefulness trial**, which selects the next step: Ask proposals or replacement.
+4. **3c and the slash fixes** land when ready.
+5. **Bounded within1** and the **narrow cross-app journey**, once decisions, retirement and replacement behave.
+6. **E2** after attribution has an accepted solution.
