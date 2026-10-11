@@ -102,6 +102,11 @@ pub use memory_receipts::ReceiptMember;
 pub use memory_receipts::ReceiptStatus;
 pub use memory_receipts::apply_proposal;
 pub use memory_receipts::undo_receipt;
+/// Offline measurement entry point of the inactive working-set capsule.
+pub use working_set::OfflineCapsule;
+pub use working_set::OfflineCapsuleInput;
+pub use working_set::OfflineFileWitness;
+pub use working_set::offline_capsule;
 
 /// Bytes of Stateful developer content a fresh context window carries across the project
 /// packet, the run packet and the conversation record (about 3k tokens).

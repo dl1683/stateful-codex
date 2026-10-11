@@ -10,6 +10,7 @@
 
 mod commands;
 mod grammar;
+mod offline;
 mod reduce;
 mod render;
 mod retain;
@@ -20,6 +21,11 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use working_files::FileWitness;
+
+pub use offline::OfflineCapsule;
+pub use offline::OfflineCapsuleInput;
+pub use offline::OfflineFileWitness;
+pub use offline::offline_capsule;
 
 /// Version of the finite extraction grammar and payload schema; a change invalidates caches.
 pub(crate) const GRAMMAR_VERSION: u32 = 1;
@@ -248,6 +254,9 @@ mod commands_tests;
 #[cfg(test)]
 #[path = "grammar_tests.rs"]
 mod grammar_tests;
+#[cfg(test)]
+#[path = "offline_tests.rs"]
+mod offline_tests;
 #[cfg(test)]
 #[path = "reduce_tests.rs"]
 mod reduce_tests;
