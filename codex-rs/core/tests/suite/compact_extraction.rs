@@ -26,14 +26,16 @@ use core_test_support::responses::ev_completed_with_tokens;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_failed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
+use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use wiremock::MockServer;
 
-const INSTRUCTION: &str = "Append the sidecar after the summary.";
+const INSTRUCTION_LEAD: &str = "After the ordinary summary, append exactly one capsule trailer:";
 const OPENING: &str = "<capsule_sidecar_v1 request=\"host-marker-1\">";
 const USER_MESSAGE: &str = "Use SQLite because the tool runs offline.";
 const SUMMARY: &str = "Native summary prose.";
@@ -55,7 +57,7 @@ impl CompactionExtractionContributor for RecordingExtraction {
             .expect("prepared lock")
             .push(request.attempt);
         Some(CompactionExtractionPreparation {
-            instruction: INSTRUCTION.to_string(),
+            instruction: instruction(),
             trailer_opening: OPENING.to_string(),
         })
     }
@@ -119,6 +121,16 @@ fn local_provider(server: &MockServer) -> ModelProviderInfo {
     provider
 }
 
+/// The real addition shape: it names the request's own delimiter and schema.
+fn instruction() -> String {
+    format!(
+        "{INSTRUCTION_LEAD}
+{OPENING}
+{{\"version\":1,\"records\":[],\"supersessions\":[]}}
+</capsule_sidecar_v1>"
+    )
+}
+
 fn trailer() -> String {
     format!(
         "{OPENING}\n{{\"version\":1,\"records\":[],\"supersessions\":[]}}\n</capsule_sidecar_v1>"
@@ -134,7 +146,7 @@ fn assert_augmented(request: &ResponsesRequest) {
     let user_texts = request.message_input_texts("user");
     assert_eq!(
         user_texts[user_texts.len() - 2..].to_vec(),
-        vec![SUMMARIZATION_PROMPT.to_string(), INSTRUCTION.to_string()]
+        vec![SUMMARIZATION_PROMPT.to_string(), instruction()]
     );
 }
 
@@ -146,7 +158,7 @@ fn assert_summary_only(request: &ResponsesRequest) {
         "summary must be installed"
     );
     assert!(!request.body_contains_text("capsule_sidecar_v1"));
-    assert!(!request.body_contains_text(INSTRUCTION));
+    assert!(!request.body_contains_text(INSTRUCTION_LEAD));
 }
 
 async fn submit(codex: &codex_core::CodexThread, text: &str) {
@@ -164,19 +176,57 @@ async fn build(
     server: &MockServer,
     configure: impl FnOnce(&mut codex_core::config::Config) + Send + 'static,
 ) -> (Arc<codex_core::CodexThread>, Arc<RecordingExtraction>) {
+    build_from(server, test_codex().with_config(configure)).await
+}
+
+async fn build_from(
+    server: &MockServer,
+    builder: TestCodexBuilder,
+) -> (Arc<codex_core::CodexThread>, Arc<RecordingExtraction>) {
     let contributor = Arc::new(RecordingExtraction::default());
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.compaction_extraction_contributor(contributor.clone());
     let provider = local_provider(server);
-    let mut builder = test_codex()
+    let mut builder = builder
         .with_extensions(Arc::new(extensions.build()))
         .with_config(move |config| {
             config.model_provider = provider;
             config.compact_prompt = Some(SUMMARIZATION_PROMPT.to_string());
-            configure(config);
         });
-    let codex = builder.build(server).await.expect("build codex").codex;
+    let codex = builder
+        .build_with_auto_env(server)
+        .await
+        .expect("build codex")
+        .codex;
     (codex, contributor)
+}
+
+/// Every frozen source part names the text at that position of the captured wire request.
+fn assert_positions_match_wire(contributor: &RecordingExtraction, request: &ResponsesRequest) {
+    let completed = contributor.completed.lock().expect("completed lock");
+    let input = request.input();
+    let mismatched = completed[0]
+        .request
+        .parts
+        .iter()
+        .filter(|part| {
+            input[part.item_index]["content"][part.part_index]["text"].as_str()
+                != Some(part.text.as_str())
+        })
+        .map(|part| (part.item_index, part.part_index))
+        .collect::<Vec<_>>();
+    assert_eq!(mismatched, Vec::<(usize, usize)>::new());
+}
+
+/// Assistant source texts with whether the host proved their published identity.
+fn assistant_origins(contributor: &RecordingExtraction) -> Vec<(String, bool)> {
+    contributor.completed.lock().expect("completed lock")[0]
+        .request
+        .parts
+        .iter()
+        .filter(|part| part.class == CompactionSourceClass::Assistant)
+        .map(|part| (part.text.clone(), part.origin.is_some()))
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -210,9 +260,10 @@ async fn manual_compaction_separates_trailer_and_reports_the_frozen_request() {
 
     let requests = log.requests();
     assert_eq!(requests.len(), 3);
-    assert!(!requests[0].body_contains_text(INSTRUCTION));
+    assert!(!requests[0].body_contains_text(INSTRUCTION_LEAD));
     assert_augmented(&requests[1]);
     assert_summary_only(&requests[2]);
+    assert_positions_match_wire(&contributor, &requests[1]);
     assert_eq!(
         contributor.observed(),
         Observed {
@@ -411,4 +462,199 @@ async fn post_turn_auto_compaction_separates_trailer() {
     assert_augmented(&requests[1]);
     assert_summary_only(&requests[2]);
     assert_eq!(contributor.observed().completed.len(), 1);
+}
+
+/// Runs one turn, then a manual compaction answered by `compaction`, then one more turn.
+async fn manual_compaction_after_reply(
+    reply: &str,
+    compaction: Vec<String>,
+) -> (Vec<ResponsesRequest>, Arc<RecordingExtraction>) {
+    let server = start_mock_server().await;
+    let mut responses = vec![sse(vec![
+        ev_assistant_message("m0", reply),
+        ev_completed_with_tokens("r0", /*total_tokens*/ 80),
+    ])];
+    responses.extend(compaction);
+    responses.push(sse(vec![
+        ev_assistant_message("m9", "AFTER"),
+        ev_completed_with_tokens("r9", /*total_tokens*/ 120),
+    ]));
+    let log = mount_sse_sequence(&server, responses).await;
+    let (codex, contributor) = build(&server, |_| {}).await;
+
+    submit(&codex, USER_MESSAGE).await;
+    codex.submit(Op::Compact).await.expect("compact");
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    submit(&codex, "next").await;
+    (log.requests(), contributor)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn augmented_compaction_without_a_current_summary_keeps_history() {
+    skip_if_no_network!();
+    // The earlier answer must never stand in for a missing summary.
+    let reply = "FIRST_REPLY";
+    let cases = vec![
+        (
+            "no assistant text",
+            sse(vec![ev_completed_with_tokens(
+                "r1", /*total_tokens*/ 100,
+            )]),
+        ),
+        (
+            "whitespace only",
+            sse(vec![
+                ev_assistant_message("m1", "  \n\t "),
+                ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+            ]),
+        ),
+        (
+            "empty after stripping hidden markup",
+            sse(vec![
+                ev_assistant_message(
+                    "m1",
+                    &format!("<oai-mem-citation>doc</oai-mem-citation>\n{}", trailer()),
+                ),
+                ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+            ]),
+        ),
+    ];
+    for (name, compaction) in cases {
+        let (requests, contributor) = manual_compaction_after_reply(reply, vec![compaction]).await;
+
+        assert_eq!(requests.len(), 3, "{name}: no repair request");
+        assert!(
+            requests[2]
+                .message_input_texts("user")
+                .contains(&USER_MESSAGE.to_string()),
+            "{name}: history preserved"
+        );
+        assert!(
+            !requests[2].body_contains_text(SUMMARY_PREFIX),
+            "{name}: no replacement summary"
+        );
+        assert_eq!(
+            contributor.observed(),
+            Observed {
+                prepared: vec![1],
+                completed: Vec::new(),
+            },
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hidden_assistant_text_is_not_a_published_source() {
+    skip_if_no_network!();
+    let hidden = "Visible answer.<oai-mem-citation>doc-7</oai-mem-citation>";
+    let (requests, contributor) = manual_compaction_after_reply(
+        hidden,
+        vec![sse(vec![
+            ev_assistant_message("m1", &summary_with_trailer()),
+            ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+        ])],
+    )
+    .await;
+
+    assert_eq!(requests.len(), 3);
+    assert_summary_only(&requests[2]);
+    // Recorded provider bytes differ from what the user saw: no source identity.
+    assert_eq!(
+        assistant_origins(&contributor),
+        vec![(hidden.to_string(), false)]
+    );
+
+    let (_, exact) = manual_compaction_after_reply(
+        "FIRST_REPLY",
+        vec![sse(vec![
+            ev_assistant_message("m1", &summary_with_trailer()),
+            ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+        ])],
+    )
+    .await;
+    assert_eq!(
+        assistant_origins(&exact),
+        vec![("FIRST_REPLY".to_string(), true)]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn augmentation_overflow_retries_natively_without_trimming_sources() {
+    skip_if_no_network!();
+    let (requests, contributor) = manual_compaction_after_reply(
+        "FIRST_REPLY",
+        vec![
+            sse_failed("r1", "context_length_exceeded", "context window exceeded"),
+            sse(vec![
+                ev_assistant_message("m2", SUMMARY),
+                ev_completed_with_tokens("r2", /*total_tokens*/ 100),
+            ]),
+        ],
+    )
+    .await;
+
+    assert_eq!(requests.len(), 4);
+    assert_augmented(&requests[1]);
+    // Same sources, minus only the addition.
+    assert_eq!(
+        requests[2].input(),
+        requests[1].input()[..requests[1].input().len() - 1]
+    );
+    assert_summary_only(&requests[3]);
+    assert_eq!(
+        contributor.observed(),
+        Observed {
+            prepared: vec![1],
+            completed: Vec::new(),
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_lite_withholds_extraction() {
+    skip_if_no_network!();
+    let server = start_mock_server().await;
+    let log = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_assistant_message("m0", "FIRST_REPLY"),
+                ev_completed_with_tokens("r0", /*total_tokens*/ 80),
+            ]),
+            sse(vec![
+                ev_assistant_message("m1", SUMMARY),
+                ev_completed_with_tokens("r1", /*total_tokens*/ 100),
+            ]),
+            sse(vec![
+                ev_assistant_message("m2", "AFTER"),
+                ev_completed_with_tokens("r2", /*total_tokens*/ 120),
+            ]),
+        ],
+    )
+    .await;
+    let (codex, contributor) = build_from(
+        &server,
+        test_codex().with_model_info_override("gpt-5.5", |model| {
+            model.use_responses_lite = true;
+        }),
+    )
+    .await;
+
+    submit(&codex, USER_MESSAGE).await;
+    codex.submit(Op::Compact).await.expect("compact");
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    submit(&codex, "next").await;
+
+    let requests = log.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(!requests[1].body_contains_text(INSTRUCTION_LEAD));
+    assert_summary_only(&requests[2]);
+    assert_eq!(
+        contributor.observed(),
+        Observed {
+            prepared: Vec::new(),
+            completed: Vec::new(),
+        }
+    );
 }
