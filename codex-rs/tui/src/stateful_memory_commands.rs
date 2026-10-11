@@ -44,7 +44,7 @@ use crate::stateful_memory::section_rank;
 const PAGE_SIZE: u32 = 50;
 /// A Forget cannot reach a tool result already read in a turn in flight on any thread of the
 /// project, and the TUI cannot see other threads' turns, so every receipt says so.
-const FORGET_TAKES_EFFECT: &str = "This takes effect from the next turn; content already read this turn may still reach the model.";
+const FORGET_TAKES_EFFECT: &str = "Forget takes effect from the next turn. Within the current turn, content already read (including held tool results and hook copies) may still reach the model. No new read after the Forget is admitted at a later epoch.";
 const USAGE: &str = "Usage: /memory, /memory next, /memory add <rule|about-me|decision|note> <text>, /memory forget <ID@REV>, /memory correct <ID@REV> <new text>, /memory apply <ID@REV> <rule|decision|ruled-out>, /memory undo <receipt-id>, /memory help";
 
 /// What the user asked `/memory` to do.

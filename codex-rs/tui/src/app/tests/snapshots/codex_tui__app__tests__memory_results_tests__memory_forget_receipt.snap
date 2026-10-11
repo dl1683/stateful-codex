@@ -2,4 +2,4 @@
 source: tui/src/app/tests/memory_results_tests.rs
 expression: "cell.display_lines(200).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\n\").replace(added.item.entry_id.as_str(),\n\"<entry>\")"
 ---
-• Forgot <entry>@1 It stays in history but no longer applies. This takes effect from the next turn; content already read this turn may still reach the model. Run /memory refresh to update the list.
+• Forgot <entry>@1 It stays in history but no longer applies. Forget takes effect from the next turn. Within the current turn, content already read (including held tool results and hook copies) may still reach the model. No new read after the Forget is admitted at a later epoch. Run /memory refresh to update the list.
