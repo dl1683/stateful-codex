@@ -133,7 +133,8 @@ pub(crate) fn compose_capsule(input: &ComposeInput<'_>) -> Result<ComposedCapsul
         if !accepted {
             aliases.truncate(aliases_before);
             omitted += 1;
-            direction_unavailable |= !matches!(unit, Unit::Floor(..));
+            direction_unavailable |=
+                matches!(unit, Unit::Rule(_) | Unit::Successor(_) | Unit::Newest(_));
         }
     }
     // Real tokenizers are not additive: drop the lowest-priority optional records until the

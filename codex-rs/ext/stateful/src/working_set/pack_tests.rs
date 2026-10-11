@@ -127,6 +127,8 @@ fn whole_records_are_omitted_and_oversize_direction_becomes_a_marker() {
     let text = compose(&projection, &[], &ledger);
     assert!(text.contains("user(newest): too long to carry; see history @s1"));
     assert!(!text.contains("short background paragraph"));
+    // Omitted optional records are not missing direction.
+    assert!(!text.contains("current direction unavailable"));
     // Every rendered measurement is whole; the rest are counted, never shortened.
     let shown = text.lines().filter(|l| l.starts_with("measured(")).count();
     assert!(shown > 0 && shown < 40);
