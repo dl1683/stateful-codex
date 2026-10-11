@@ -1,5 +1,3 @@
-import { visibleAnswer } from "./outcome-trailer.mjs";
-
 const packetSections = [
   ["examined", "Examined"],
   ["rationale", "Why it matters"],
@@ -190,11 +188,10 @@ function renderResult(state) {
 }
 
 function renderLive(state) {
-  const live = visibleAnswer(state.liveText, { streaming: true });
-  return live
+  return state.liveText
     ? panel(
         "Live response",
-        `<p class="live-copy">${escapeHtml(live)}</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p>`,
+        `<p class="live-copy">${escapeHtml(state.liveText)}</p><p class="microcopy">Supporting prose. Durable meaning is recorded in the obligation packet and project intelligence.</p>`,
       )
     : "";
 }
@@ -205,9 +202,7 @@ function renderAnswer(state) {
     .map(normalizeThreadItem)
     .filter((item) => item?.type === "agentMessage")
     .at(-1);
-  const answer = state.liveText
-    ? visibleAnswer(state.liveText, { streaming: true })
-    : visibleAnswer(latest?.text ?? "");
+  const answer = state.liveText || (latest?.text ?? "");
   return panel(
     "Answer",
     answer

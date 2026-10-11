@@ -126,14 +126,7 @@ test("an Ask workspace shows the answer with no run controls", () => {
       item: {
         type: "agentMessage",
         id: "message-1",
-        text: [
-          "We chose SQLite over Postgres for offline laptop use.",
-          "",
-          "[stateful-outcome]",
-          "disposition: answer",
-          "open-issues: none",
-          "[/stateful-outcome]",
-        ].join("\n"),
+        text: "We chose SQLite over Postgres for offline laptop use.",
       },
     },
   ];
@@ -145,8 +138,6 @@ test("an Ask workspace shows the answer with no run controls", () => {
   assert.match(actual, /We chose SQLite over Postgres for offline laptop use\./);
   assert.match(actual, /id="message-form"/);
   for (const absent of [
-    /stateful-outcome/,
-    /disposition:/,
     /id="steering-form"/,
     /id="mode-form"/,
     /data-action="cancel"/,
@@ -156,24 +147,6 @@ test("an Ask workspace shows the answer with no run controls", () => {
   ]) {
     assert.doesNotMatch(actual, absent);
   }
-});
-
-test("a streamed outcome trailer is never shown live", () => {
-  const ask = workspaceFixture();
-  ask.ask = true;
-  ask.run = null;
-  ask.liveText = ["A leap year has 366 days.", "", "[stateful-outcome]", "disposit"].join(
-    "\n",
-  );
-  const work = workspaceFixture();
-  work.liveText = ["Paris.", "[stateful"].join("\n");
-
-  for (const state of [ask, work]) {
-    const actual = renderWorkspace(state);
-    assert.doesNotMatch(actual, /\[stateful|disposit/);
-  }
-  assert.match(renderWorkspace(ask), /A leap year has 366 days\./);
-  assert.match(renderWorkspace(work), /Paris\./);
 });
 
 function statefulFindingCount(state) {
