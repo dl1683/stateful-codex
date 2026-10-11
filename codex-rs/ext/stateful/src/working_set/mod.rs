@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 mod commands;
+mod directives;
 mod grammar;
 mod offline;
 mod piggyback;
@@ -142,6 +143,22 @@ pub(crate) struct Projection {
     pub capacity_debt: u32,
     /// Completed items whose middle was not inspected.
     pub uninspected_items: u32,
+    /// The newest accepted user messages, captured whole with no word list.
+    #[serde(default)]
+    pub statements: Vec<UserStatement>,
+    /// Every accepted user message seen, including those no longer retained.
+    #[serde(default)]
+    pub statements_seen: u32,
+}
+
+/// One accepted user message. It is a user statement, not by itself an adopted rule.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct UserStatement {
+    pub source: SourceRef,
+    /// The exact message; `None` when it exceeds the per-statement bound (reference only).
+    pub text: Option<String>,
+    /// `Projection::next_id` when it arrived: candidates with an id up to it came before it.
+    pub after_candidate: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -254,6 +271,9 @@ impl Projection {
 #[cfg(test)]
 #[path = "commands_tests.rs"]
 mod commands_tests;
+#[cfg(test)]
+#[path = "directives_tests.rs"]
+mod directives_tests;
 #[cfg(test)]
 #[path = "grammar_tests.rs"]
 mod grammar_tests;

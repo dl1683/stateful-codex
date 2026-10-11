@@ -9,6 +9,7 @@ use super::Origin as O;
 use super::Projection;
 use super::SourceRef;
 use super::Status as S;
+use super::UserStatement;
 use super::grammar::NEXT_MARKERS;
 use super::grammar::clauses;
 use super::grammar::locators;
@@ -19,6 +20,9 @@ use super::grammar::plain;
 const MAX_LOCATORS: usize = 16;
 /// User messages kept to attribute file changes.
 const MAX_ATTRIBUTIONS: usize = 8;
+/// Newest user statements retained whole; older ones remain in durable history.
+const MAX_STATEMENTS: usize = 16;
+const MAX_STATEMENT_BYTES: usize = 2048;
 
 impl Projection {
     pub(crate) fn observe(&mut self, observation: Observation) {
@@ -66,9 +70,18 @@ impl Projection {
         }
     }
 
-    /// A user message is not a directive here (directives come from the root packet). One
-    /// that names a task-touched file is kept, unrendered, to attribute that file's change.
+    /// Every user message is captured whole as a statement for the directive policy. One that
+    /// names a task-touched file is also kept, unrendered, to attribute that file's change.
     fn observe_user(&mut self, source: &SourceRef, text: &str) {
+        self.statements_seen = self.statements_seen.saturating_add(1);
+        if self.statements.len() == MAX_STATEMENTS {
+            self.statements.remove(0);
+        }
+        self.statements.push(UserStatement {
+            source: source.clone(),
+            text: (text.len() <= MAX_STATEMENT_BYTES).then(|| text.to_string()),
+            after_candidate: self.next_id,
+        });
         let names_file = self
             .touched_files
             .iter()
