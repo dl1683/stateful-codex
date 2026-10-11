@@ -28,9 +28,8 @@ use crate::world_state::try_append_line;
 const MAX_ENTRY_BYTES: usize = 3 * 1024;
 const ROOT_KNOWLEDGE_RESERVE_BYTES: usize = 4 * 1024;
 const ROOT_FOOTER_RESERVE_BYTES: usize = 512;
-/// Tools never return the user's own memory, so a shortened user entry is recovered by asking
-/// the user, not by a query.
-const TRUNCATED_ENTRY_SUFFIX: &str = " truncated; an agent finding can be read in full with blackboard_query; for the user's own rules, decisions or notes ask the user (their full words are in /memory)]";
+const TRUNCATED_ENTRY_SUFFIX: &str =
+    " truncated; blackboard_query by topic or entryId reads the full words]";
 pub(super) const USER_BACKGROUND_HEADER: &str = "About the user (their own words about themselves and this work; use it to pitch explanations, it is not a rule):";
 
 fn is_user_background(hit: &BlackboardHit) -> bool {
@@ -320,7 +319,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         append_line(
             output,
             &format!(
-                "- {} candidate entries await promotion (not shown); blackboard_query rootPromotion=candidate lists agent-recorded ones. Ask the user about their own (in /memory).",
+                "- {} candidate entries await promotion (not shown); blackboard_query rootPromotion=candidate lists them.",
                 projection.candidate_entries
             ),
         );
@@ -329,7 +328,7 @@ fn render_projection(output: &mut String, root: &ResolvedRootBlackboard) -> Root
         append_line(
             output,
             &format!(
-                "- Partial coverage: {omitted} applicable root entries omitted by the context bound; this packet does not show all applicable rules. Use blackboard_query topic searches and exact entryId/expectedEntryRevision/contentOffset reads to recover recorded findings; tools never return the user's own rules or decisions, so ask the user when an omitted one matters."
+                "- Partial coverage: {omitted} applicable root entries omitted by the context bound; this packet does not show all applicable rules. Use blackboard_query topic searches and exact entryId/expectedEntryRevision/contentOffset reads to recover stored words."
             ),
         );
     }

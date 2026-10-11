@@ -542,3 +542,114 @@ async fn c2r3_legacy_coverage_stays_unavailable_without_inventing_source_or_curs
         .unwrap();
     assert_eq!(known_sources, 0);
 }
+
+/// Model reads check eligibility when they run, on any connection: before a Forget commits on
+/// one pool, a read on another pool returns the user's rule (exact, search, since, relation);
+/// after it commits, none of those reads returns it, and the agent control is unchanged.
+/// Derived outputs that outlive the turn never quote the user's rule.
+#[tokio::test]
+async fn reads_check_user_memory_eligibility_at_read_time_across_connections() {
+    let home = TempDir::new().unwrap();
+    let writer = store(&home).await;
+    let reader = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
+        .await
+        .unwrap();
+    let (user_rule, _) = writer
+        .create_entry_with_context(
+            BlackboardEntryId::parse("user-rule").unwrap(),
+            rule("Never push to main."),
+            KnowledgeContext::new(KnowledgeCategory::Rule, KnowledgeAuthority::HumanDirect),
+            change(ChangeOperation::Saved, "Never push to main."),
+        )
+        .await
+        .unwrap();
+    let mut finding = rule("The release pushes a tag first.");
+    finding.kind = BlackboardKind::Fact;
+    finding.provenance.kind = BlackboardProvenanceKind::Agent;
+    let agent = writer
+        .create_entry(BlackboardEntryId::parse("agent-finding").unwrap(), finding)
+        .await
+        .unwrap();
+    writer
+        .create_relation(
+            BlackboardRelationId::parse("user-relation").unwrap(),
+            NewBlackboardRelation {
+                project_id: PROJECT.to_string(),
+                from_entry_id: agent.id.clone(),
+                to_entry_id: user_rule.id.clone(),
+                kind: BlackboardRelationKind::Contradicts,
+                note: None,
+                confidence: ConfidenceScore::from_basis_points(9_000).unwrap(),
+                provenance: user_rule.value.provenance.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let reads = |store: &BlackboardStore| {
+        let store = store.clone();
+        async move {
+            let mut ids = Vec::new();
+            for hit in store
+                .query(BlackboardQuery {
+                    project_id: PROJECT.to_string(),
+                    text: Some("push".to_string()),
+                    within_node: None,
+                    root_promotion: None,
+                    entry_scope: BlackboardEntryScope::All,
+                    max_results: 10,
+                })
+                .await
+                .unwrap()
+                .data
+            {
+                ids.push(format!("search:{}", hit.entry.id));
+                ids.extend(
+                    hit.relations
+                        .iter()
+                        .map(|relation| format!("relation:{}", relation.id)),
+                );
+            }
+            for entry in store
+                .changed_since(PROJECT, /*since_ms*/ 0, /*limit*/ 10)
+                .await
+                .unwrap()
+                .0
+            {
+                ids.push(format!("since:{}", entry.id));
+            }
+            let exact = store
+                .get_source_eligible_entry(PROJECT, &BlackboardEntryId::parse("user-rule").unwrap())
+                .await
+                .unwrap();
+            ids.extend(exact.map(|entry| format!("exact:{}", entry.value.content)));
+            ids.sort();
+            ids
+        }
+    };
+    assert_eq!(
+        reads(&reader).await,
+        [
+            "exact:Never push to main.",
+            "relation:user-relation",
+            "relation:user-relation",
+            "search:agent-finding",
+            "search:user-rule",
+            "since:agent-finding",
+            "since:user-rule",
+        ]
+    );
+    let [user_quotable, agent_quotable] =
+        [&user_rule.id, &agent.id].map(|id| writer.entry_quotable_in_derived_output(PROJECT, id));
+    assert_eq!(
+        (user_quotable.await.unwrap(), agent_quotable.await.unwrap()),
+        (false, true)
+    );
+    writer
+        .update_entry(PROJECT, &user_rule.id, retire(&user_rule))
+        .await
+        .unwrap();
+    assert_eq!(
+        reads(&reader).await,
+        ["search:agent-finding", "since:agent-finding"]
+    );
+}

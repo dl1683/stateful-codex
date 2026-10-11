@@ -314,10 +314,10 @@ async fn material_root_checklist(
                 && visible.alias_for(hit.entry.id.as_str(), hit.entry.revision)
                     == Some(reference.as_str())
         });
-        // Memory the user can forget (their own rules, decisions, confirmations) is shown only
-        // by the root snapshot, never quoted in a tool result.
+        // The checklist becomes the durable completion basis, read again in later turns, so
+        // memory the user can forget (their own rules, decisions, confirmations) is not quoted.
         let disclosable = store
-            .entry_source_eligible(project_id, &hit.entry.id)
+            .entry_quotable_in_derived_output(project_id, &hit.entry.id)
             .await
             .map_err(respond)?;
         let text = if disclosable {

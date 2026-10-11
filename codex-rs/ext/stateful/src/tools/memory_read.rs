@@ -4,9 +4,10 @@
 //! It replaces chains of query and read calls for questions such as "what is the default and
 //! why" or "summarize what we recorded since Monday". Nothing here calls a model; everything is
 //! read from the project store within fixed scan bounds, and the result says what it covered.
-//! Memory the user can forget (their own rules, decisions and corrections) and earlier
-//! conversation are never returned: a tool result can be held after a Forget commits, so that
-//! memory reaches the model only through the thread-start root and continuity snapshots.
+//! The user's own rules, decisions and corrections are returned with attribution, under the
+//! eligibility of the moment of the read (a Forget committed earlier excludes them). Earlier
+//! conversation is not returned; it reaches the model through the thread-start continuity
+//! snapshot.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -123,7 +124,7 @@ impl MemoryReadTool {
                 "noMatchMeans": "nothing matched within this coverage, not that nothing happened",
             },
             "use": "This evidence needs no confirmation read. Read more only when an omitted part is critical to the answer: evidence_read for an entry's source, git show for a commit.",
-            "unavailable": "the user's own memory (rules, decisions, corrections: see the root packet), earlier conversation (see the thread-start continuity record), proposal recall and original-source recall",
+            "unavailable": "earlier conversation (see the thread-start continuity record), unapplied proposal recall and original-source recall",
         });
         let entry_limit = budget.saturating_sub(RESERVED_BYTES);
         let mut omitted_entries = 0usize;
@@ -523,7 +524,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Recall missing earlier work once: matching recorded findings, status/history and sources/dates. Evidence needs no confirmation read. Never returns the user's own memory (see the root packet), past conversation, proposals or original sources.".to_string(),
+            description: "Recall missing earlier work once: matching recorded findings, status/history and sources/dates. Evidence needs no confirmation read. Includes the user's own rules/decisions with attribution; never past conversation, unapplied proposals or original sources.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({

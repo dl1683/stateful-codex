@@ -110,18 +110,21 @@ an entry keeps seeing it after refreshing or restarting. Retired, forgotten,
 excluded and proposal entries stay out.
 
 The model's Stateful memory tools (`blackboard_query`, `memory_read`,
-`evidence_read`, `context_map_query`) apply a narrower rule: they never return an
-entry that has ever had a user-authored revision or HumanDirect context, or a
-relation the user recorded. That memory reaches the model only through the
-thread-start root packet. `statefulMemory/read` remains the user's `/memory`
-view.
+`evidence_read`, `context_map_query`) return the user's own rules, decisions,
+notes and the relations they recorded, with attribution, and proposals the user
+applied within the Apply bound; unapplied proposals stay out. Each read checks
+eligibility when it runs. Forget takes effect from the next turn. Within the
+current turn, content already read (including held tool results and hook copies)
+may still reach the model. No new read after the Forget is admitted at a later
+epoch. Nested Code Mode cannot call these reads. `statefulMemory/read` remains
+the user's `/memory` view.
 
-This exclusion governs the model's memory tools only. It is not a boundary against
+These rules govern the model's memory tools only. They are not a boundary against
 a model that runs shell or network commands with the user's permissions. Such a
 model can reach anything the user can, including this endpoint through a local
 client gateway (for example the Stateful Web gateway, which serves its session
 token to local requests) and the project store files themselves. Do not rely on
-the exclusion to keep the user's memory from a model granted those permissions.
+Forget or the proposal exclusion to keep words from a model granted those permissions.
 
 # Thread removal
 

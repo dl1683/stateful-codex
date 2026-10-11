@@ -43,29 +43,34 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
               OR NOT EXISTS(SELECT 1 FROM knowledge_scopes AS scope WHERE scope.project_id = entry.project_id AND scope.scope_id = current_alias.scope_id AND octet_length(scope.scope_id) <= 512 AND octet_length(scope.title) <= 512 AND (scope.end_condition IS NULL OR octet_length(scope.end_condition) <= 2000) AND octet_length(scope.opened_source) <= 512))
         )))";
 
-/// Every model tool output (search, exact reads, history and relation expansion, coverage
-/// counts, completion checklists) uses this eligibility. Tool results can be held (PostToolUse
-/// hooks, the rest of the response stream) after a user's Forget commits, so memory the user
-/// can forget never enters them: proposals (including those the user applied) and every entry
-/// with any user-authored revision or HumanDirect context (declared rules, `/memory add`,
-/// confirmations, corrections) are excluded. That memory reaches the model only through the
-/// root snapshot rendered at sampling time. Durable group membership covers proposals even
-/// when their context is unsupported; bounded historical payload checks also cover linked
-/// copies of proposal context.
+/// Model memory reads (search, exact reads, history and relation expansion, evidence
+/// dependents, coverage counts) use the root's admission policy at read time: the user's own
+/// declared, added, confirmed and corrected entries, and proposals the user applied within the
+/// Apply bound, are readable with attribution; unapplied proposals stay out. Each read checks
+/// eligibility in its own snapshot, so a read that starts after a Forget commits never returns
+/// the forgotten entry. A result read earlier in the same turn may still reach the model (the
+/// next-turn Forget contract). Durable group membership covers proposals even when their
+/// context is unsupported; bounded historical payload checks also cover linked copies of
+/// proposal context.
 pub(super) fn automatic_entry_eligibility() -> String {
+    root_entry_eligibility()
+}
+
+/// Derived outputs that persist beyond the turn (completion checklists and the durable
+/// completion basis they become) keep the user's own memory out: a later read of the stored
+/// basis would otherwise carry words the user forgot into a later turn.
+pub(super) fn derived_output_eligibility() -> String {
     format!("{ENTRY_SOURCE_ELIGIBILITY} AND {NOT_PROPOSAL} AND {NOT_USER_STATED}")
 }
 
 /// Who reads entries through the shared query and hit loaders.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EntryReader {
-    /// A model tool: its result can be held after a Forget, so it uses
-    /// [`automatic_entry_eligibility`].
+    /// A model tool, reading under [`automatic_entry_eligibility`] at read time.
     ModelTool,
-    /// A trusted client inspecting the project for the user (`blackboard/query`). Its output
-    /// never enters model context, so the user's own entries (confirmed, declared, corrected)
-    /// and relations they recorded stay visible; proposals, exclusions and retirement still
-    /// apply.
+    /// A trusted client inspecting the project for the user (`blackboard/query`). The user's
+    /// own entries (confirmed, declared, corrected) and relations they recorded stay visible;
+    /// proposals, exclusions and retirement still apply.
     TrustedClient,
 }
 
@@ -100,13 +105,12 @@ const NOT_PROPOSAL: &str = "NOT EXISTS (
                   ELSE 0 END
               ELSE 0 END)";
 
-/// Root delivery only (never a model tool output): the same eligibility, except that a
-/// proposal the user explicitly applied is admitted while its current revision carries the
-/// user's quoted words under a bounded HumanDirect promotion context, and those words are
-/// within the Apply bound (an entry applied under an earlier, longer bound is kept but not
-/// applied). The root is rendered
-/// at sampling time from a fresh snapshot, so an Undo or Forget removes it from the next
-/// request; there is no post-hook publication window as for tool outputs.
+/// Root delivery and model memory reads: the source eligibility, except that a proposal the
+/// user explicitly applied is admitted while its current revision carries the user's quoted
+/// words under a bounded HumanDirect promotion context, and those words are within the Apply
+/// bound (an entry applied under an earlier, longer bound is kept but not applied). Both are
+/// evaluated in a fresh snapshot when the root is rendered or the read runs, so an Undo or
+/// Forget removes the entry from every later render and read.
 pub(super) fn root_entry_eligibility() -> String {
     format!(
         "{ENTRY_SOURCE_ELIGIBILITY} AND (EXISTS (
@@ -136,6 +140,18 @@ impl BlackboardStore {
         let eligible = entry_source_eligible_on(&mut tx, project_id, id).await?;
         tx.commit().await?;
         Ok(eligible)
+    }
+
+    /// Whether a derived output that outlives the turn (see [`derived_output_eligibility`])
+    /// may quote the entry's words.
+    pub async fn entry_quotable_in_derived_output(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+    ) -> Result<bool, BlackboardStoreError> {
+        let eligibility = derived_output_eligibility();
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT EXISTS(SELECT 1 FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision WHERE entry.project_id = ? AND entry.id = ? {eligibility})")))
+            .bind(project_id).bind(id.as_str()).fetch_one(&self.pool).await?)
     }
 
     /// Exact automatic recovery checks exclusion and loads entry in one read snapshot.

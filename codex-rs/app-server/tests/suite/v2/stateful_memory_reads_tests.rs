@@ -1,6 +1,6 @@
-//! The C4-C6 cut through the public app-server: memory the user can forget (declared rules,
-//! applied decisions) never enters a model tool result, so a result held after a Forget
-//! cannot carry it. It reaches the model only through the thread-start root snapshot.
+//! Model reads of the user's own memory through the public app-server, under the next-turn
+//! Forget contract: declared rules and applied decisions come back with attribution, and once
+//! a Forget commits, no read of a later turn returns them.
 use super::capture_boundaries_tests::DECISION;
 use super::capture_boundaries_tests::apply_request;
 use super::capture_boundaries_tests::call;
@@ -26,7 +26,7 @@ use std::sync::Mutex;
 const RULE: &str = "Ground rules for this project:\n- Never push.";
 const FINDING: &str = "The release checklist bumps the version first.";
 const NOTES: &str = "Release checklist: bump the version.\n";
-/// Words of the user's rule and decision; none may appear in any tool result.
+/// Words of the user's rule and decision; no read after their Forget may return them.
 const USER_WORDS: [&str; 4] = ["Never push", "offline on a laptop", "SQLite", "Postgres"];
 
 /// A project with one indexed source file and a durably bound thread.
@@ -102,7 +102,7 @@ async fn remember(
 }
 
 /// The model's script: session 1 proposes the decision and records the finding; later
-/// requests make the calls `reads` lists, in order.
+/// requests make the calls `reads` lists, in order (an empty tool name ends a turn).
 fn script(
     targets: Arc<Mutex<Vec<(String, String, Value)>>>,
 ) -> super::capture_boundaries_tests::Script {
@@ -120,8 +120,8 @@ fn script(
         _ => {
             let reads = targets.lock().expect("targets lock");
             match sequence.checked_sub(5).and_then(|index| reads.get(index)) {
-                Some((id, tool, args)) => call(id, tool, args.clone()),
-                None => message("Done."),
+                Some((id, tool, args)) if !tool.is_empty() => call(id, tool, args.clone()),
+                _ => message("Done."),
             }
         }
     })
@@ -139,15 +139,65 @@ pub(super) fn output(body: &Value, call_id: &str) -> String {
         .to_string()
 }
 
+/// The reads one turn makes; `phase` keeps call IDs unique across turns.
+fn reads(phase: &str, decision: &str, rule: &str) -> Vec<(String, String, Value)> {
+    [
+        (
+            "exact-decision",
+            "blackboard_query",
+            json!({"entryId": decision}),
+        ),
+        ("exact-rule", "blackboard_query", json!({"entryId": rule})),
+        (
+            "search-user",
+            "blackboard_query",
+            json!({"text": "SQLite", "detail": "full"}),
+        ),
+        (
+            "search-push",
+            "blackboard_query",
+            json!({"text": "push", "detail": "full"}),
+        ),
+        (
+            "search-agent",
+            "blackboard_query",
+            json!({"text": "release"}),
+        ),
+        (
+            "recall",
+            "memory_read",
+            json!({"question": "SQLite Postgres offline laptop push release checklist"}),
+        ),
+    ]
+    .into_iter()
+    .map(|(id, tool, args)| (format!("{phase}-{id}"), tool.to_string(), args))
+    .chain([(format!("{phase}-end"), String::new(), Value::Null)])
+    .collect()
+}
+
+/// Every read's output in the logged requests, by call ID.
+fn outputs(bodies: &[Value], reads: &[(String, String, Value)]) -> Vec<(String, String)> {
+    reads
+        .iter()
+        .filter(|(_, tool, _)| !tool.is_empty())
+        .map(|(id, _, _)| {
+            let body = bodies
+                .iter()
+                .find(|body| body.to_string().contains(&format!("\"call_id\":\"{id}\"")))
+                .unwrap_or_else(|| panic!("{id} output delivered"));
+            (id.clone(), output(body, id))
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn c456cut_tool_results_never_carry_the_users_words() -> Result<()> {
+async fn reads_return_user_memory_with_attribution_until_forget() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let (home, root) = (TempDir::new()?, TempDir::new()?);
     let (mut server, project, thread) = project_with_notes(&home, &root, &responses_server).await?;
-    let reads = Arc::new(Mutex::new(Vec::new()));
-    let calls = mount(&responses_server, script(reads.clone())).await;
-    let (decision, _, rule) = remember(&mut server, &project, &thread).await?;
-    // Root delivery keeps the user's memory.
+    let script_reads = Arc::new(Mutex::new(Vec::new()));
+    let calls = mount(&responses_server, script(script_reads.clone())).await;
+    let (decision, revision, rule) = remember(&mut server, &project, &thread).await?;
     let mut root_words = root_contents(&home, &project).await?;
     root_words.sort();
     assert_eq!(
@@ -155,43 +205,9 @@ async fn c456cut_tool_results_never_carry_the_users_words() -> Result<()> {
         vec!["Never push.".to_string(), DECISION.to_string()]
     );
 
-    *reads.lock().expect("targets lock") = vec![
-        (
-            "exact-decision".into(),
-            "blackboard_query".into(),
-            json!({"entryId": decision}),
-        ),
-        (
-            "exact-rule".into(),
-            "blackboard_query".into(),
-            json!({"entryId": rule}),
-        ),
-        (
-            "search-user".into(),
-            "blackboard_query".into(),
-            json!({"text": "SQLite"}),
-        ),
-        (
-            "search-push".into(),
-            "blackboard_query".into(),
-            json!({"text": "push"}),
-        ),
-        (
-            "search-agent".into(),
-            "blackboard_query".into(),
-            json!({"text": "release"}),
-        ),
-        (
-            "recall".into(),
-            "memory_read".into(),
-            json!({"question": "SQLite Postgres offline laptop push release checklist"}),
-        ),
-        (
-            "evidence".into(),
-            "evidence_read".into(),
-            json!({"relativePath": "notes.md"}),
-        ),
-    ];
+    let before = reads("before", &decision, &rule);
+    let after = reads("after", &decision, &rule);
+    *script_reads.lock().expect("targets lock") = [before.clone(), after.clone()].concat();
     let second = start_thread(&mut server, &project).await?;
     turn(
         &mut server,
@@ -199,41 +215,80 @@ async fn c456cut_tool_results_never_carry_the_users_words() -> Result<()> {
         &["What do we know about this project?"],
     )
     .await?;
-    let bodies = calls.lock().expect("request log lock").clone();
-    let read_ids = reads
-        .lock()
-        .expect("targets lock")
-        .iter()
-        .map(|(id, _, _)| id.clone())
-        .collect::<Vec<_>>();
-    let outputs = read_ids
-        .iter()
-        .enumerate()
-        .map(|(index, id)| (id.clone(), output(&bodies[6 + index], id)))
-        .collect::<Vec<_>>();
-    for (id, output) in &outputs {
+    let found = outputs(&calls.lock().expect("request log lock"), &before);
+    let by_id = |wanted: &str| -> Value {
+        let text = &found.iter().find(|(id, _)| id == wanted).expect(wanted).1;
+        serde_json::from_str(text).expect("json output")
+    };
+    // Exact reads carry the whole words and who stated them; the applied decision also says
+    // when the user adopted it.
+    let decision_read = by_id("before-exact-decision");
+    assert_eq!(
+        (
+            decision_read["content"].clone(),
+            decision_read["attribution"]["by"].clone(),
+            decision_read["attribution"]["adopted"].is_string(),
+            decision_read["revision"].clone(),
+        ),
+        (
+            json!(DECISION),
+            json!("user (applied)"),
+            true,
+            json!(revision)
+        )
+    );
+    let rule_read = by_id("before-exact-rule");
+    assert_eq!(
+        (
+            rule_read["content"].clone(),
+            rule_read["attribution"]["by"].clone(),
+            rule_read["attribution"]["said"].is_string(),
+        ),
+        (json!("Never push."), json!("user"), true)
+    );
+    for (id, word) in [
+        ("before-search-user", "offline on a laptop"),
+        ("before-search-push", "Never push"),
+        ("before-search-agent", FINDING),
+        ("before-recall", "Never push"),
+        ("before-recall", "offline on a laptop"),
+        ("before-recall", FINDING),
+    ] {
+        assert!(by_id(id).to_string().contains(word), "{id} lacks {word:?}");
+    }
+
+    // The user forgets both; every read of the next turn excludes them, the root drops them,
+    // and the agent finding stays readable.
+    for (entry_id, expected_revision) in [(rule, 1), (decision, revision)] {
+        let _: StatefulMemoryForgetResponse = server
+            .request(|request_id| ClientRequest::StatefulMemoryForget {
+                request_id,
+                params: StatefulMemoryForgetParams {
+                    thread_id: second.clone(),
+                    expected_project_id: project.clone(),
+                    entry_id,
+                    expected_revision,
+                },
+            })
+            .await?;
+    }
+    assert_eq!(root_contents(&home, &project).await?, Vec::<String>::new());
+    let third = start_thread(&mut server, &project).await?;
+    turn(
+        &mut server,
+        &third,
+        &["What do we know about this project?"],
+    )
+    .await?;
+    let found = outputs(&calls.lock().expect("request log lock"), &after);
+    for (id, output) in &found {
         for word in USER_WORDS {
             assert!(!output.contains(word), "{id} carried {word:?}: {output}");
         }
     }
-    // Positive controls: the agent finding and the source file are still returned.
-    let by_id = |wanted: &str| {
-        outputs
-            .iter()
-            .find(|(id, _)| id == wanted)
-            .map(|(_, output)| output.clone())
-            .unwrap_or_default()
-    };
-    assert!(
-        by_id("search-agent").contains(FINDING),
-        "{}",
-        by_id("search-agent")
-    );
-    assert!(by_id("recall").contains(FINDING), "{}", by_id("recall"));
-    assert!(
-        by_id("evidence").contains("Release checklist: bump the version."),
-        "{}",
-        by_id("evidence")
-    );
+    for id in ["after-search-agent", "after-recall"] {
+        let output = &found.iter().find(|(found, _)| found == id).expect(id).1;
+        assert!(output.contains(FINDING), "{id}: {output}");
+    }
     Ok(())
 }

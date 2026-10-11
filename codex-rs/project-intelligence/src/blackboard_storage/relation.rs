@@ -131,9 +131,9 @@ pub(super) async fn load_relations_for_entry(
     stored.into_iter().map(parse_relation).collect()
 }
 
-/// Automatic adapters share endpoint and copied-note eligibility in the hit's snapshot;
-/// for model tools, relations the user recorded are memory the user can forget and stay out,
-/// like their entries. The raw loader above remains available for explicit archival inspection.
+/// Automatic adapters share endpoint and copied-note eligibility in the hit's snapshot, so a
+/// relation is readable exactly while both of its entries are. The raw loader above remains
+/// available for explicit archival inspection.
 pub(super) async fn load_eligible_relations_for_entry(
     connection: &mut SqliteConnection,
     project_id: &str,
@@ -142,14 +142,9 @@ pub(super) async fn load_eligible_relations_for_entry(
     reader: EntryReader,
 ) -> Result<Vec<BlackboardRelation>, BlackboardStoreError> {
     let eligibility = reader.entry_eligibility();
-    let user_relations = match reader {
-        EntryReader::ModelTool => "AND relation.provenance_kind IS NOT 'user'",
-        EntryReader::TrustedClient => "",
-    };
     let stored = sqlx::query_as::<_, StoredRelation>(sqlx::AssertSqlSafe(format!(
         "SELECT relation.* FROM blackboard_relations AS relation
          WHERE relation.project_id = ? AND (from_entry_id = ? OR to_entry_id = ?)
-           {user_relations}
            AND (note IS NULL OR octet_length(note) <= 2048)
            AND EXISTS (SELECT 1 FROM blackboard_entries AS entry
                JOIN blackboard_entry_revisions AS revision

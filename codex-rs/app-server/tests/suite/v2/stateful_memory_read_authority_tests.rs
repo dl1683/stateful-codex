@@ -1,15 +1,14 @@
-//! Witnesses for the two halves of the model-tool exclusion of the user's memory, each on its
-//! own: an Agent-provenance entry with only a HumanDirect context, and an entry whose User
-//! revision was later downgraded to Agent. Both stay out of every model read (exact, search,
-//! history, `since`, evidence dependents, context-map coverage counts) next to an ordinary Agent
-//! control that every read returns, while the trusted-client `blackboard/query` keeps listing
-//! them, including a user-confirmed entry across a refresh and an app-server restart.
+//! One admitted read policy for the user's own memory: a user-confirmed entry, an entry whose
+//! User revision was later downgraded to Agent, and an Agent-provenance entry with only a
+//! HumanDirect context are returned by every model read (exact, search, history, `since`,
+//! evidence dependents, context-map coverage counts) like an ordinary Agent control, and the
+//! trusted-client `blackboard/query` keeps listing them across an app-server restart.
 use super::capture_boundaries_tests::call;
 use super::capture_boundaries_tests::message;
 use super::capture_boundaries_tests::mount;
 use super::capture_boundaries_tests::turn;
-use super::capture_disclosure_cut_tests::output;
-use super::capture_disclosure_cut_tests::project_with_notes;
+use super::memory_reads_tests::output;
+use super::memory_reads_tests::project_with_notes;
 use super::*;
 use codex_app_server_protocol::RequestId;
 use codex_project_intelligence::BlackboardEntryId;
@@ -40,8 +39,8 @@ const CONFIRMED: &str = "Lighthouse deploys happen on Tuesday mornings.";
 const DOWNGRADED: &str = "Lighthouse keeps its codename internal.";
 const DIRECT: &str = "Lighthouse staging hosts reboot nightly.";
 const CONTROL: &str = "Lighthouse caches warm at boot.";
-/// Words only the excluded entries carry.
-const EXCLUDED_WORDS: [&str; 3] = ["Tuesday", "codename", "nightly"];
+/// Every entry's words.
+const ALL: [&str; 4] = [CONFIRMED, DOWNGRADED, DIRECT, CONTROL];
 
 async fn rpc(server: &mut TestAppServer, method: &str, params: Value) -> Result<Value> {
     let id = server.send_request(method, Some(params)).await?;
@@ -90,7 +89,7 @@ async fn client_listing(server: &mut TestAppServer, project: &str) -> Result<BTr
 }
 
 #[tokio::test]
-async fn c456cut_user_memory_exclusions_have_independent_witnesses() -> Result<()> {
+async fn reads_return_user_authority_entries_under_one_policy() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let (home, root) = (TempDir::new()?, TempDir::new()?);
     let (mut server, project, _) = project_with_notes(&home, &root, &responses_server).await?;
@@ -182,8 +181,7 @@ async fn c456cut_user_memory_exclusions_have_independent_witnesses() -> Result<(
         )
         .await?;
 
-    // The trusted client keeps every entry, before and after an app-server restart. This is
-    // also the control that only the user-memory rule excludes them from model reads.
+    // The trusted client keeps every entry, before and after an app-server restart.
     let everything = BTreeSet::from(
         ["confirmed-1", "control-1", "direct-1", "downgraded-1"].map(str::to_string),
     );
@@ -258,26 +256,23 @@ async fn c456cut_user_memory_exclusions_have_independent_witnesses() -> Result<(
         .enumerate()
         .map(|(index, (id, _, _))| (*id, output(&bodies[index + 1], id)))
         .collect::<Vec<_>>();
-    for (id, output) in &outputs {
-        for word in EXCLUDED_WORDS {
-            assert!(!output.contains(word), "{id} carried {word:?}: {output}");
+    for (id, content) in [
+        ("exact-confirmed", CONFIRMED),
+        ("exact-downgraded", DOWNGRADED),
+        ("exact-direct", DIRECT),
+        ("exact-control", CONTROL),
+    ] {
+        let output = &outputs.iter().find(|(found, _)| found == &id).expect(id).1;
+        assert!(output.contains(content), "{id}: {output}");
+    }
+    for (id, output) in outputs.iter().filter(|(id, _)| {
+        ["search", "history", "recall-history", "since", "dependents"].contains(id)
+    }) {
+        for content in ALL {
+            assert!(output.contains(content), "{id} lacks {content:?}: {output}");
         }
     }
-    // Positive controls: every entry read returns the ordinary Agent finding.
-    for (id, output) in outputs.iter().filter(|(id, _)| {
-        [
-            "exact-control",
-            "search",
-            "history",
-            "recall-history",
-            "since",
-            "dependents",
-        ]
-        .contains(id)
-    }) {
-        assert!(output.contains(CONTROL), "{id} lost the control: {output}");
-    }
-    // Coverage counts on the shared route count only the control.
+    // Coverage counts on the shared route count all four entries.
     for (id, output) in outputs.iter().filter(|(id, _)| id.starts_with("map-")) {
         let parsed: Value = serde_json::from_str(output)?;
         let routes = parsed
@@ -291,12 +286,12 @@ async fn c456cut_user_memory_exclusions_have_independent_witnesses() -> Result<(
             .collect::<Vec<_>>();
         assert!(
             !known.is_empty(),
-            "{id} lost the control's coverage: {output}"
+            "{id} lost the entries' coverage: {output}"
         );
         assert!(
             known
                 .iter()
-                .all(|known| *known == json!({"rootEntries": 0, "deeperEntries": 1})),
+                .all(|known| *known == json!({"rootEntries": 0, "deeperEntries": 4})),
             "{id}: {output}"
         );
     }

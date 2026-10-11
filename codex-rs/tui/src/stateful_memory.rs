@@ -69,8 +69,6 @@ pub(crate) fn memory_lines(
                     .dim()
                     .into(),
             );
-            // The user's own memory is never readable through model tools, so no line points
-            // there.
             if item.exceeds_apply_bound {
                 let shown = if item.content_truncated {
                     " (only its first 2,000 bytes are shown)"

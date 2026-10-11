@@ -61,11 +61,11 @@ mod capture_journey_tests;
 #[path = "stateful_capture_boundaries_tests.rs"]
 mod capture_boundaries_tests;
 
-#[path = "stateful_capture_disclosure_cut_tests.rs"]
-mod capture_disclosure_cut_tests;
+#[path = "stateful_memory_reads_tests.rs"]
+mod memory_reads_tests;
 
-#[path = "stateful_capture_exclusion_witness_tests.rs"]
-mod capture_exclusion_witness_tests;
+#[path = "stateful_memory_read_authority_tests.rs"]
+mod memory_read_authority_tests;
 
 #[tokio::test]
 async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> Result<()> {
