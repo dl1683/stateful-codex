@@ -265,5 +265,8 @@ mod reduce_tests;
 #[path = "render_tests.rs"]
 mod render_tests;
 #[cfg(test)]
+#[path = "source_validation_tests.rs"]
+mod source_validation_tests;
+#[cfg(test)]
 #[path = "working_files_tests.rs"]
 mod working_files_tests;
