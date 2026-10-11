@@ -18,6 +18,7 @@ mod search;
 mod status;
 mod storage;
 mod temporal_context;
+mod working_set_storage;
 
 pub use blackboard::BlackboardEntry;
 pub use blackboard::BlackboardEntryId;
@@ -167,6 +168,20 @@ pub use temporal_context::TemporalContext;
 pub use temporal_context::TemporalDerivation;
 pub use temporal_context::TimePrecision;
 pub use temporal_context::TimeZone;
+pub use working_set_storage::FileSampleCoverage;
+pub use working_set_storage::MAX_WORKING_SET_FILE_BYTES;
+pub use working_set_storage::MAX_WORKING_SET_FILES;
+pub use working_set_storage::MAX_WORKING_SET_PAYLOAD_BYTES;
+pub use working_set_storage::SourceWatermark;
+pub use working_set_storage::WorkingSetFileSample;
+pub use working_set_storage::WorkingSetInvalidation;
+pub use working_set_storage::WorkingSetKey;
+pub use working_set_storage::WorkingSetProjection;
+pub use working_set_storage::WorkingSetSourceEvent;
+pub use working_set_storage::WorkingSetStore;
+pub use working_set_storage::WorkingSetStoreError;
+pub use working_set_storage::WorkingSetUpdate;
+pub use working_set_storage::WorkingSetView;
 
 pub use capture_source::SourceLink;
 pub use capture_source::SourceLinkCursor;

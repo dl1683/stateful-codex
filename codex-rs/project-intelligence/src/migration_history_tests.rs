@@ -345,6 +345,11 @@ async fn migration_history_incompatible_and_unknown_refused_by_every_pi_opener_u
                 .err()
                 .unwrap()
                 .to_string(),
+            crate::WorkingSetStore::open(&sqlite)
+                .await
+                .err()
+                .unwrap()
+                .to_string(),
         ] {
             assert!(error.contains(&expected), "{error}");
             assert_eq!(Sha256::digest(std::fs::read(&path).unwrap()), before);
@@ -602,6 +607,11 @@ async fn migration_history_nonempty_untracked_database_refuses_every_opener_unch
                 .err()
                 .unwrap()
                 .to_string(),
+            crate::WorkingSetStore::open(&sqlite)
+                .await
+                .err()
+                .unwrap()
+                .to_string(),
         ] {
             for expected in [
                 "unsupported migration history",
@@ -664,4 +674,23 @@ async fn migration_history_ledger_name_view_is_not_treated_as_empty_database() {
         "{error}"
     );
     assert_eq!(Sha256::digest(std::fs::read(&path).unwrap()), before);
+}
+
+#[tokio::test]
+async fn migration_history_populated_0023_store_gains_capsule_generation_from_zero() {
+    let home = TempDir::new().unwrap();
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    seed(&sqlite, &prefix(/*version*/ 23)).await;
+    let store = crate::WorkingSetStore::open(&sqlite).await.unwrap();
+    assert_eq!(store.eligibility_generation("project").await.unwrap(), 0);
+    let blackboard = BlackboardStore::open(&sqlite).await.unwrap();
+    sqlx::query(
+        "INSERT INTO capture_source_exclusions VALUES ('project', 'digest', 0, 1, 'legacy')",
+    )
+    .execute(&blackboard.pool)
+    .await
+    .unwrap();
+    assert_eq!(store.eligibility_generation("project").await.unwrap(), 1);
+    check_integrity(&blackboard.pool).await;
+    blackboard.pool.close().await;
 }
