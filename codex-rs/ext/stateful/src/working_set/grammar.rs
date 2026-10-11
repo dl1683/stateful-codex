@@ -175,6 +175,19 @@ pub(super) fn labeled_value(line: &str) -> Option<(&str, String)> {
     (label_ok && digits > 0 && unit_ok).then(|| (label, value.to_string()))
 }
 
+/// A bounded head of a command statement: its first line, at most `max` bytes, marked
+/// `[...]` when anything was left out.
+pub(super) fn command_head(statement: &str, max: usize) -> String {
+    let statement = statement.trim();
+    let line = statement.lines().next().unwrap_or_default().trim_end();
+    let head = take_bytes_at_char_boundary(line, max);
+    if head.len() < statement.len() {
+        format!("{head} [...]")
+    } else {
+        head.to_string()
+    }
+}
+
 pub(super) fn family(program: &str) -> Option<usize> {
     FAMILIES.iter().position(|names| one_of(names, program))
 }

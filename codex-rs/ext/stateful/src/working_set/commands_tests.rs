@@ -121,3 +121,22 @@ fn unavailability_is_read_from_the_error_text_of_a_program_the_command_runs() {
         vec![(Some("rg"), Status::Failed, None, 1)]
     );
 }
+
+#[test]
+fn a_long_replacement_script_is_stored_as_a_bounded_head() {
+    let script = format!(
+        "Select-String -Path src/a.py -Pattern '{}'\nGet-Content src/b.py\n",
+        "x|".repeat(200)
+    );
+    let projection = reduced(vec![
+        command("t1", "c1", "rg -n x .", 127, "bash: rg: command not found"),
+        command("t1", "c2", &script, 0, "src/a.py:1:x"),
+    ]);
+    let head = projection.candidates[1].text.as_deref().unwrap_or_default();
+    assert!(
+        head.starts_with("Select-String -Path src/a.py -Pattern 'x|x|"),
+        "{head}"
+    );
+    assert!(head.ends_with(" [...]"), "{head}");
+    assert!(head.len() <= 120 + " [...]".len(), "{head}");
+}

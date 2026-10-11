@@ -13,16 +13,20 @@ use super::Status as S;
 use super::grammar::MAX_INSPECTED_BYTES;
 use super::grammar::UNAVAILABLE;
 use super::grammar::any_in;
+use super::grammar::command_head;
 use super::grammar::command_key;
 use super::grammar::family;
 use super::grammar::labeled_value;
 use super::grammar::programs;
 use super::grammar::shell_body;
+use super::grammar::statements;
 use super::grammar::unavailable_program;
 
 const MAX_MEASUREMENTS: usize = 8;
 const MAX_ERROR_BYTES: usize = 120;
 const MAX_COMMAND_LABEL_BYTES: usize = 60;
+/// Replacement commands render as a head of at most this many bytes.
+const MAX_ROUTE_HEAD_BYTES: usize = 120;
 
 impl Projection {
     pub(super) fn observe_command(
@@ -112,7 +116,25 @@ impl Projection {
                         old.status = S::Resolved;
                     }
                 }
-                let text = format!("{command} | cwd {cwd} | exit 0");
+                // Store a bounded head of the replacing statement, never the whole script;
+                // the source alias names the complete command.
+                let failed_families: Vec<usize> = self
+                    .candidates
+                    .iter()
+                    .filter(|c| c.status == S::Failed)
+                    .filter_map(|c| c.subject.as_deref().and_then(family))
+                    .collect();
+                let statement = statements(&command)
+                    .into_iter()
+                    .find(|s| {
+                        super::grammar::programs(s)
+                            .first()
+                            .and_then(|p| family(p))
+                            .is_some_and(|f| failed_families.contains(&f))
+                    })
+                    .unwrap_or(&command);
+                let head = command_head(statement, MAX_ROUTE_HEAD_BYTES);
+                let text = head;
                 let head = (K::Route, S::Active, O::Host);
                 let subject = (Some(program.as_str()), Some(cwd));
                 if let Some(id) = self.admit(head, subject, &text, source, (0, 0)) {

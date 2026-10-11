@@ -332,3 +332,23 @@ fn a_long_next_action_is_an_explicit_partial_quote_with_its_source() {
     assert!(line.ends_with(" [partial quote] @s1"), "{line}");
     assert_eq!(capsule.aliases[0].1.turn_id, "t1");
 }
+
+#[test]
+fn a_replacement_without_retained_text_shows_no_command() {
+    let mut projection = reduced(vec![
+        command("t1", "c1", "rg -n x .", 127, "bash: rg: command not found"),
+        command("t1", "c2", "git grep -n x src", 0, "src/a.py:1:x"),
+    ]);
+    projection.candidates[1].text = None;
+    let capsule =
+        render_capsule(&projection, &HEADER, &Exclusions::default(), Some(&quarter)).expect("fits");
+    let route = capsule
+        .text
+        .lines()
+        .find(|l| l.starts_with("route:"))
+        .unwrap_or_default();
+    assert_eq!(
+        route,
+        "route: unavailable rg - bash: rg: command not found | exit 127 @s1"
+    );
+}

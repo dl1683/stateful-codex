@@ -11,10 +11,7 @@ use super::Origin;
 use super::Projection;
 use super::SourceRef;
 use super::Status;
-use super::grammar::family;
 use super::grammar::is_locator;
-use super::grammar::programs;
-use super::grammar::statements;
 
 pub(crate) const MAX_CAPSULE_BYTES: usize = 2048;
 pub(crate) const MAX_CAPSULE_TOKENS: usize = 512;
@@ -284,23 +281,16 @@ fn record_line(
             format!("{label}: {} {}", text(first), alias(first))
         }
         CandidateKind::Route => match record.get(1) {
-            Some(fix) => {
-                // Only the replacing statement, not its whole compound command.
-                let wanted = first.subject.as_deref().and_then(family);
-                let command = fix.text.as_deref().unwrap_or_default();
-                let command = command.split(" | cwd ").next().unwrap_or_default();
-                let statement = statements(command)
-                    .into_iter()
-                    .find(|s| programs(s).first().and_then(|p| family(p)) == wanted)
-                    .map_or_else(|| text(fix), escape);
-                format!(
-                    "route: unavailable {} {} -> works {statement} {}",
-                    text(first),
-                    alias(first),
-                    alias(fix)
-                )
-            }
-            None => format!("route: unavailable {} {}", text(first), alias(first)),
+            // The stored replacement is already a bounded command head; a record whose text
+            // was not retained shows no replacement rather than an empty command.
+            Some(fix) if fix.text.as_deref().is_some_and(|t| !t.trim().is_empty()) => format!(
+                "route: unavailable {} {} -> works {} {}",
+                text(first),
+                alias(first),
+                text(fix),
+                alias(fix)
+            ),
+            _ => format!("route: unavailable {} {}", text(first), alias(first)),
         },
         CandidateKind::Attribution => String::new(),
         CandidateKind::Value if first.status == Status::Baseline => {
