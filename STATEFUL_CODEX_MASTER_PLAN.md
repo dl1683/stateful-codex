@@ -275,3 +275,20 @@ Gates, in order:
 4. a scoped paired within1 run on local compaction in both arms, with at least 3 predeclared pairs before claiming.
 
 Required: zero wrong-active rules and zero rejected-working routes.
+
+### Piggyback cut; Forget plus restored reads next (three-way 2026-10-11; step-back 11d)
+
+Offline three-way result (campaign2/capsule_3way/NOTES.md), across 53 boundaries on the regression sets:
+- Piggyback carried no exact recall beyond structural-only: it produced 2 trivial records.
+- It cost +33% units and +89% compaction latency.
+- The hand upper bound shows capacity that is not being used: N3, H1, H2 and RULE-NEW.
+
+The in-band trailer is CUT: it failed 3 leak reviews and brought no gain.
+
+Next:
+1. **Forget plus restored exact reads** (on the minimal epoch seam), then the digest. The structural floor stays, held for the gate.
+2. Later, and bounded: a separate structured extraction call at compaction boundaries, about 10 per run, metered, with history untouched.
+   - It gets one offline comparison with the same validator, packer and scorer.
+   - It advances only on a predeclared exact-recall gain with zero safety violations.
+   - It must recover the within-run excess plus its own overhead.
+   - Resume never triggers extraction.
