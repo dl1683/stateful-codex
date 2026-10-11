@@ -82,7 +82,9 @@ pub(super) struct ContinuityRecord {
     pub(super) more_turns: bool,
     /// Threads whose summaries could not be read (for example legacy history).
     pub(super) unreadable_threads: usize,
-    /// The project's thread list itself could not be read.
+    /// Turns and turn fields withheld because current memory eligibility excludes them.
+    pub(super) withheld: usize,
+    /// The project's history, or a check on it, could not be read.
     pub(super) history_unavailable: bool,
     pub(super) latest_run: Option<LatestRun>,
 }
@@ -231,6 +233,12 @@ impl ContinuityRecord {
             notes.push(format!(
                 "{} threads have no readable turn summaries",
                 self.unreadable_threads
+            ));
+        }
+        if self.withheld > 0 {
+            notes.push(format!(
+                "{} turns or turn fields withheld because memory changed",
+                self.withheld
             ));
         }
         (!notes.is_empty()).then(|| format!("Not shown: {}.", notes.join("; ")))

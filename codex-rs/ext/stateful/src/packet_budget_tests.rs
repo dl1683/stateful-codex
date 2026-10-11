@@ -255,6 +255,7 @@ fn continuity_record() -> ContinuityRecord {
             .collect(),
         more_turns: true,
         unreadable_threads: 0,
+        withheld: 0,
         history_unavailable: false,
         latest_run: Some(LatestRun {
             id: "run-1".to_string(),

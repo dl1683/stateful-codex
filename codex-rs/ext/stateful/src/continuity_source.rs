@@ -49,6 +49,7 @@ pub(super) async fn gather_continuity(
     let mut more_turns = false;
     let mut unreadable_threads = 0;
     let mut history_unavailable = false;
+    let mut withheld = 0;
     let mut turns = Vec::new();
     let listed = match threads
         .list_threads(project_threads_params(
@@ -107,27 +108,40 @@ pub(super) async fn gather_continuity(
                     history_unavailable = true;
                     continue;
                 };
-                if !store
+                // Ineligible content is withheld (memory changed); only a failed check means
+                // the history could not be read.
+                match store
                     .source_turn_eligible(project_id, &captured.turn_id)
                     .await
-                    .unwrap_or(false)
                 {
-                    history_unavailable = true;
-                    continue;
+                    Ok(true) => {}
+                    Ok(false) => {
+                        withheld += 1;
+                        continue;
+                    }
+                    Err(_) => {
+                        history_unavailable = true;
+                        continue;
+                    }
                 }
                 for text in [
                     &mut captured.user,
                     &mut captured.answer,
                     &mut captured.thread_title,
                 ] {
-                    if let Some(value) = text.as_ref()
-                        && !store
-                            .source_text_eligible(project_id, value)
-                            .await
-                            .unwrap_or(false)
-                    {
-                        *text = None;
-                        history_unavailable = true;
+                    let Some(value) = text.as_ref() else {
+                        continue;
+                    };
+                    match store.source_text_eligible(project_id, value).await {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            *text = None;
+                            withheld += 1;
+                        }
+                        Err(_) => {
+                            *text = None;
+                            history_unavailable = true;
+                        }
                     }
                 }
                 if captured.user.is_some() || captured.answer.is_some() {
@@ -170,6 +184,7 @@ pub(super) async fn gather_continuity(
             }),
         more_turns,
         unreadable_threads,
+        withheld,
         history_unavailable,
         latest_run,
         turns,

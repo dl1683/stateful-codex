@@ -37,6 +37,7 @@ fn record(turns: Vec<CapturedTurn>) -> ContinuityRecord {
         turns,
         more_turns: false,
         unreadable_threads: 0,
+        withheld: 0,
         history_unavailable: false,
         latest_run: None,
     }
@@ -293,5 +294,19 @@ fn deferred_section_renders_nothing_but_still_recognizes_a_record() {
             section.matches_retained_fragment("developer", &record_text),
         ),
         (None, None, true)
+    );
+}
+
+/// Content withheld because memory changed is reported as withheld, never as unreadable
+/// history.
+#[test]
+fn withheld_turns_are_not_reported_as_unreadable_history() {
+    let mut continuity = record(vec![turn("turn-1", "Fix the scaler.", Some("Fixed."))]);
+    continuity.withheld = 2;
+    let rendered = continuity.render(MAX_FRAGMENT_BYTES);
+    assert!(!rendered.contains("could not be read"), "{rendered}");
+    assert!(
+        rendered.contains("2 turns or turn fields withheld because memory changed"),
+        "{rendered}"
     );
 }
