@@ -292,3 +292,15 @@ Next:
    - It advances only on a predeclared exact-recall gain with zero safety violations.
    - It must recover the within-run excess plus its own overhead.
    - Resume never triggers extraction.
+
+### Restored reads with a next-turn Forget contract (2026-10-11)
+
+The full Forget lifecycle design (sc_dogfood/integrate/reviews/forget_reads_design.md) is about 13 stages and 8.5k lines. It is kept on file as the successor.
+
+First slice, chosen for usefulness first: entry reads, bounded conversation history, and the digest, admitted at the turn's epoch.
+
+The contract: "Forget takes effect from the next turn. Within the current turn, content already read, held tool results and hook copies included, may still reach the model."
+- Delivering forgotten content in any later turn is blocking.
+- The in-turn route is a named limitation.
+
+Gate: the frozen restricted-read within1 baseline, re-run with reads restored, paired against plain.
