@@ -257,3 +257,21 @@ Branches on the result:
 - capture works but cost fails: trimming comes first;
 - the cap is too small: try a larger capsule or a retrieval hybrid;
 - the evidence is absent: Forget plus restored reads comes first.
+
+### Capsule redesign after the held-out failure (council 2026-10-11c, Codex and Droid converged; sc_dogfood/council/council_20261011c_capsule_FINAL.md)
+
+Lexical semantic extraction is dropped: it scored 5/5 tuned but 2/5 held-out, carried a superseded rule as active, and listed a rejected tool as working.
+
+The capsule becomes:
+- **Floor:** a structural layer of next step, locators, change witnesses, and verified routes.
+- **Primary:** source-validated extractive semantic slots, selected inside the existing local compaction request (zero extra requests), validated against the request input with full provenance.
+- **Unsupported paths:** remote-v2 semantics are unsupported until capability-tested; token-budget and resume carry prior validated records only.
+- **Directives:** come from store supersession. Conflicting unlinked messages show the newer one; the two are never both shown as active.
+
+Gates, in order:
+1. offline comparison on the regression sets;
+2. a fresh sealed holdout;
+3. frozen continuations;
+4. a scoped paired within1 run on local compaction in both arms, with at least 3 predeclared pairs before claiming.
+
+Required: zero wrong-active rules and zero rejected-working routes.
