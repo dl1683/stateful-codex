@@ -8,6 +8,7 @@
 //! callbacks, executor file reads and the checked install).
 #![allow(dead_code)]
 
+mod commands;
 mod grammar;
 mod reduce;
 mod retain;
@@ -179,6 +180,13 @@ pub(crate) enum Observation {
     PlanStepCompleted {
         text: String,
     },
+    Command {
+        source: SourceRef,
+        argv: Vec<String>,
+        cwd: String,
+        exit_code: Option<i32>,
+        output: String,
+    },
     AppliedFileChange {
         path: String,
     },
@@ -226,6 +234,9 @@ impl Projection {
     }
 }
 
+#[cfg(test)]
+#[path = "commands_tests.rs"]
+mod commands_tests;
 #[cfg(test)]
 #[path = "grammar_tests.rs"]
 mod grammar_tests;

@@ -48,6 +48,13 @@ impl Projection {
                     }
                 }
             }
+            Observation::Command {
+                source,
+                argv,
+                cwd,
+                exit_code,
+                output,
+            } => self.observe_command(&source, &argv, &cwd, exit_code, &output),
             Observation::AppliedFileChange { path } => self.touch(&path),
         }
     }

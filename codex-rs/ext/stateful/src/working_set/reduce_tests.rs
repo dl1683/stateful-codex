@@ -28,6 +28,22 @@ pub(super) fn user(turn: &str, text: &str) -> Observation {
     }
 }
 
+pub(super) fn command(
+    turn: &str,
+    call: &str,
+    script: &str,
+    exit: i32,
+    output: &str,
+) -> Observation {
+    Observation::Command {
+        source: source(turn, call),
+        argv: vec!["bash".to_string(), "-lc".to_string(), script.to_string()],
+        cwd: "/repo".to_string(),
+        exit_code: Some(exit),
+        output: output.to_string(),
+    }
+}
+
 pub(super) fn reduced(observations: Vec<Observation>) -> Projection {
     let mut projection = Projection::new();
     for observation in observations {
