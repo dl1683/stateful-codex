@@ -63,6 +63,8 @@ fn request() -> CompactionRequestSnapshot {
     for (item_index, part) in parts.iter_mut().enumerate() {
         part.item_index = item_index;
     }
+    // The correction is the third content part of its message.
+    parts[7].part_index = 2;
     if let Some(origin) = &mut parts[5].origin {
         origin.byte_identical = false;
     }
@@ -126,7 +128,7 @@ fn source(q: usize, needle: &str) -> SourceSpan {
         origin_thread_id: None,
         item_id: origin.item_id.clone(),
         turn_id: origin.turn_id.clone(),
-        part_index: 0,
+        part_index: part.part_index,
         byte_start: start,
         byte_end: start + needle.len(),
         source_part_sha256: digest(&part.text),
@@ -193,7 +195,7 @@ fn json_unicode_escapes_decode_before_byte_comparison() {
     let needle = "Postgres 🙂";
     let start = CHOICE.find(needle).expect("needle");
     let raw = format!(
-        r#"{{"version":1,"records":[{{"kind":"diagnosis","finding":{{"q":0,"start":{start},"end":{},"quote":"Postgres 🙂"}},"subject":{},"uncertainty":null}}],"supersessions":[]}}"#,
+        r#"{{"version":1,"records":[{{"kind":"diagnosis","finding":{{"q":0,"start":{start},"end":{},"quote":"Postgres \ud83d\ude42"}},"subject":{},"uncertainty":null}}],"supersessions":[]}}"#,
         start + needle.len(),
         span(0, "SQLite"),
     );
