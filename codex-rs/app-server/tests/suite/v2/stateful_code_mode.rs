@@ -129,17 +129,13 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
         "blackboard_update_batch",
         "steering_reconcile",
         "blackboard_query",
+        "conversation_read",
     ] {
         assert!(
             top_level.iter().any(|name| name == direct),
             "{direct} should be a direct model tool; saw {top_level:?}"
         );
     }
-    // Earlier conversation reaches the model only through the thread-start continuity record.
-    assert!(
-        !top_level.iter().any(|name| name == "conversation_read"),
-        "conversation_read must not be offered; saw {top_level:?}"
-    );
     let nested = tools
         .iter()
         .find(|tool| tool_name(tool) == "exec")
@@ -154,6 +150,7 @@ async fn code_mode_only_keeps_prose_writes_direct_and_quote_safe() -> Result<()>
         "evidence_read(",
         "context_map_query(",
         "stateful_run_read(",
+        "conversation_read(",
     ] {
         assert!(!nested.contains(read), "{read} reachable from code mode");
     }

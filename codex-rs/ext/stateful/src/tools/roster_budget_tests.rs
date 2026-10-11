@@ -17,8 +17,9 @@ use crate::visible_root::VisibleRootRegistry;
 /// (checkpoint E, about 1.2 KB) raised the total ceiling from 19,500; the direct ceiling,
 /// which is the per-request cost, is unchanged. The required completion openIssues field took
 /// the total to about 20,190; dismissal/approval receipt and check-directory fields to about
-/// 20,300.
-const MAX_ROSTER_BYTES: usize = 20_400;
+/// 20,300. The restored deferred conversation_read (about 510 bytes, loaded only through tool
+/// search) took the total to about 20,590.
+const MAX_ROSTER_BYTES: usize = 20_700;
 /// Every request carries the directly exposed tools, so their size is a fixed per-request
 /// cost; specialized tools are deferred to tool search.
 const MAX_DIRECT_ROSTER_BYTES: usize = 11_500;

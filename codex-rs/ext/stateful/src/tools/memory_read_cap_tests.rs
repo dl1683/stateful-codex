@@ -127,6 +127,15 @@ async fn read_errors_stay_within_the_read_error_bound() {
             json!({"since": long}),
         ),
         (
+            Arc::new(conversation_read::ConversationReadTool::new(
+                "project-1".into(),
+                services.clone(),
+                projects.clone(),
+            )),
+            "conversation_read",
+            json!({"cursor": long}),
+        ),
+        (
             Arc::new(blackboard::BlackboardQueryTool::new(
                 "project-1".into(),
                 thread.clone(),

@@ -36,7 +36,8 @@ const RULE: &str = "Ground rules for this project:\n- Never push.";
 const FINDING: &str = "The release checklist bumps the version first.";
 const NOTES: &str = "Release checklist: bump the version.\n";
 /// Words of the user's rule and decision; no read after their Forget may return them.
-const USER_WORDS: [&str; 4] = ["Never push", "offline on a laptop", "SQLite", "Postgres"];
+pub(super) const USER_WORDS: [&str; 4] =
+    ["Never push", "offline on a laptop", "SQLite", "Postgres"];
 
 /// A project with one indexed source file and a durably bound thread.
 pub(super) async fn project_with_notes(
@@ -79,7 +80,7 @@ pub(super) async fn project_with_notes(
 
 /// Session 1: an applied decision, a declared rule and an agent finding. Returns the
 /// decision's id and applied revision and the rule's id.
-async fn remember(
+pub(super) async fn remember(
     server: &mut TestAppServer,
     project: &str,
     thread: &str,
@@ -112,7 +113,7 @@ async fn remember(
 
 /// The model's script: session 1 proposes the decision and records the finding; later
 /// requests make the calls `reads` lists, in order (an empty tool name ends a turn).
-fn script(
+pub(super) fn script(
     targets: Arc<Mutex<Vec<(String, String, Value)>>>,
 ) -> super::capture_boundaries_tests::Script {
     Box::new(move |sequence, body| match sequence {
@@ -185,7 +186,10 @@ fn reads(phase: &str, decision: &str, rule: &str) -> Vec<(String, String, Value)
 }
 
 /// Every read's output in the logged requests, by call ID.
-fn outputs(bodies: &[Value], reads: &[(String, String, Value)]) -> Vec<(String, String)> {
+pub(super) fn outputs(
+    bodies: &[Value],
+    reads: &[(String, String, Value)],
+) -> Vec<(String, String)> {
     reads
         .iter()
         .filter(|(_, tool, _)| !tool.is_empty())

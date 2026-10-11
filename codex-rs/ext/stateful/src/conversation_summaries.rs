@@ -1,6 +1,7 @@
 //! Reads of the thread store's per-turn summaries (each turn's first user message and
 //! final answer) for the selected project's top-level threads.
 
+use codex_project_intelligence::BlackboardStore;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_thread_store::ListThreadsParams;
@@ -94,4 +95,44 @@ pub(super) fn turn_status(turn: &StoredTurn) -> Option<&'static str> {
         StoredTurnStatus::Failed => Some("failed"),
         StoredTurnStatus::InProgress => Some("in progress"),
     }
+}
+
+/// A turn's first user message and final answer as a read may return them now, under the
+/// memory eligibility current at this call. `None` withholds the whole turn: its sealed
+/// source was excluded by a Forget, its user message carries forgotten or retired memory
+/// words, or eligibility could not be checked. An ineligible answer is withheld alone. Legacy
+/// turns without a sealed source get only the text checks, which fail closed.
+pub(super) async fn eligible_turn_texts(
+    store: &BlackboardStore,
+    project_id: &str,
+    turn: &StoredTurn,
+) -> Option<(Option<String>, Option<String>)> {
+    if !store
+        .source_turn_eligible(project_id, &turn.turn_id)
+        .await
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let (user, answer) = turn_texts(&turn.items);
+    if let Some(text) = &user
+        && !store
+            .source_text_eligible(project_id, text)
+            .await
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    let answer = match answer {
+        Some(text)
+            if store
+                .source_text_eligible(project_id, &text)
+                .await
+                .unwrap_or(false) =>
+        {
+            Some(text)
+        }
+        _ => None,
+    };
+    Some((user, answer))
 }

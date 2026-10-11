@@ -67,6 +67,9 @@ mod memory_reads_tests;
 #[path = "stateful_memory_read_authority_tests.rs"]
 mod memory_read_authority_tests;
 
+#[path = "stateful_conversation_reads_tests.rs"]
+mod conversation_reads_tests;
+
 #[tokio::test]
 async fn the_user_reviews_forgets_and_corrects_memory_without_a_model_turn() -> Result<()> {
     let responses_server = responses::start_mock_server().await;

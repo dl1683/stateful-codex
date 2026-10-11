@@ -26,6 +26,7 @@ const BLACKBOARD_QUERY: &str = "blackboard_query";
 const CONTEXT_MAP_QUERY: &str = "context_map_query";
 const EVIDENCE_READ: &str = "evidence_read";
 const STEERING_QUERY: &str = "steering_query";
+const CONVERSATION_READ: &str = "conversation_read";
 const MEMORY_READ: &str = "memory_read";
 const BLACKBOARD_BATCH_RECORD: &str = "blackboard_record_batch";
 const BLACKBOARD_UPDATE: &str = "blackboard_update_batch";
@@ -180,6 +181,7 @@ impl StatefulAttributionTracker {
                 CONTEXT_MAP_QUERY => turn.counters.route_query_calls += 1,
                 EVIDENCE_READ => turn.counters.evidence_read_calls += 1,
                 STEERING_QUERY => turn.counters.steering_query_calls += 1,
+                CONVERSATION_READ => turn.counters.conversation_read_calls += 1,
                 BLACKBOARD_BATCH_RECORD | BLACKBOARD_UPDATE | BLACKBOARD_RELATE => {
                     turn.counters.blackboard_write_calls += 1
                 }
@@ -254,6 +256,7 @@ fn stateful_tool_name(name: &codex_extension_api::ToolName) -> Option<&str> {
                     | CONTEXT_MAP_QUERY
                     | EVIDENCE_READ
                     | STEERING_QUERY
+                    | CONVERSATION_READ
                     | MEMORY_READ
                     | BLACKBOARD_BATCH_RECORD
                     | BLACKBOARD_UPDATE
