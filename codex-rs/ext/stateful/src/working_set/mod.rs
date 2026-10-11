@@ -11,6 +11,7 @@
 mod commands;
 mod grammar;
 mod reduce;
+mod render;
 mod retain;
 mod working_files;
 
@@ -250,6 +251,9 @@ mod grammar_tests;
 #[cfg(test)]
 #[path = "reduce_tests.rs"]
 mod reduce_tests;
+#[cfg(test)]
+#[path = "render_tests.rs"]
+mod render_tests;
 #[cfg(test)]
 #[path = "working_files_tests.rs"]
 mod working_files_tests;
