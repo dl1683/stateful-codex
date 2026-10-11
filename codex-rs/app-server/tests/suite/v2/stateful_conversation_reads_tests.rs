@@ -1,7 +1,10 @@
 //! Exact conversation-history reads through the public app-server: every read checks current
 //! memory eligibility when it runs, so once a Forget commits no history read of a later turn
-//! returns the user message that stated the forgotten memory.
+//! returns the user message that stated the forgotten memory; reads are bounded per call and
+//! per turn.
 use super::capture_boundaries_tests::DECISION;
+use super::capture_boundaries_tests::call;
+use super::capture_boundaries_tests::message;
 use super::capture_boundaries_tests::mount;
 use super::capture_boundaries_tests::turn;
 use super::memory_reads_tests::USER_WORDS;
@@ -146,5 +149,86 @@ async fn history_reads_withhold_forgotten_user_messages_from_the_next_turn() -> 
         );
     }
     assert_eq!(page(&found, "after-control")["text"], json!(CONTROL));
+    Ok(())
+}
+
+/// A 20 KB user message pages within the 8,192-byte read envelope; one turn's history reads
+/// stop at the 32,768-byte turn allowance, and the next turn reads again.
+#[tokio::test]
+async fn history_reads_are_bounded_per_call_and_per_turn() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let (home, root) = (TempDir::new()?, TempDir::new()?);
+    let (mut server, project, thread) = project_with_notes(&home, &root, &responses_server).await?;
+    let reads = Arc::new(Mutex::new(vec![("end".to_string(), Value::Null)]));
+    let scripted = reads.clone();
+    let calls = mount(
+        &responses_server,
+        Box::new(
+            move |sequence, _| match scripted.lock().expect("reads lock").get(sequence) {
+                Some((id, args)) if !args.is_null() => call(id, "conversation_read", args.clone()),
+                _ => message("Done."),
+            },
+        ),
+    )
+    .await;
+    let long = (0..400)
+        .map(|index| format!("Section {index}: keep \"quoted\" text.\n"))
+        .collect::<String>();
+    let first = server
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.clone(),
+            input: vec![UserInput::Text {
+                text: long.clone(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?
+        .turn
+        .id;
+    let exact = json!({"threadId": thread, "turnId": first, "part": "user"});
+    let ids = [
+        "page-1", "page-2", "page-3", "page-4", "page-5", "end-1", "later", "end-2",
+    ];
+    *reads.lock().expect("reads lock") = [("end".to_string(), Value::Null)]
+        .into_iter()
+        .chain(ids.iter().map(|id| {
+            let args = if id.starts_with("end") {
+                Value::Null
+            } else {
+                exact.clone()
+            };
+            (id.to_string(), args)
+        }))
+        .collect();
+    let second = start_thread(&mut server, &project).await?;
+    turn(&mut server, &second, &["Read the brief."]).await?;
+    turn(&mut server, &second, &["Read it again."]).await?;
+
+    let bodies = calls.lock().expect("request log lock").clone();
+    let output = |id: &str| -> String {
+        let call = (id.to_string(), "conversation_read".to_string(), Value::Null);
+        outputs(&bodies, &[call]).remove(0).1
+    };
+    for id in ["page-1", "page-2", "page-3", "page-4", "later"] {
+        let text = output(id);
+        let page: Value = serde_json::from_str(&text).expect("json page");
+        assert!(
+            (6_000..=8_192).contains(&text.len()),
+            "{id}: {} bytes",
+            text.len()
+        );
+        assert_eq!(
+            (page["offset"].clone(), page["totalBytes"].clone()),
+            (json!(0), json!(long.len()))
+        );
+        assert!(long.starts_with(page["text"].as_str().expect("page text")));
+        assert!(page["nextOffset"].as_u64().is_some(), "{id}");
+    }
+    let refused = output("page-5");
+    assert!(
+        refused.contains("32768-byte conversation history allowance") && refused.len() <= 2_048,
+        "{refused}"
+    );
     Ok(())
 }

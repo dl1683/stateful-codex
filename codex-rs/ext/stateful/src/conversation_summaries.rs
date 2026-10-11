@@ -1,6 +1,11 @@
 //! Reads of the thread store's per-turn summaries (each turn's first user message and
 //! final answer) for the selected project's top-level threads.
 
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
+
 use codex_project_intelligence::BlackboardStore;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
@@ -94,6 +99,41 @@ pub(super) fn turn_status(turn: &StoredTurn) -> Option<&'static str> {
         StoredTurnStatus::Interrupted => Some("interrupted"),
         StoredTurnStatus::Failed => Some("failed"),
         StoredTurnStatus::InProgress => Some("in progress"),
+    }
+}
+
+/// Serialized conversation-history bytes the reads of one turn may return in total
+/// (`conversation_read` results and `memory_read`'s earlier turns): four full read envelopes.
+pub(super) const MAX_HISTORY_BYTES_PER_TURN: usize = 32_768;
+/// Turns whose use is remembered; the oldest is forgotten first.
+const MAX_TRACKED_TURNS: usize = 64;
+
+/// What each turn's conversation-history reads have returned, so one turn cannot page a
+/// whole transcript into its context.
+#[derive(Clone, Default)]
+pub(super) struct HistoryAllowance(Arc<Mutex<VecDeque<(String, usize)>>>);
+
+impl HistoryAllowance {
+    /// Charges `bytes` to `turn_id`, or charges nothing and returns false when the turn's
+    /// allowance cannot hold them.
+    pub(super) fn charge(&self, turn_id: &str, bytes: usize) -> bool {
+        let mut turns = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let index = match turns.iter().position(|(id, _)| id == turn_id) {
+            Some(index) => index,
+            None => {
+                if turns.len() == MAX_TRACKED_TURNS {
+                    turns.pop_front();
+                }
+                turns.push_back((turn_id.to_string(), 0));
+                turns.len() - 1
+            }
+        };
+        let used = &mut turns[index].1;
+        if bytes > MAX_HISTORY_BYTES_PER_TURN - *used {
+            return false;
+        }
+        *used += bytes;
+        true
     }
 }
 

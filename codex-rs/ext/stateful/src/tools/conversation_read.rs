@@ -4,7 +4,8 @@
 //!
 //! Every listing and page is checked against current memory eligibility when the read runs:
 //! a turn whose source was excluded, or whose user message carries words of memory the user
-//! forgot, is withheld whole. Each read is bounded by the memory read envelope.
+//! forgot, is withheld whole. Reads are bounded per call (the memory read envelope) and per
+//! turn (`MAX_HISTORY_BYTES_PER_TURN`).
 
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ use super::MAX_MEMORY_READ_BYTES;
 use super::parse_arguments;
 use super::respond;
 use super::run_read::read_page;
+use crate::conversation_summaries::MAX_HISTORY_BYTES_PER_TURN;
 use crate::conversation_summaries::eligible_turn_texts;
 use crate::conversation_summaries::is_top_level;
 use crate::conversation_summaries::project_threads_params;
@@ -115,6 +117,16 @@ impl ConversationReadTool {
                 ));
             }
         };
+        let bytes = result.to_string().len();
+        if !self
+            .services
+            .history_allowance()
+            .charge(&call.turn_id, bytes)
+        {
+            return Err(respond(format!(
+                "this turn already read its {MAX_HISTORY_BYTES_PER_TURN}-byte conversation history allowance; continue from what was read, or read more in a later turn"
+            )));
+        }
         Ok(Box::new(codex_extension_api::JsonToolOutput::new(result)))
     }
 
@@ -365,7 +377,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ConversationReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Project conversation history: {} threads, {threadId} turns, {threadId,turnId,part} a turn's first user message or final answer, exactly. Forgotten memory is withheld.".to_string(),
+            description: "Project conversation history: {} threads, {threadId} turns, {threadId,turnId,part} a turn's first user message or final answer, exactly. Forgotten memory is withheld; bounded per call and per turn.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
