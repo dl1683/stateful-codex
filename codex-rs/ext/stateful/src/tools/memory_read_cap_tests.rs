@@ -10,6 +10,8 @@ use tempfile::TempDir;
 
 use super::capture_repair_tests::call;
 
+type ReadTool = Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>;
+
 /// A truncation allowance far above every Stateful bound, so only the memory-read cap binds.
 const GENEROUS: usize = 1_000_000;
 
@@ -101,4 +103,104 @@ async fn memory_reads_stay_within_the_memory_read_bound() {
         ),
         (true, json!(true), json!(false))
     );
+}
+
+/// Every read executor bounds its error and refusal text at the output boundary, even under a
+/// generous host allowance and an argument that echoes whole into a diagnostic (a 45 KB
+/// malformed `since` date).
+#[tokio::test]
+async fn read_errors_stay_within_the_read_error_bound() {
+    let home = TempDir::new().unwrap();
+    let services =
+        ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
+    let projects: Arc<dyn codex_thread_store::ThreadStore> =
+        Arc::new(InMemoryThreadStore::default());
+    let thread = "00000000-0000-0000-0000-000000000001".to_string();
+    let long = "0!1@2#3$4%5^6&7*8(9)".repeat(2_250);
+    let tools: Vec<(ReadTool, &str, serde_json::Value)> = vec![
+        (
+            Arc::new(memory_read::MemoryReadTool::new(
+                "project-1".into(),
+                services.clone(),
+            )),
+            "memory_read",
+            json!({"since": long}),
+        ),
+        (
+            Arc::new(blackboard::BlackboardQueryTool::new(
+                "project-1".into(),
+                thread.clone(),
+                services.clone(),
+                projects.clone(),
+                VisibleRootRegistry::default(),
+            )),
+            "blackboard_query",
+            json!({"entryId": long}),
+        ),
+        (
+            Arc::new(evidence::EvidenceReadTool::new(
+                "project-1".into(),
+                thread.clone(),
+                services.clone(),
+                projects.clone(),
+            )),
+            "evidence_read",
+            json!({"relativePath": long}),
+        ),
+        (
+            Arc::new(context_map::ContextMapQueryTool::new(
+                "project-1".into(),
+                services.clone(),
+                projects.clone(),
+            )),
+            "context_map_query",
+            json!({"text": long}),
+        ),
+        (
+            Arc::new(context_map::ContextMapRefreshTool::new(
+                "project-1".into(),
+                services.clone(),
+                projects.clone(),
+            )),
+            "context_map_refresh",
+            json!({"reason": long}),
+        ),
+        (
+            Arc::new(run_read::StatefulRunReadTool::new(
+                "project-1".into(),
+                thread.clone(),
+                services.clone(),
+            )),
+            "stateful_run_read",
+            json!({"section": "result", "cursor": long}),
+        ),
+        (
+            Arc::new(steering::SteeringQueryTool::new(
+                "project-1".into(),
+                thread.clone(),
+                services.clone(),
+            )),
+            "steering_query",
+            json!({"cursor": long}),
+        ),
+    ];
+    for (tool, name, arguments) in tools {
+        match tool
+            .handle(call(name, arguments, GENEROUS, ToolCallSource::Direct))
+            .await
+        {
+            Ok(output) => assert!(output.log_output().len() <= MAX_RESPONSE_BYTES, "{name}"),
+            Err(FunctionCallError::RespondToModel(message) | FunctionCallError::Fatal(message)) => {
+                let bytes = serde_json::to_string(&message).unwrap().len();
+                assert!(bytes <= MAX_READ_ERROR_BYTES, "{name}: {bytes} bytes");
+                assert!(
+                    !message.contains(&long[..4_096]),
+                    "{name} echoed its argument"
+                );
+                if name == "memory_read" {
+                    assert!(message.starts_with("since must be YYYY-MM-DD"), "{message}");
+                }
+            }
+        }
+    }
 }

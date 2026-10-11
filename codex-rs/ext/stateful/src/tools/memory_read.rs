@@ -479,9 +479,9 @@ pub(super) fn parse_utc_day(value: &str) -> Result<i64, String> {
         .split('-')
         .map(str::parse::<i64>)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| format!("since must be YYYY-MM-DD, got {value}"))?;
+        .map_err(|_| format!("since must be YYYY-MM-DD, got {}", prefix(value)))?;
     let [year, month, day] = parts[..] else {
-        return Err(format!("since must be YYYY-MM-DD, got {value}"));
+        return Err(format!("since must be YYYY-MM-DD, got {}", prefix(value)));
     };
     let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
     let days_in_month = match month {
@@ -493,7 +493,8 @@ pub(super) fn parse_utc_day(value: &str) -> Result<i64, String> {
     };
     if !(1970..=9999).contains(&year) || !(1..=days_in_month).contains(&day) {
         return Err(format!(
-            "since must be a real date YYYY-MM-DD from 1970, got {value}"
+            "since must be a real date YYYY-MM-DD from 1970, got {}",
+            prefix(value)
         ));
     }
     // Days from civil (Howard Hinnant), proleptic Gregorian.
@@ -505,6 +506,19 @@ pub(super) fn parse_utc_day(value: &str) -> Result<i64, String> {
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     let days = era * 146_097 + day_of_era - 719_468;
     Ok(days * 86_400_000)
+}
+
+/// At most the first 32 bytes of a rejected argument, so a diagnostic never echoes it whole.
+fn prefix(value: &str) -> String {
+    let mut end = value.len().min(32);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end < value.len() {
+        format!("{}...", &value[..end])
+    } else {
+        value.to_string()
+    }
 }
 
 fn day(ms: i64) -> String {
@@ -549,7 +563,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for MemoryReadTool {
     where
         'call: 'a,
     {
-        Box::pin(self.handle_call(call))
+        let limit = super::read_error_limit(&call);
+        Box::pin(async move {
+            self.handle_call(call)
+                .await
+                .map_err(|error| super::bound_read_error(error, limit))
+        })
     }
 }
 

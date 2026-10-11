@@ -153,7 +153,12 @@ impl<'call> ToolExecutor<ToolCall<'call>> for SteeringQueryTool {
     where
         'call: 'a,
     {
-        Box::pin(self.handle_call(call))
+        let limit = super::read_error_limit(&call);
+        Box::pin(async move {
+            self.handle_call(call)
+                .await
+                .map_err(|error| super::bound_read_error(error, limit))
+        })
     }
 }
 

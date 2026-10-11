@@ -214,6 +214,50 @@ fn bounded_respond(call: &ToolCall<'_>, message: &str) -> FunctionCallError {
     FunctionCallError::RespondToModel(message)
 }
 
+/// Serialized bound for a read executor's error or refusal text.
+const MAX_READ_ERROR_BYTES: usize = 2_048;
+
+/// The serialized bound for a read executor's error text on this call.
+fn read_error_limit(call: &ToolCall<'_>) -> usize {
+    call.response_byte_budget(MAX_RESPONSE_BYTES)
+        .min(MAX_READ_ERROR_BYTES)
+}
+
+/// Caps a read executor's error at its output boundary, whatever produced it (a store error,
+/// a parser diagnostic, a refusal): a longer text is cut and marked as shortened.
+fn bound_read_error(error: FunctionCallError, limit: usize) -> FunctionCallError {
+    match error {
+        FunctionCallError::RespondToModel(message) => {
+            FunctionCallError::RespondToModel(shorten_diagnostic(message, limit))
+        }
+        FunctionCallError::Fatal(message) => {
+            FunctionCallError::Fatal(shorten_diagnostic(message, limit))
+        }
+    }
+}
+
+fn shorten_diagnostic(message: String, limit: usize) -> String {
+    const MARKER: &str = " [diagnostic shortened]";
+    let fits = |text: &str| serde_json::to_string(text).is_ok_and(|json| json.len() <= limit);
+    if fits(&message) {
+        return message;
+    }
+    let mut end = message.len();
+    loop {
+        end = end * 3 / 4;
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        let shortened = format!("{}{MARKER}", &message[..end]);
+        if fits(&shortened) {
+            return shortened;
+        }
+        if end == 0 {
+            return String::new();
+        }
+    }
+}
+
 /// Emits a JSON result only when its serialized text fits the call's budget. Callers
 /// that mutate state must size their output before mutating; this is the backstop.
 fn bounded_json_output(
