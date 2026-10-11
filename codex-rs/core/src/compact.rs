@@ -6,6 +6,7 @@ use std::time::Instant;
 use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
+use crate::compact_extraction::CompactionExtraction;
 use crate::context::CompactionSummary;
 use crate::context::ContextualUserFragment;
 use crate::context::world_state::WorldState;
@@ -273,15 +274,37 @@ async fn run_compact_task_inner_impl(
     // Reuse one client session so turn-scoped state (sticky routing and websocket incremental
     // request tracking) survives retries within this compact turn.
     let mut client_session = sess.services.model_client.new_session();
-    let compaction_response = loop {
+    let mut native_attempts: u32 = 0;
+    let (mut compaction_response, extraction) = loop {
         // Clone is required because of the loop
-        let mut turn_input = history
+        let annotated_input = history
             .clone()
-            .for_prompt(&turn_context.model_info().input_modalities);
+            .for_prompt_annotated(&turn_context.model_info().input_modalities);
+        native_attempts = native_attempts.saturating_add(1);
+        // Rebuilt for every attempt: a trimmed or retried request gets a fresh map and marker.
+        let extraction = CompactionExtraction::prepare(
+            sess.as_ref(),
+            &turn_context.sub_id,
+            native_attempts,
+            history.annotated_items(),
+            &annotated_input,
+        );
+        let mut turn_input = annotated_input
+            .into_iter()
+            .map(ResponseItemEnvelope::into_item)
+            .collect::<Vec<_>>();
         sess.services
             .executed_tool_calls
             .attach_to_compaction_prompt(&mut turn_input);
         let turn_input_len = turn_input.len();
+        if let Some(extraction) = &extraction {
+            turn_input.push(extraction.instruction_item());
+        }
+        let output_commit = if extraction.is_some() {
+            CompactionOutputCommit::Buffered
+        } else {
+            CompactionOutputCommit::Streamed
+        };
         let prompt = Prompt {
             input: turn_input,
             base_instructions: sess.get_prompt_base_instructions().await,
@@ -298,12 +321,13 @@ async fn run_compact_task_inner_impl(
             &responses_metadata,
             &prompt,
             compaction_metadata.phase(),
+            output_commit,
         )
         .await;
 
         match attempt_result {
             Ok(response) => {
-                break response;
+                break (response, extraction);
             }
             Err(err)
                 if matches!(
@@ -347,6 +371,20 @@ async fn run_compact_task_inner_impl(
             }
         }
     };
+
+    // The trailer is host extraction data: it never enters history or the summary.
+    let trailer = extraction
+        .as_ref()
+        .map(|extraction| extraction.separate_trailer(&mut compaction_response.output))
+        .transpose()?;
+    if extraction.is_some() && !matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
+        let output = std::mem::take(&mut compaction_response.output)
+            .into_iter()
+            .map(compaction_output_envelope)
+            .collect();
+        sess.record_annotated_conversation_items(&turn_context, turn_context.model_info(), output)
+            .await;
+    }
 
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.annotated_items();
@@ -401,6 +439,9 @@ async fn run_compact_task_inner_impl(
     )
     .await;
     sess.recompute_token_usage(&turn_context).await;
+    if let (Some(extraction), Some(trailer)) = (extraction, trailer) {
+        extraction.complete(sess.as_ref(), trailer, native_attempts);
+    }
 
     sess.emit_turn_item_completed(&turn_context, compaction_item)
         .await;
@@ -754,6 +795,23 @@ struct CompactionResponse {
     output: Vec<ResponseItem>,
 }
 
+/// Whether non-post-turn output is recorded as it streams or held until completion.
+#[derive(Clone, Copy)]
+enum CompactionOutputCommit {
+    Streamed,
+    Buffered,
+}
+
+fn compaction_output_envelope(item: ResponseItem) -> ResponseItemEnvelope {
+    ResponseItemEnvelope {
+        item,
+        metadata: Some(CodexHarnessMetadata {
+            compaction_output: true,
+            ..Default::default()
+        }),
+    }
+}
+
 async fn drain_to_completed(
     sess: &Session,
     turn_context: &TurnContext,
@@ -761,6 +819,7 @@ async fn drain_to_completed(
     responses_metadata: &CodexResponsesMetadata,
     prompt: &Prompt,
     phase: CompactionPhase,
+    output_commit: CompactionOutputCommit,
 ) -> CodexResult<CompactionResponse> {
     let mut stream = client_session
         .stream(
@@ -790,7 +849,9 @@ async fn drain_to_completed(
         };
         match event {
             Ok(ResponseEvent::OutputItemDone(item)) => {
-                if matches!(phase, CompactionPhase::PostTurn) {
+                if matches!(phase, CompactionPhase::PostTurn)
+                    || matches!(output_commit, CompactionOutputCommit::Buffered)
+                {
                     // Commit post-turn summaries only after success; failures must leave both
                     // the live history and persisted rollout intact.
                     output.push(item);
@@ -798,13 +859,7 @@ async fn drain_to_completed(
                     sess.record_annotated_conversation_items(
                         turn_context,
                         turn_context.model_info(),
-                        vec![ResponseItemEnvelope {
-                            item,
-                            metadata: Some(CodexHarnessMetadata {
-                                compaction_output: true,
-                                ..Default::default()
-                            }),
-                        }],
+                        vec![compaction_output_envelope(item)],
                     )
                     .await;
                 }
