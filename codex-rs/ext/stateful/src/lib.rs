@@ -37,6 +37,7 @@ mod socratic;
 mod source_freshness;
 mod tools;
 mod visible_root;
+mod working_set;
 mod world_state;
 
 use std::sync::Arc;
