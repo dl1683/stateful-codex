@@ -488,10 +488,10 @@ async fn retired_matches_are_withheld_and_current_wording_remains_readable() {
     );
 }
 
-/// A user-authored entry replaced by an agent record is recalled as history under the same
-/// read policy as the agent's current wording, attributed to the user.
+/// A user-authored entry replaced by an agent record stays out of recall: superseded user words
+/// are never readable, so only the agent's current wording is returned.
 #[tokio::test]
-async fn user_authored_predecessors_are_recalled_with_attribution() {
+async fn user_authored_predecessors_stay_out_of_recall() {
     let state_home = tempfile::TempDir::new().expect("state home");
     let services = crate::services::ProjectIntelligenceServices::new(
         codex_state::SqliteConfig::new_for_testing(
@@ -531,18 +531,8 @@ async fn user_authored_predecessors_are_recalled_with_attribution() {
             (
                 row["entryId"].as_str().unwrap_or_default().to_string(),
                 row["source"].as_str().unwrap_or_default().to_string(),
-                row["attribution"]["by"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        sources,
-        vec![
-            ("b".to_string(), "agent record".to_string(), String::new()),
-            ("a".to_string(), "user".to_string(), "user".to_string()),
-        ]
-    );
+    assert_eq!(sources, vec![("b".to_string(), "agent record".to_string())]);
 }

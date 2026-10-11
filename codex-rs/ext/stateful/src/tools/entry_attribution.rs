@@ -9,18 +9,20 @@ use serde_json::json;
 use crate::root_blackboard::user_statement;
 use crate::root_blackboard::utc_minute;
 
-/// `{"by", "said", "adopted", "recorded"}` for an entry the user declared or applied (the same
-/// statement the root renders), `{"by": "user", "recorded"}` for another user-authored revision,
-/// and nothing for other entries, whose `provenance` already names their author. Times are UTC
-/// minutes; a statement time the host did not observe is `unknown`, never guessed. An
-/// unreadable legacy context counts as no statement.
+/// `{"by", "said", "adopted", "recorded"}` for an entry whose returned revision is still the
+/// words the user declared or applied (the same statement the root renders);
+/// `{"by": "user", "said": "unknown", "recorded"}` for another user-authored revision; nothing
+/// for other revisions, whose `provenance` already names their author, even when the user once
+/// stated earlier words of the entry. Times are UTC minutes; a statement time the host did not
+/// observe is `unknown`, never guessed. An unreadable legacy context, or an entry that changed
+/// since it was read, counts as no statement.
 pub(super) async fn attribution(
     store: &BlackboardStore,
     project_id: &str,
     entry: &BlackboardEntry,
 ) -> Option<Value> {
     let context = store
-        .knowledge_context(project_id, &entry.id)
+        .statement_context(project_id, &entry.id, entry.revision)
         .await
         .ok()
         .flatten();
@@ -31,6 +33,6 @@ pub(super) async fn attribution(
             "adopted": statement.adopted, "recorded": recorded,
         })),
         None => (entry.value.provenance.kind == BlackboardProvenanceKind::User)
-            .then(|| json!({"by": "user", "recorded": recorded})),
+            .then(|| json!({"by": "user", "said": "unknown", "recorded": recorded})),
     }
 }

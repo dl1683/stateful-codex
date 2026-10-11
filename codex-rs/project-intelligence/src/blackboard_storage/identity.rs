@@ -52,8 +52,13 @@ pub(super) const ENTRY_SOURCE_ELIGIBILITY: &str = "
 /// next-turn Forget contract). Durable group membership covers proposals even when their
 /// context is unsupported; bounded historical payload checks also cover linked copies of
 /// proposal context.
+/// A superseded or retired revision of the user's own memory is never readable, whatever its
+/// provenance (user words skip the retired-alias check above); agent history stays readable.
 pub(super) fn automatic_entry_eligibility() -> String {
-    root_entry_eligibility()
+    format!(
+        "{} AND (revision.state = 'active' OR ({NOT_USER_STATED}))",
+        root_entry_eligibility()
+    )
 }
 
 /// Derived outputs that persist beyond the turn (completion checklists and the durable
@@ -152,6 +157,47 @@ impl BlackboardStore {
         let eligibility = derived_output_eligibility();
         Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT EXISTS(SELECT 1 FROM blackboard_entries AS entry JOIN blackboard_entry_revisions AS revision ON revision.entry_id = entry.id AND revision.revision = entry.revision WHERE entry.project_id = ? AND entry.id = ? {eligibility})")))
             .bind(project_id).bind(id.as_str()).fetch_one(&self.pool).await?)
+    }
+
+    /// The context whose user statement describes exactly `revision`, the entry's current
+    /// revision: every revision from the context's own up to `revision` is user-authored with
+    /// unchanged words. A later Agent revision, changed words or a newer current revision mean
+    /// the statement no longer describes the returned words, so nothing is returned.
+    pub async fn statement_context(
+        &self,
+        project_id: &str,
+        id: &BlackboardEntryId,
+        revision: u64,
+    ) -> Result<Option<KnowledgeContext>, BlackboardStoreError> {
+        let revision =
+            i64::try_from(revision).map_err(|_| BlackboardStoreError::RevisionOverflow)?;
+        let mut tx = self.pool.begin().await?;
+        let pinned: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM blackboard_entries AS entry
+               JOIN knowledge_context AS context ON context.entry_id = entry.id
+                AND context.project_id = entry.project_id
+               JOIN blackboard_entry_revisions AS stated
+                 ON stated.entry_id = entry.id AND stated.revision = context.revision
+               WHERE entry.project_id = ? AND entry.id = ? AND entry.revision = ?
+                 AND context.revision = (SELECT MAX(newest.revision) FROM knowledge_context AS newest
+                     WHERE newest.entry_id = entry.id AND newest.revision <= entry.revision)
+                 AND NOT EXISTS (SELECT 1 FROM blackboard_entry_revisions AS later
+                     WHERE later.entry_id = entry.id AND later.revision >= context.revision
+                       AND later.revision <= entry.revision
+                       AND (later.provenance_kind != 'user' OR later.content != stated.content)))",
+        )
+        .bind(project_id)
+        .bind(id.as_str())
+        .bind(revision)
+        .fetch_one(&mut *tx)
+        .await?;
+        let context = if pinned {
+            super::knowledge::context_of(&mut tx, project_id, id.as_str()).await?
+        } else {
+            None
+        };
+        tx.commit().await?;
+        Ok(context)
     }
 
     /// Exact automatic recovery checks exclusion and loads entry in one read snapshot.

@@ -14,8 +14,13 @@ use super::*;
 use codex_app_server_protocol::ContextMapRefreshParams;
 use codex_app_server_protocol::ContextMapRefreshResponse;
 use codex_app_server_protocol::ProjectRoot;
+use codex_app_server_protocol::StatefulMemoryAddKind;
+use codex_app_server_protocol::StatefulMemoryAddParams;
+use codex_app_server_protocol::StatefulMemoryAddResponse;
 use codex_app_server_protocol::StatefulMemoryApplyCategory;
 use codex_app_server_protocol::StatefulMemoryApplyResponse;
+use codex_app_server_protocol::StatefulMemoryCorrectParams;
+use codex_app_server_protocol::StatefulMemoryCorrectResponse;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -290,5 +295,152 @@ async fn reads_return_user_memory_with_attribution_until_forget() -> Result<()> 
         let output = &found.iter().find(|(found, _)| found == id).expect(id).1;
         assert!(output.contains(FINDING), "{id}: {output}");
     }
+    Ok(())
+}
+
+/// An in-place `blackboard/upsert` of an existing entry as the Agent.
+async fn agent_upsert(
+    server: &mut TestAppServer,
+    project: &str,
+    entry_id: &str,
+    revision: u64,
+    content: &str,
+) -> Result<()> {
+    let request = server
+        .send_request(
+            "blackboard/upsert",
+            Some(json!({
+                "projectId": project, "entryId": entry_id, "expectedRevision": revision,
+                "nodeId": null, "kind": "instruction", "content": content,
+                "confidenceBasisPoints": 9000, "verification": "unverified", "importance": "high",
+                "rootPromotion": "notPromoted", "evidence": [],
+                "provenance": {"kind": "agent", "sourceId": "agent-edit"}
+            })),
+        )
+        .await?;
+    server
+        .read_stream_until_response_message(codex_app_server_protocol::RequestId::Integer(request))
+        .await?;
+    Ok(())
+}
+
+/// A corrected rule's superseded words are never read again, by ID, search, history, recall or
+/// `since`; a declared rule downgraded and then edited by the Agent is returned with the Agent's
+/// words and no user statement.
+#[tokio::test]
+async fn reads_return_only_current_user_words_and_attribute_the_returned_revision() -> Result<()> {
+    let responses_server = responses::start_mock_server().await;
+    let (home, root) = (TempDir::new()?, TempDir::new()?);
+    let (mut server, project, thread) = project_with_notes(&home, &root, &responses_server).await?;
+    let script_reads = Arc::new(Mutex::new(vec![(
+        "declare-end".to_string(),
+        String::new(),
+        Value::Null,
+    )]));
+    let scripted = script_reads.clone();
+    let calls = mount(
+        &responses_server,
+        Box::new(
+            move |sequence, _| match scripted.lock().expect("targets lock").get(sequence) {
+                Some((id, tool, args)) if !tool.is_empty() => call(id, tool, args.clone()),
+                _ => message("Done."),
+            },
+        ),
+    )
+    .await;
+    turn(&mut server, &thread, &[RULE]).await?;
+    let rule = kept(&mut server).await?.members[0]
+        .entry_id
+        .clone()
+        .expect("admitted rule");
+    let added: StatefulMemoryAddResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: StatefulMemoryAddParams {
+                expected_project_id: project.clone(),
+                thread_id: thread.clone(),
+                kind: StatefulMemoryAddKind::Rule,
+                content: "Always cite paths with line numbers.".to_string(),
+                scope: None,
+                reason: None,
+                client_action_id: "superseded-add".to_string(),
+                background_section: false,
+            },
+        })
+        .await?;
+    let _: StatefulMemoryCorrectResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryCorrect {
+            request_id,
+            params: StatefulMemoryCorrectParams {
+                expected_project_id: project.clone(),
+                thread_id: thread.clone(),
+                entry_id: added.item.entry_id.clone(),
+                expected_revision: added.item.revision,
+                content: "Always cite paths with commit hashes.".to_string(),
+                background_section: false,
+            },
+        })
+        .await?;
+    agent_upsert(&mut server, &project, &rule, 1, "Never push.").await?;
+    agent_upsert(&mut server, &project, &rule, 2, "Push only from CI.").await?;
+
+    let reads = [
+        (
+            "old-exact",
+            "blackboard_query",
+            json!({"entryId": added.item.entry_id}),
+        ),
+        (
+            "search",
+            "blackboard_query",
+            json!({"text": "cite", "detail": "full"}),
+        ),
+        (
+            "history",
+            "blackboard_query",
+            json!({"text": "cite", "entryScope": "all", "detail": "full"}),
+        ),
+        ("recall", "memory_read", json!({"question": "cite paths"})),
+        ("since", "memory_read", json!({"since": "2000-01-01"})),
+        ("edited-exact", "blackboard_query", json!({"entryId": rule})),
+    ]
+    .map(|(id, tool, args)| (id.to_string(), tool.to_string(), args));
+    script_reads
+        .lock()
+        .expect("targets lock")
+        .extend(reads.iter().cloned());
+    let second = start_thread(&mut server, &project).await?;
+    turn(&mut server, &second, &["How do we cite paths?"]).await?;
+    let found = outputs(&calls.lock().expect("request log lock"), &reads);
+    for (id, output) in &found {
+        assert!(
+            !output.contains("line numbers"),
+            "{id} carried superseded words: {output}"
+        );
+    }
+    for (id, output) in found
+        .iter()
+        .filter(|(id, _)| ["search", "history", "recall", "since"].contains(&id.as_str()))
+    {
+        assert!(
+            output.contains("commit hashes"),
+            "{id} lacks the successor: {output}"
+        );
+    }
+    let edited: Value = serde_json::from_str(
+        &found
+            .iter()
+            .find(|(id, _)| id == "edited-exact")
+            .expect("edited")
+            .1,
+    )?;
+    assert_eq!(
+        (
+            edited["content"].clone(),
+            edited["source"]["kind"].clone(),
+            edited.get("attribution").cloned(),
+        ),
+        (json!("Push only from CI."), json!("agent"), None)
+    );
     Ok(())
 }
