@@ -209,14 +209,15 @@ fn a_small_budget_keeps_the_newest_turn_in_compact_form() {
     assert!(rendered.ends_with("did not fit this bounded view."));
 }
 
-#[test]
-fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
+/// Every optional line at its longest, with four turns of `user` messages, so the newest
+/// turn is compressed into what the minimum budget leaves.
+fn minimum_budget_record(user: &str) -> ContinuityRecord {
     let long = "\"<quoted>\" ".repeat(400);
     let turns = (0..4)
         .map(|index| {
             let mut captured = turn(
                 &format!("01a0fbad-1689-75e3-ac68-867cb758f5{index:02}"),
-                &long,
+                user,
                 Some(&format!("{long}?")),
             );
             captured.thread_id = "01a0fbad-0c72-7143-8052-63fab09364ca".to_string();
@@ -239,7 +240,13 @@ fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
         next: vec![long.clone(), long.clone()],
         strategy: Some(long),
     });
-    let rendered = continuity.render(super::MIN_FRAGMENT_BYTES);
+    continuity
+}
+
+#[test]
+fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
+    let rendered =
+        minimum_budget_record(&"\"<quoted>\" ".repeat(400)).render(super::MIN_FRAGMENT_BYTES);
 
     assert!(
         fragment_bytes(&rendered) <= super::MIN_FRAGMENT_BYTES,
@@ -251,6 +258,25 @@ fn the_newest_turn_fits_the_minimum_budget_with_every_optional_line() {
     assert!(rendered.contains("\n  Answer: \""), "{rendered}");
     assert!(
         rendered.contains(" bytes]") || rendered.contains(" bytes omitted ...] "),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn a_compressed_newest_user_message_keeps_its_short_next_step() {
+    let user = format!("{}Next step: run tests.", "Earlier context. ".repeat(60));
+    let mut continuity = minimum_budget_record(&user);
+    continuity.project_id = "01a0fbad-0c72-7143-8052-63fab0936400".to_string();
+    let rendered = continuity.render(super::MIN_FRAGMENT_BYTES);
+
+    assert!(
+        fragment_bytes(&rendered) <= super::MIN_FRAGMENT_BYTES,
+        "{} bytes",
+        fragment_bytes(&rendered)
+    );
+    let newest = rendered.split("\n  Answer: ").next().expect("newest turn");
+    assert!(
+        newest.contains(" bytes omitted ...] \"Next step: run tests.\""),
         "{rendered}"
     );
 }

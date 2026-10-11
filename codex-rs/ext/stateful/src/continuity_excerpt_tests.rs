@@ -157,3 +157,47 @@ fn a_tiny_limit_falls_back_to_the_head_only_quote() {
         "\"\" [shortened at 0 of 700 bytes]"
     );
 }
+
+#[test]
+fn a_fitting_next_step_line_followed_by_an_appendix_is_kept_whole() {
+    let line = format!("Next step: {}", "check layer ".repeat(38));
+    let answer = format!(
+        "{}{line}\n{}",
+        "Done. ".repeat(200),
+        "Appendix. ".repeat(60)
+    );
+
+    let excerpt = quote_excerpt(&answer, ANSWER_LIMIT);
+
+    assert_bounded(&answer, &excerpt, ANSWER_LIMIT);
+    let parts = assert_truthful(&answer, &excerpt);
+    assert!(parts.tail.starts_with(&line), "{excerpt}");
+    assert!(parts.trailing_omitted.is_some_and(|count| count > 0));
+    assert!(parts.head.starts_with("Done. "), "{excerpt}");
+}
+
+#[test]
+fn a_short_next_step_survives_a_small_limit() {
+    let message = format!("{}Next step: run tests.", "Earlier context. ".repeat(60));
+
+    let excerpt = quote_excerpt(&message, 96);
+
+    assert_bounded(&message, &excerpt, 96);
+    let parts = assert_truthful(&message, &excerpt);
+    assert_eq!(parts.tail, "Next step: run tests.");
+    assert!(parts.head.starts_with("Earlier"), "{excerpt}");
+}
+
+#[test]
+fn a_word_merely_starting_with_next_step_is_not_a_next_step() {
+    let answer = format!(
+        "{}Next stepper diagnostics follow. {}",
+        "Earlier context. ".repeat(60),
+        "Diagnostic line. ".repeat(40)
+    );
+
+    let parts = assert_truthful(&answer, &quote_excerpt(&answer, ANSWER_LIMIT));
+
+    assert!(!parts.tail.starts_with("Next stepper"), "{parts:?}");
+    assert!(parts.tail.ends_with("Diagnostic line. "));
+}
