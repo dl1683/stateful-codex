@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { stateArtifactHash } from "../eval/export-project-state.mjs";
-import { verifyStateArtifact } from "../eval/prepare-state-grading.mjs";
+import {
+  stateArtifactScope,
+  verifyStateArtifact,
+} from "../eval/prepare-state-grading.mjs";
 
 function fixture() {
   const state = {
@@ -43,5 +46,33 @@ test("rejects state changed after the recorded turn", () => {
   assert.throws(
     () => verifyStateArtifact(state, turn),
     /content does not match its hash/,
+  );
+});
+
+test("records the exporter scope, inferring it only for legacy v1 artifacts", () => {
+  const { state } = fixture();
+  assert.deepEqual(
+    [
+      stateArtifactScope(state),
+      stateArtifactScope({ ...state, exportScope: "v1-work-run-snapshot" }),
+      stateArtifactScope({ ...state, formatVersion: "stateful-project-state-v2" }),
+    ],
+    [
+      {
+        formatVersion: "stateful-project-state-v1",
+        exportScope: "v1-work-run-snapshot",
+        exportScopeInferred: true,
+      },
+      {
+        formatVersion: "stateful-project-state-v1",
+        exportScope: "v1-work-run-snapshot",
+        exportScopeInferred: false,
+      },
+      {
+        formatVersion: "stateful-project-state-v2",
+        exportScope: null,
+        exportScopeInferred: false,
+      },
+    ],
   );
 });

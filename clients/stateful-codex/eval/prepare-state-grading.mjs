@@ -5,7 +5,11 @@ import { pathToFileURL } from "node:url";
 
 import { readEvents } from "./compare-rollouts.mjs";
 import { resolveRolloutPath } from "./rollout-path.mjs";
-import { stateArtifactHash } from "./export-project-state.mjs";
+import {
+  EXPORT_SCOPE,
+  FORMAT_VERSION,
+  stateArtifactHash,
+} from "./export-project-state.mjs";
 import { summarizeLongitudinalEvents } from "./summarize-longitudinal-rollout.mjs";
 
 const RUBRIC_VERSION = "stateful-longitudinal-v1";
@@ -115,6 +119,7 @@ async function main() {
           },
           value: values[artifact],
           provenance: {
+            ...stateArtifactScope(state),
             stateSnapshotSha256: state.snapshotSha256,
             capturedAtMs: state.capturedAtMs,
             intelligenceRevision: state.intelligenceRevision,
@@ -137,6 +142,21 @@ async function main() {
     path.join(options.output, "state-grading-manifest.json"),
     `${JSON.stringify(gradingManifest, null, 2)}\n`,
   );
+}
+
+/// The exporter format and scope a grading packet was built from. Artifacts
+/// exported before `exportScope` existed are v1 Work snapshots by
+/// construction, so they get that scope with `exportScopeInferred: true`.
+export function stateArtifactScope(state) {
+  const formatVersion = state.formatVersion ?? null;
+  if (state.exportScope != null) {
+    return { formatVersion, exportScope: state.exportScope, exportScopeInferred: false };
+  }
+  return {
+    formatVersion,
+    exportScope: formatVersion === FORMAT_VERSION ? EXPORT_SCOPE : null,
+    exportScopeInferred: formatVersion === FORMAT_VERSION,
+  };
 }
 
 export function verifyStateArtifact(state, turn) {

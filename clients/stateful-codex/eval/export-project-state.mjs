@@ -13,8 +13,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
-const FORMAT_VERSION = "stateful-project-state-v1";
-const EXPORT_SCOPE = "v1-work-run-snapshot";
+export const FORMAT_VERSION = "stateful-project-state-v1";
+export const EXPORT_SCOPE = "v1-work-run-snapshot";
 
 export function readProjectState({ sqliteHome, threadId, runId = null }) {
   const runtime = new DatabaseSync(path.join(sqliteHome, "stateful_runtime_1.sqlite"), {
