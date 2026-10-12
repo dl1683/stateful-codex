@@ -20,6 +20,7 @@ async fn c3r1_source_handle_redelivery_preserves_honest_bounded_lower_bound() {
         attribution: Default::default(),
         visible_root: Default::default(),
         run_activity: Default::default(),
+        run_commits: Default::default(),
     };
     let thread_store = ExtensionData::new(thread);
     thread_store.insert(SelectedProject::new(&project_id));

@@ -19,6 +19,7 @@ mod continuity;
 mod continuity_excerpt;
 mod continuity_source;
 mod conversation_summaries;
+mod deliverable;
 mod events;
 mod limits;
 mod memory_add;
@@ -179,6 +180,7 @@ struct StatefulExtension {
     attribution: attribution::StatefulAttributionTracker,
     visible_root: visible_root::VisibleRootRegistry,
     run_activity: checkpoint::RunActivityRegistry,
+    run_commits: deliverable::TurnRunCommits,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -645,6 +647,7 @@ impl ToolContributor for StatefulExtension {
             self.projects.clone(),
             self.event_sink.clone(),
             self.visible_root.clone(),
+            self.run_commits.clone(),
             run_tools,
         )
     }
@@ -666,6 +669,7 @@ pub fn install<C: Sync>(
         attribution: attribution::StatefulAttributionTracker::default(),
         visible_root: visible_root::VisibleRootRegistry::default(),
         run_activity: checkpoint::RunActivityRegistry::default(),
+        run_commits: deliverable::TurnRunCommits::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());

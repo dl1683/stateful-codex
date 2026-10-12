@@ -22,6 +22,7 @@ use crate::completion::CompletionRequest;
 use crate::completion::DELIVERABLE_RULE;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::completion::prepare_completion;
+use crate::deliverable::TurnRunCommits;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
 use run_acceptance::AcceptanceDecision;
@@ -78,6 +79,7 @@ pub(super) struct StatefulRunUpdateTool {
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
+    run_commits: TurnRunCommits,
 }
 
 impl StatefulRunUpdateTool {
@@ -88,6 +90,7 @@ impl StatefulRunUpdateTool {
         projects: Arc<dyn ThreadStore>,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
         visible_root: VisibleRootRegistry,
+        run_commits: TurnRunCommits,
     ) -> Self {
         Self {
             project_id,
@@ -96,6 +99,7 @@ impl StatefulRunUpdateTool {
             projects,
             event_sink,
             visible_root,
+            run_commits,
         }
     }
 
@@ -399,6 +403,12 @@ impl StatefulRunUpdateTool {
                 None,
             )
         };
+        if matches!(
+            run.status,
+            StatefulRunStatus::Completed | StatefulRunStatus::Blocked
+        ) {
+            self.run_commits.record(&call.turn_id, &run);
+        }
         if let Some(fence) = fence
             && let Err(error) = fence.release().await
         {

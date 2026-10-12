@@ -381,6 +381,7 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_abort<'a>(&'a self, input: TurnAbortInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
+            self.run_commits.take(input.turn_store.level_id());
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }
@@ -390,6 +391,7 @@ impl TurnLifecycleContributor for StatefulExtension {
         input: TurnFinalizeInput<'a>,
     ) -> ExtensionFuture<'a, TurnFinalizeOutcome> {
         Box::pin(async move {
+            let receipt = self.run_commits.take(input.turn_id);
             let (Some(active_turn), Some(thread), Some(services)) = (
                 input.thread_store.get::<ActiveRunTurn>(),
                 input.thread_store.get::<SelectedThread>(),
@@ -407,20 +409,31 @@ impl TurnLifecycleContributor for StatefulExtension {
                     return TurnFinalizeOutcome::NotHandled;
                 }
             };
-            crate::answered::finalize(
+            // Classified before the Answered route, independently of it; the diagnostic only
+            // adds a warning and never changes what that route committed.
+            let status_only = crate::deliverable::status_only_reply(&input);
+            let outcome = crate::answered::finalize(
                 store,
                 self.event_sink.as_deref(),
                 active_turn.run_id.clone(),
                 &thread.thread_id,
                 &input,
             )
-            .await
+            .await;
+            match status_only {
+                Some(reply) => {
+                    let check = crate::deliverable::ReceiptCheck::read(store, receipt).await;
+                    crate::deliverable::warn(outcome, reply, &check)
+                }
+                None => outcome,
+            }
         })
     }
 
     fn on_turn_error<'a>(&'a self, input: TurnErrorInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             fail_turn_attribution(self, input.turn_id);
+            self.run_commits.take(input.turn_id);
             if !matches!(input.error_details, CodexErrorDetails::TaskPanicked(_)) {
                 return;
             }

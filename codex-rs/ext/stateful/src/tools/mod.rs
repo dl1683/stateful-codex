@@ -28,6 +28,7 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::StatefulEventSink;
+use crate::deliverable::TurnRunCommits;
 use crate::limits::MAX_MODEL_ITEM_BYTES;
 use crate::services::ProjectIntelligenceServices;
 use crate::visible_root::VisibleRootRegistry;
@@ -62,6 +63,7 @@ pub(super) fn project_intelligence_tools(
     projects: Arc<dyn ThreadStore>,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
+    run_commits: TurnRunCommits,
     run_tools: RunTools,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
@@ -130,6 +132,7 @@ pub(super) fn project_intelligence_tools(
             projects.clone(),
             event_sink.clone(),
             visible_root,
+            run_commits,
         )),
         Arc::new(acceptance::AcceptanceUpdateTool::new(
             project_id.clone(),

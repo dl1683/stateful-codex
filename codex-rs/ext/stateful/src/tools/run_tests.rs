@@ -71,6 +71,7 @@ async fn fixture_for(goal: &str, mode: WorkflowMode) -> Fixture {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
+        crate::deliverable::TurnRunCommits::default(),
     );
     Fixture {
         _state_home: state_home,

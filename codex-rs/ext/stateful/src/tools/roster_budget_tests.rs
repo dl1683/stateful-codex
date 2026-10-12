@@ -35,6 +35,7 @@ fn stateful_tool_roster_stays_within_its_request_budget() {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
+        crate::deliverable::TurnRunCommits::default(),
         RunTools::Offered,
     );
     let sizes = tools

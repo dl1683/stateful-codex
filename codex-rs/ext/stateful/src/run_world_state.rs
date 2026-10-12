@@ -688,7 +688,7 @@ fn mode_name(mode: WorkflowMode) -> &'static str {
     }
 }
 
-fn status_name(status: StatefulRunStatus) -> &'static str {
+pub(crate) fn status_name(status: StatefulRunStatus) -> &'static str {
     match status {
         StatefulRunStatus::Pending => "pending",
         StatefulRunStatus::Running => "running",

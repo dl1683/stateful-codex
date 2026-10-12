@@ -139,6 +139,14 @@ pub(crate) fn readiness(message: &str) -> Readiness<'_> {
     }
 }
 
+/// Whether the finalized message is the turn's last assistant message and not commentary.
+pub(crate) fn genuine_final(input: &TurnFinalizeInput<'_>) -> bool {
+    input
+        .turn_store
+        .get::<LastAgentMessage>()
+        .is_some_and(|last| !last.commentary && last.text == input.last_agent_message)
+}
+
 /// Ends the turn's run as answered, unverified, when the turn's final message is a genuine,
 /// ready answer; otherwise records nothing and the run keeps its ordinary route.
 pub(crate) async fn finalize(
@@ -148,11 +156,7 @@ pub(crate) async fn finalize(
     thread_id: &str,
     input: &TurnFinalizeInput<'_>,
 ) -> TurnFinalizeOutcome {
-    let genuine_final = input
-        .turn_store
-        .get::<LastAgentMessage>()
-        .is_some_and(|last| !last.commentary && last.text == input.last_agent_message);
-    if !genuine_final {
+    if !genuine_final(input) {
         return TurnFinalizeOutcome::NotHandled;
     }
     let result = match readiness(input.last_agent_message) {

@@ -326,6 +326,7 @@ impl StatefulRunUpdateTool {
         run: &StatefulRun,
         instruction: &str,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        self.run_commits.record(&call.turn_id, run);
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::RunUpdated {
                 project_id: run.value.project_id.clone(),

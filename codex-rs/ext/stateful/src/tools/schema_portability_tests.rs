@@ -125,6 +125,7 @@ fn every_stateful_tool_schema_uses_the_portable_subset() {
         Arc::new(InMemoryThreadStore::default()),
         /*event_sink*/ None,
         VisibleRootRegistry::default(),
+        crate::deliverable::TurnRunCommits::default(),
         RunTools::Offered,
     );
     let mut violations = Vec::new();
