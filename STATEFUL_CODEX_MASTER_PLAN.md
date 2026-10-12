@@ -368,3 +368,15 @@ Order:
 4. **3c and the slash fixes** land when ready.
 5. **Bounded within1** and the **narrow cross-app journey**, once decisions, retirement and replacement behave.
 6. **E2** after attribution has an accepted solution.
+
+### Robustness preflight from the open-model ladder (council 2026-10-12a, Codex and Droid converged)
+
+After 3b, and before lean 3a, comes a short, separately frozen preflight:
+1. extension-boundary tool-argument normalization;
+2. completion-loop classification and recovery;
+3. codex-exec bounded hydration;
+4. a provider role adapter or fail-fast gate (Mistral);
+5. serving admission control and a concurrency ramp;
+6. per-request prefix and schema cost measurement, with trimming only on paired evidence.
+
+Each item reruns its exact failing ladder sessions. Rationale: for deploying an open model in this harness on GCP, reliability beats additional memory capture right now.
