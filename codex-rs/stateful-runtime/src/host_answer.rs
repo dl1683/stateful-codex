@@ -128,6 +128,7 @@ struct StoredHostAnswer {
 }
 
 /// The published shape of an answer record; the size bound is measured on its encoding.
+/// `outcome` is absent from the shape published today and present once it is on the wire.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PublishedAnswer<'a> {
@@ -135,18 +136,37 @@ struct PublishedAnswer<'a> {
     answer: &'a str,
     basis: &'a str,
     committed_at: i64,
-    outcome: HostAnswerOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<HostAnswerOutcome>,
 }
 
 /// The bytes the answer record of `answer` takes once serialized with `outcome` and its basis,
-/// escapes and envelope included (with the widest possible timestamp).
+/// escapes and envelope included (with the widest possible timestamp), in the shape that
+/// publishes the outcome.
 pub fn serialized_answer_bytes(turn_id: &str, answer: &str, outcome: HostAnswerOutcome) -> usize {
+    published_bytes(turn_id, answer, outcome, Some(outcome))
+}
+
+/// The bytes the live admission bound measures: today's published shape, without the outcome
+/// field, with the selected basis. For an answered record this is exactly the size measured
+/// before the outcome existed; the activation step moves admission to
+/// [`serialized_answer_bytes`].
+fn admitted_answer_bytes(turn_id: &str, answer: &str, outcome: HostAnswerOutcome) -> usize {
+    published_bytes(turn_id, answer, outcome, /*published_outcome*/ None)
+}
+
+fn published_bytes(
+    turn_id: &str,
+    answer: &str,
+    outcome: HostAnswerOutcome,
+    published_outcome: Option<HostAnswerOutcome>,
+) -> usize {
     serde_json::to_vec(&PublishedAnswer {
         turn_id,
         answer,
         basis: outcome.basis(),
         committed_at: i64::MIN,
-        outcome,
+        outcome: published_outcome,
     })
     .map_or(usize::MAX, |encoded| encoded.len())
 }
@@ -282,7 +302,7 @@ fn answer_violation(commit: &AnsweredRunCommit, outcome: HostAnswerOutcome) -> O
     {
         return Some("the answer is empty or malformed".to_string());
     }
-    let bytes = serialized_answer_bytes(&commit.turn_id, &commit.answer, outcome);
+    let bytes = admitted_answer_bytes(&commit.turn_id, &commit.answer, outcome);
     (bytes > MAX_RESULT_BYTES).then(|| {
         format!(
             "the answer takes {bytes} bytes once recorded, over the {MAX_RESULT_BYTES}-byte limit"
@@ -292,8 +312,10 @@ fn answer_violation(commit: &AnsweredRunCommit, outcome: HostAnswerOutcome) -> O
 
 /// The result of a partial run: [`PARTIAL_RESULT_HEADER`], one `- item` line per item, the
 /// omission marker when some did not fit, a blank line, then `body`. Room for the marker of
-/// every item is reserved before any item is added; items are added in order while they fit.
-/// `None` when even the header, the reserved marker and the body exceed the result limit.
+/// every item is reserved before any item is added; items are added in order while their
+/// encoded lines fit. An item that starts with `+` (the marker's shape) or a backslash is
+/// written behind one backslash, so no item can read back as the marker;
+/// [`partial_result_items`] decodes it. `None` when even the header, the reserved marker and the body exceed the result limit.
 pub(crate) fn compose_partial(items: &[String], body: &str) -> Option<String> {
     let reserved = PARTIAL_RESULT_HEADER.len() + partial_marker(items.len()).len() + 2 + body.len();
     if reserved > MAX_RESULT_BYTES {
@@ -302,8 +324,14 @@ pub(crate) fn compose_partial(items: &[String], body: &str) -> Option<String> {
     let mut lines = String::new();
     let mut kept = 0;
     for item in items {
-        // One line per item, so the list stays parseable; the byte length is unchanged.
-        let line = format!("- {}\n", item.replace(['\n', '\r'], " "));
+        // One line per item, so the list stays parseable; line breaks become spaces.
+        let item = item.replace(['\n', '\r'], " ");
+        let escape = if item.starts_with(['+', '\\']) {
+            "\\"
+        } else {
+            ""
+        };
+        let line = format!("- {escape}{item}\n");
         if reserved + lines.len() + line.len() > MAX_RESULT_BYTES {
             break;
         }
@@ -321,6 +349,40 @@ pub(crate) fn compose_partial(items: &[String], body: &str) -> Option<String> {
 /// The line that ends the listed items of a partial result when `omitted` of them did not fit.
 pub fn partial_marker(omitted: usize) -> String {
     format!("- +{omitted} more (read the acceptance ledger and obligation)\n")
+}
+
+/// The items listed by a partial result, decoded, and how many were omitted.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PartialResultItems {
+    pub items: Vec<String>,
+    pub omitted: usize,
+}
+
+/// Reads back the list [`compose_partial`] wrote at the start of `result`; `None` when the
+/// result does not start with [`PARTIAL_RESULT_HEADER`].
+pub fn partial_result_items(result: &str) -> Option<PartialResultItems> {
+    let mut parsed = PartialResultItems::default();
+    for line in result
+        .strip_prefix(PARTIAL_RESULT_HEADER)?
+        .lines()
+        .take_while(|line| !line.is_empty())
+    {
+        let item = line.strip_prefix("- ").unwrap_or(line);
+        if let Some(escaped) = item.strip_prefix('\\') {
+            parsed.items.push(escaped.to_string());
+            continue;
+        }
+        let omitted = item
+            .strip_prefix('+')
+            .and_then(|rest| rest.split_once(' '))
+            .and_then(|(count, _)| count.parse::<usize>().ok())
+            .filter(|count| partial_marker(*count).strip_suffix('\n') == Some(line));
+        match omitted {
+            Some(count) => parsed.omitted = count,
+            None => parsed.items.push(item.to_string()),
+        }
+    }
+    Some(parsed)
 }
 
 /// The items a terminal answer leaves open or not certified, read on the transaction's

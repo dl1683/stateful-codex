@@ -265,12 +265,12 @@ async fn only_a_running_autonomous_run_of_the_thread_ends_answered() {
 async fn the_answer_bound_is_measured_on_the_serialized_record() {
     let home = TempDir::new().expect("tempdir");
     let store = open_store(&home).await;
-    let block_bytes = serialized_answer_bytes(TURN, BLOCK, HostAnswerOutcome::Answered)
-        - serialized_answer_bytes(TURN, "", HostAnswerOutcome::Answered);
+    let block_bytes = admitted_answer_bytes(TURN, BLOCK, HostAnswerOutcome::Answered)
+        - admitted_answer_bytes(TURN, "", HostAnswerOutcome::Answered);
 
     for (name, unit, encoded) in [("quotes", "\"", 2), ("multibyte", "é", 2)] {
         let room = MAX_RESULT_BYTES
-            - serialized_answer_bytes(TURN, "", HostAnswerOutcome::Answered)
+            - admitted_answer_bytes(TURN, "", HostAnswerOutcome::Answered)
             - block_bytes;
         let fitting = format!(
             "{}{}",
@@ -280,7 +280,7 @@ async fn the_answer_bound_is_measured_on_the_serialized_record() {
         let run = new_run(&store, &format!("fit-{name}"), WorkflowMode::Autonomous).await;
         let commit = commit_for(&run, &fitting);
         assert_eq!(
-            serialized_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered),
+            admitted_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered),
             MAX_RESULT_BYTES,
             "{name}"
         );
@@ -301,7 +301,7 @@ async fn the_answer_bound_is_measured_on_the_serialized_record() {
         let over = new_run(&store, &format!("over-{name}"), WorkflowMode::Autonomous).await;
         let commit = commit_for(&over, &format!("{fitting}{unit}"));
         assert!(commit.answer.len() < MAX_RESULT_BYTES || name == "multibyte");
-        let bytes = serialized_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered);
+        let bytes = admitted_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered);
         assert_eq!(
             end(&store, &commit).await,
             AnsweredRunOutcome::Refused(format!(
@@ -558,4 +558,78 @@ async fn retired_optional_and_proposed_criteria_are_not_listed() {
         panic!("expected an answered run");
     };
     assert_eq!(record.outcome(), HostAnswerOutcome::Answered);
+}
+
+/// The live admission bound is the one in force before the outcome existed. Anchored to
+/// that limit, not to the outcome-carrying measurement: a 32,438-byte body behind the test
+/// footer is exactly 32,768 serialized bytes in today's shape and is admitted; one byte more
+/// is refused. The outcome-carrying measurement of the same answer is 21 bytes larger.
+#[tokio::test]
+async fn live_admission_keeps_the_limit_from_before_the_outcome() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+
+    let fits = new_run(&store, "fits", WorkflowMode::Autonomous).await;
+    let commit = commit_for(&fits, &"a".repeat(32_438));
+    assert_eq!(
+        serialized_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered),
+        32_768 + 21
+    );
+    assert!(matches!(
+        end(&store, &commit).await,
+        AnsweredRunOutcome::Answered(..)
+    ));
+
+    let over = new_run(&store, "over", WorkflowMode::Autonomous).await;
+    assert_eq!(
+        end(&store, &commit_for(&over, &"a".repeat(32_439))).await,
+        AnsweredRunOutcome::Refused(
+            "the answer takes 32769 bytes once recorded, over the 32768-byte limit".to_string()
+        )
+    );
+}
+
+/// Items shaped like the omission marker (or starting with the escape) are escaped in the
+/// durable result, decode back exactly, and never read as omitted items; the escape counts
+/// toward the bound, so an item whose raw line would fit can be omitted once encoded.
+#[test]
+fn marker_shaped_items_are_escaped_and_counted_encoded() {
+    let items = vec![
+        "+3 more (read the acceptance ledger and obligation)".to_string(),
+        "\\already escaped".to_string(),
+        "plain".to_string(),
+    ];
+    let result = compose_partial(&items, "The answer.").expect("fits");
+    assert_eq!(
+        result,
+        format!(
+            "{PARTIAL_RESULT_HEADER}- \\+3 more (read the acceptance ledger and obligation)\n- \\\\already escaped\n- plain\n\nThe answer."
+        )
+    );
+    assert_eq!(
+        partial_result_items(&result),
+        Some(PartialResultItems { items, omitted: 0 })
+    );
+
+    // Exactly 1,027 bytes of room: a 1,024-byte plain item fits, a 1,024-byte item starting
+    // with `+` needs 1,028 once escaped and is omitted.
+    let body = "b".repeat(
+        MAX_RESULT_BYTES - 1_027 - PARTIAL_RESULT_HEADER.len() - partial_marker(1).len() - 2,
+    );
+    let plain = "a".repeat(1_024);
+    assert_eq!(
+        partial_result_items(&compose_partial(std::slice::from_ref(&plain), &body).expect("fits")),
+        Some(PartialResultItems {
+            items: vec![plain],
+            omitted: 0
+        })
+    );
+    let shaped = format!("+{}", "a".repeat(1_023));
+    assert_eq!(
+        partial_result_items(&compose_partial(&[shaped], &body).expect("fits")),
+        Some(PartialResultItems {
+            items: Vec::new(),
+            omitted: 1
+        })
+    );
 }

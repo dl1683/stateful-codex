@@ -1,9 +1,11 @@
 use codex_state::SqliteConfig;
 use codex_stateful_runtime::NewStatefulRun;
+use codex_stateful_runtime::PARTIAL_RESULT_HEADER;
 use codex_stateful_runtime::RunBudget;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
+use codex_stateful_runtime::partial_marker;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -232,5 +234,46 @@ fn the_partial_disclosure_is_bounded() {
     assert!(
         disclosure.ends_with("é [shortened; see the run result]"),
         "{disclosure}"
+    );
+}
+
+/// An open issue shaped like the omission marker is disclosed as an issue, never as omitted
+/// items, on the normal, the idempotent and the recovered success path.
+#[tokio::test]
+async fn a_marker_shaped_issue_is_disclosed_as_an_issue_on_every_path() {
+    let home = TempDir::new().expect("tempdir");
+    let store = store(&home).await;
+    let run = running_run(&store).await;
+    let commit = AnsweredRunCommit {
+        trailer_issues: vec![
+            "+3 more (read the acceptance ledger and obligation)".to_string(),
+            "\\path\\to\\file is stale".to_string(),
+        ],
+        ..commit_for(&run)
+    };
+    let allow = || true;
+    let disclosure = TurnFinalizeOutcome::Warning(
+        "Stateful: this run ended partial; it is not certified by this terminal answer path. Open or not certified: +3 more (read the acceptance ledger and obligation); \\path\\to\\file is stale".to_string(),
+    );
+    let normal = store.end_run_answered(&commit, &allow).await;
+    assert_eq!(
+        resolve(&store, None, &commit, /*authorized*/ true, normal).await,
+        disclosure
+    );
+    let idempotent = store.end_run_answered(&commit, &allow).await;
+    assert_eq!(
+        resolve(&store, None, &commit, /*authorized*/ true, idempotent).await,
+        disclosure
+    );
+    assert_eq!(
+        resolve(
+            &store,
+            None,
+            &commit,
+            /*authorized*/ true,
+            commit_error()
+        )
+        .await,
+        disclosure
     );
 }

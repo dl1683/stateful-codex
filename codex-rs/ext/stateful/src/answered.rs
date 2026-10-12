@@ -24,12 +24,11 @@ use codex_stateful_runtime::AnsweredRunCommit;
 use codex_stateful_runtime::AnsweredRunOutcome;
 use codex_stateful_runtime::HostAnswerOutcome;
 use codex_stateful_runtime::HostAnswerRecord;
-use codex_stateful_runtime::PARTIAL_RESULT_HEADER;
 use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
-use codex_stateful_runtime::partial_marker;
+use codex_stateful_runtime::partial_result_items;
 
 use crate::StatefulEventSink;
 
@@ -286,26 +285,10 @@ pub(crate) fn outcome_disclosure(
 
 /// The disclosure of a partial result, at most [`MAX_DISCLOSURE_BYTES`].
 fn partial_disclosure(result: &str) -> String {
-    let mut items = Vec::new();
-    let mut omitted = None;
-    for line in result
-        .strip_prefix(PARTIAL_RESULT_HEADER)
-        .unwrap_or_default()
-        .lines()
-        .take_while(|line| !line.is_empty())
-    {
-        let marker = line
-            .strip_prefix("- +")
-            .and_then(|rest| rest.split_once(' '))
-            .and_then(|(count, _)| count.parse::<usize>().ok())
-            .filter(|count| partial_marker(*count).strip_suffix('\n') == Some(line));
-        match marker {
-            Some(count) => omitted = Some(count),
-            None => items.push(line.strip_prefix("- ").unwrap_or(line)),
-        }
-    }
-    let listed = items.join("; ");
-    let more = omitted.map(|count| format!(" [+{count} more; see the run result]"));
+    let parsed = partial_result_items(result).unwrap_or_default();
+    let listed = parsed.items.join("; ");
+    let more =
+        (parsed.omitted > 0).then(|| format!(" [+{} more; see the run result]", parsed.omitted));
     let text = format!(
         "{PARTIAL_DISCLOSURE}{listed}{}",
         more.as_deref().unwrap_or_default()
