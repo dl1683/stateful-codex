@@ -2170,6 +2170,73 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
 }
 
 #[tokio::test]
+async fn thread_turns_list_recovers_a_lagging_projection_of_a_loaded_thread() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let start_id = mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?;
+    let ThreadStartResponse { thread, .. } =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+    let turn_start_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "hello".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let TurnStartResponse { turn } =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_start_id)).await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    // A swallowed transient projection failure leaves SQLite without the durable, live turn.
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        codex_home.path().abs(),
+    ))
+    .await?;
+    for statement in [
+        "DELETE FROM thread_turns WHERE thread_id = ?",
+        "DELETE FROM thread_items WHERE thread_id = ?",
+        "DELETE FROM thread_history_projection_state WHERE thread_id = ?",
+    ] {
+        sqlx::query(statement)
+            .bind(thread.id.as_str())
+            .execute(&pool)
+            .await?;
+    }
+
+    let page = read_turns_page(
+        &mut mcp,
+        codex_protocol::ThreadId::from_string(&thread.id)?,
+        /*cursor*/ None,
+        Some(4),
+        SortDirection::Desc,
+        Some(TurnItemsView::Summary),
+    )
+    .await?;
+
+    let listed: Vec<_> = page.data.into_iter().map(|t| (t.id, t.status)).collect();
+    assert_eq!(listed, vec![(turn.id, TurnStatus::Completed)]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn thread_items_list_returns_unsupported() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;

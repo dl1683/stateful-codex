@@ -3291,6 +3291,18 @@ impl ThreadRequestProcessor {
             TurnItemsView::Summary => StoredTurnItemsView::Summary,
             TurnItemsView::Full => StoredTurnItemsView::NotLoaded,
         };
+        let loaded_thread = self.thread_manager.get_thread(thread_id).await.ok();
+        // A swallowed projection failure can leave SQLite behind the durable rollout of a live
+        // thread. Retry the projection first, as `thread/read` with turns does, so the newest
+        // turns are listed.
+        if loaded_thread.is_some()
+            && let Err(err) = self
+                .thread_store
+                .persist_thread(thread_id, PersistContext::Standard)
+                .await
+        {
+            warn!("failed to persist thread {thread_id} before listing turns: {err}");
+        }
         let page = self
             .thread_store
             .list_turns(StoreListTurnsParams {
@@ -3322,7 +3334,6 @@ impl ThreadRequestProcessor {
             }
             turns.push(turn);
         }
-        let loaded_thread = self.thread_manager.get_thread(thread_id).await.ok();
         let has_live_running_thread = match loaded_thread.as_ref() {
             Some(thread) => matches!(thread.agent_status().await, AgentStatus::Running),
             None => false,
