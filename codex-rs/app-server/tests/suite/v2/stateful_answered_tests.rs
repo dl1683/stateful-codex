@@ -576,7 +576,22 @@ async fn running_turns_warn_only_for_status_lines() -> Result<()> {
         let release = mount_gated(&harness.responses_server, script, /*gate*/ 1).await;
         let turn_id = harness.start_turn().await?;
         let turn = harness.outcome(&turn_id, /*next*/ false).await?;
-        let read = harness.read(&started.id).await?;
+        // The continuation is claimed after the turn completes; wait for that claim (its model
+        // response is still held), then read the run.
+        let read = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let read = harness.read(&started.id).await?;
+                if read
+                    .run
+                    .as_ref()
+                    .is_some_and(|run| run.continuations_used == 1)
+                {
+                    return anyhow::Ok(read);
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await??;
         let run = read.run.expect("run");
         release.send(())?;
         let continuation = harness.outcome(&turn_id, /*next*/ true).await?;
