@@ -125,6 +125,8 @@ Evidence: the three-way showed Qwen clean exits falling 98 to 3 after the accept
 
 Decision: verification becomes opt-in for explicitly started Work with declared criteria. Ordinary Autonomous answers end Answered (not verified); unfinished work ends partial. Completed stays evidence-bound.
 
+**Resume point (2026-10-12, paused for the night).** Slice 0 is complete. Slice 1 step F1 landed at `f256e307e`; activation is pending. The cleanup landed (`4d6706d6a` to `175b77ee1`). **Slice 2 (git-independent workspace identity): freeze NOT STARTED.** Council 12b order, with status: (0) done; (1) answer safety, activation pending; (2) git-independent workspace identity, freeze not started; (3) simplified Work verification; (4) refreeze P2 against the new outcome contract; (5) the release check: the matched 216-session rerun with floors of 98/108 Qwen and 54/108 Mistral, zero trivial Blocked, outcomes reported separately, hashes captured, plus a Luna non-git journey; (6) lean 3a's rollout waits for (5). Open observations: the q36a3 critical-error rate (3.7% to 9.3%), checked in (5); the gate-bypass confound (load and time), not isolated.
+
 Status: slice 0 complete (P1 landed at `b8dcee46f`; the causal probe is done). Slice 1 step F1 landed at `f256e307e`; activation is pending. The cleanup landed (`4d6706d6a` to `01aeba725`). Slice 2 is next.
 
 Order:
