@@ -91,35 +91,6 @@ pub struct SourceSearchCursor {
     pub after_byte: u32,
 }
 
-/// Exact evidence route, never a synthesized quotation or admission assertion.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceLink {
-    pub locator: String,
-    pub digest: String,
-    pub source_revision: u64,
-    pub span: SourceSpan,
-}
-
-/// Evidence pagination pins the entry and link set; changed evidence restarts discovery.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceLinkCursor {
-    pub project_id: String,
-    pub entry_id: String,
-    pub entry_revision: u64,
-    pub link_count: i64,
-    pub last: SourceLink,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceLinkPage {
-    pub links: Vec<SourceLink>,
-    pub after: Option<SourceLinkCursor>,
-    pub complete: bool,
-}
-
 impl SourceObservation {
     pub(crate) fn validate(&self, text: &str) -> Result<(), crate::BlackboardStoreError> {
         let bounded_id = |id: &str| !id.is_empty() && id.len() <= 512;

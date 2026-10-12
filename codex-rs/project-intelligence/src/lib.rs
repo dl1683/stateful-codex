@@ -187,6 +187,3 @@ pub use working_set_storage::WorkingSetStoreError;
 pub use working_set_storage::WorkingSetUpdate;
 pub use working_set_storage::WorkingSetView;
 
-pub use capture_source::SourceLink;
-pub use capture_source::SourceLinkCursor;
-pub use capture_source::SourceLinkPage;

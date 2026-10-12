@@ -51,7 +51,6 @@ mod source;
 mod source_fixture;
 mod source_group;
 mod source_group_read;
-mod source_links;
 mod source_observation;
 mod source_order;
 mod source_projection;

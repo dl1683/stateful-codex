@@ -485,20 +485,27 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
         )
         .await?;
     drop(admission);
-    // The agent copy's exact source links are listed (the user's own entry never is: user
-    // memory stays out of every model-facing consumer).
-    let links = store
-        .entry_source_links(&project, &copy_id, /*after*/ None)
-        .await?;
-    assert!(links.complete);
+    // The agent copy stays source-eligible with its exact source link (the user's own entry
+    // never is: user memory stays out of every model-facing consumer).
+    assert!(
+        store
+            .get_source_eligible_entry(&project, &copy_id)
+            .await?
+            .is_some()
+    );
+    let links: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT source_id, start_byte, end_byte FROM capture_entry_sources WHERE entry_id = ?",
+    )
+    .bind(copy_id.as_str())
+    .fetch_all(&pool)
+    .await?;
     assert_eq!(
-        links.links,
-        vec![codex_project_intelligence::SourceLink {
-            locator: seal.exact_source_locator.clone(),
-            digest: seal.digest.clone(),
-            source_revision: seal.observation.source_revision,
-            span: span.clone()
-        }]
+        links,
+        vec![(
+            seal.exact_source_locator.clone(),
+            i64::from(span.start_byte),
+            i64::from(span.end_byte)
+        )]
     );
     assert!(
         !store
@@ -518,9 +525,9 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
     );
     assert!(
         store
-            .entry_source_links(&project, &entry_id, /*after*/ None)
-            .await
-            .is_err()
+            .get_source_eligible_entry(&project, &entry_id)
+            .await?
+            .is_none()
     );
     let before = snapshot(&pool).await?;
     let mutation = codex_project_intelligence::BlackboardEntryUpdate {

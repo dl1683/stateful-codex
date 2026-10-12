@@ -748,7 +748,7 @@ async fn c2_source_pages_bound_escaped_metadata_progress_and_reject_cursor_drift
 }
 
 #[tokio::test]
-async fn c2_source_links_page_exact_ranges_and_omission_redelivery_stays_unknown() {
+async fn c2_source_links_keep_exact_ranges_and_omission_redelivery_stays_unknown() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let admission = admission(&home).await;
@@ -777,24 +777,6 @@ async fn c2_source_links_page_exact_ranges_and_omission_redelivery_stays_unknown
         .link_entry_source(&admission, &id, entry.revision, &seal, &spans[8..])
         .await
         .unwrap();
-    let page = store
-        .entry_source_links(PROJECT, &id, /*after*/ None)
-        .await
-        .unwrap();
-    assert_eq!(
-        page.links.iter().map(|link| &link.span).collect::<Vec<_>>(),
-        spans[..8].iter().collect::<Vec<_>>()
-    );
-    assert!(!page.complete);
-    let next = store
-        .entry_source_links(PROJECT, &id, page.after.as_ref())
-        .await
-        .unwrap();
-    assert_eq!(
-        next.links.iter().map(|link| &link.span).collect::<Vec<_>>(),
-        spans[8..].iter().collect::<Vec<_>>()
-    );
-    assert!(next.complete);
     let extra = SourceSpan {
         start_byte: 9,
         end_byte: 10,
@@ -804,12 +786,17 @@ async fn c2_source_links_page_exact_ranges_and_omission_redelivery_stays_unknown
         .link_entry_source(&admission, &id, entry.revision, &seal, &[extra])
         .await
         .unwrap();
-    assert!(matches!(
-        store
-            .entry_source_links(PROJECT, &id, page.after.as_ref())
-            .await,
-        Err(BlackboardStoreError::SourceCursorDrift)
-    ));
+    let ranges: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT start_byte, end_byte FROM capture_entry_sources WHERE entry_id = ? ORDER BY start_byte",
+    )
+    .bind(id.as_str())
+    .fetch_all(&store.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        ranges,
+        (0..10).map(|start| (start, start + 1)).collect::<Vec<_>>()
+    );
     let mut omitted = observation("omitted", text);
     omitted.complete_envelope = false;
     omitted.ordered_spans.clear();

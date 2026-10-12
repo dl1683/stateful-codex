@@ -317,12 +317,6 @@ async fn c3r2_automatic_proposal_recall_cut_keeps_storage_and_agent_control_cold
                 .unwrap(),
             None
         );
-        assert!(
-            store
-                .entry_source_links(&project_id, &id, /*after*/ None)
-                .await
-                .is_err()
-        );
         let admission = codex_state::ThreadProjectAdmission::acquire(
             &sqlite,
             codex_protocol::ThreadId::from_string(THREAD).unwrap(),
