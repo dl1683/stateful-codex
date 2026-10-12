@@ -5,12 +5,9 @@
 
 use codex_project_intelligence::FileSampleCoverage;
 use codex_project_intelligence::MAX_WORKING_SET_FILE_BYTES;
-use codex_project_intelligence::MAX_WORKING_SET_FILES;
 use codex_project_intelligence::WorkingSetFileSample;
 use sha2::Digest;
 use sha2::Sha256;
-
-use super::Projection;
 
 /// Total sampled bytes per collection; the reader also applies a two-second deadline.
 pub(crate) const MAX_TOTAL_SAMPLE_BYTES: usize = 512 * 1024;
@@ -54,20 +51,6 @@ impl FileWitness {
             &self.after_sha[..8]
         )
     }
-}
-
-/// User-marked paths first, then the most recently touched; at most eight, inside the root.
-pub(crate) fn select_tracked_files(projection: &Projection, user_marked: &[String]) -> Vec<String> {
-    let mut selected: Vec<String> = Vec::new();
-    for path in user_marked
-        .iter()
-        .chain(projection.touched_files.iter().rev())
-    {
-        if selected.len() < MAX_WORKING_SET_FILES && inside_root(path) && !selected.contains(path) {
-            selected.push(path.clone());
-        }
-    }
-    selected
 }
 
 /// Classifies one read. `remaining` is the collection's shared byte budget.

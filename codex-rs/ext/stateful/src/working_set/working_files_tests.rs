@@ -5,8 +5,6 @@ use super::working_files::FileWitness;
 use super::working_files::WitnessOutcome;
 use super::working_files::compare_samples;
 use super::working_files::sample_file;
-use super::working_files::select_tracked_files;
-use super::*;
 
 fn sample(
     path: &str,
@@ -111,25 +109,4 @@ fn large_hunks_are_marked_partial() {
         panic!("changed");
     };
     assert_eq!((witness.partial, witness.old.lines().count()), (true, 16));
-}
-
-#[test]
-fn tracked_files_prefer_user_marks_and_stay_bounded() {
-    let mut projection = Projection::new();
-    for i in 0..12 {
-        projection.observe(Observation::AppliedFileChange {
-            path: format!("f{i}.py"),
-        });
-    }
-    let marked = vec![
-        "notes.md".to_string(),
-        "../escape.md".to_string(),
-        "f3.py".to_string(),
-    ];
-    assert_eq!(
-        select_tracked_files(&projection, &marked),
-        [
-            "notes.md", "f3.py", "f11.py", "f10.py", "f9.py", "f8.py", "f7.py", "f6.py"
-        ]
-    );
 }
