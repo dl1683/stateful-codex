@@ -373,64 +373,6 @@ impl BlackboardStore {
         transaction.commit().await?;
         Ok((entries, more))
     }
-
-    /// The newest entry each of `successor_ids` replaced, for showing what a current value
-    /// replaced and since when. Entries that replaced nothing are absent.
-    pub async fn newest_predecessors(
-        &self,
-        project_id: &str,
-        successor_ids: &[BlackboardEntryId],
-    ) -> Result<Vec<(BlackboardEntryId, BlackboardEntry)>, BlackboardStoreError> {
-        if successor_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut transaction = self.pool.begin().await?;
-        let rows = newest_predecessor_ids(&mut transaction, project_id, successor_ids).await?;
-        let mut predecessors = Vec::new();
-        for (successor_id, predecessor_id) in rows {
-            let predecessor_id = BlackboardEntryId::parse(predecessor_id)?;
-            if let Some(predecessor) =
-                load_entry(&mut transaction, project_id, &predecessor_id).await?
-            {
-                predecessors.push((BlackboardEntryId::parse(successor_id)?, predecessor));
-            }
-        }
-        transaction.commit().await?;
-        Ok(predecessors)
-    }
-}
-
-async fn newest_predecessor_ids(
-    connection: &mut sqlx::SqliteConnection,
-    project_id: &str,
-    successor_ids: &[BlackboardEntryId],
-) -> Result<Vec<(String, String)>, BlackboardStoreError> {
-    let mut builder = sqlx::QueryBuilder::<sqlx::Sqlite>::new("WITH requested(id) AS (VALUES ");
-    let mut separated = builder.separated(", ");
-    for id in successor_ids {
-        separated
-            .push("(")
-            .push_bind_unseparated(id.as_str())
-            .push_unseparated(")");
-    }
-    builder.push(
-        ") SELECT DISTINCT requested.id, (
-             SELECT entry.id FROM blackboard_entries AS entry
-             JOIN blackboard_entry_revisions AS revision
-               ON revision.entry_id = entry.id AND revision.revision = entry.revision
-             WHERE entry.project_id = ",
-    );
-    builder.push_bind(project_id);
-    builder.push(
-        " AND revision.state = 'superseded' AND revision.superseded_by = requested.id
-          ORDER BY entry.updated_at_ms DESC, entry.id LIMIT 1
-         ) AS predecessor_id FROM requested
-         WHERE predecessor_id IS NOT NULL ORDER BY requested.id",
-    );
-    Ok(builder
-        .build_query_as::<(String, String)>()
-        .fetch_all(connection)
-        .await?)
 }
 
 impl BlackboardStore {

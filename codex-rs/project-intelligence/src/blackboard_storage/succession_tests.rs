@@ -118,17 +118,6 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
         for attempt in 0..2 {
             let mut connection = store.pool.acquire().await.unwrap();
             // Actual production selectors, measured before full entry loads/dedup/display.
-            let root_ids = super::newest_predecessor_ids(
-                &mut connection,
-                PROJECT_ID,
-                &[
-                    successor.clone(),
-                    successor.clone(),
-                    BlackboardEntryId::parse("absent").unwrap(),
-                ],
-            )
-            .await
-            .unwrap();
             let preview_ids =
                 super::predecessor_ids(&mut connection, PROJECT_ID, &successor, /*limit*/ 3)
                     .await
@@ -146,13 +135,8 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
             .await
             .unwrap();
             assert_eq!(
-                (
-                    root_ids.len(),
-                    preview_ids.len(),
-                    history_ids.len(),
-                    replay_ids.len()
-                ),
-                (1, 3, 30, 5)
+                (preview_ids.len(), history_ids.len(), replay_ids.len()),
+                (3, 30, 5)
             );
             drop(connection);
             let packet = store
@@ -170,10 +154,6 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
                     .collect::<Vec<_>>(),
                 vec![&successor]
             );
-            let root = store
-                .newest_predecessors(PROJECT_ID, std::slice::from_ref(&successor))
-                .await
-                .unwrap();
             let (preview, preview_more) = store
                 .predecessor_page(PROJECT_ID, &successor, /*limit*/ 3)
                 .await
@@ -183,14 +163,8 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
                 .await
                 .unwrap();
             assert_eq!(
-                (
-                    root.len(),
-                    preview.len(),
-                    history.len(),
-                    preview_more,
-                    history_more
-                ),
-                (1, 3, 30, true, true)
+                (preview.len(), history.len(), preview_more, history_more),
+                (3, 30, true, true)
             );
             assert_eq!(
                 preview
@@ -206,8 +180,6 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
                     .collect::<Vec<_>>(),
                 history_ids
             );
-            let newest = sqlx::query_scalar::<_, String>("SELECT id FROM blackboard_entries WHERE id LIKE 'predecessor-%' ORDER BY updated_at_ms DESC, id LIMIT 1").fetch_one(&store.pool).await.unwrap();
-            assert_eq!(root[0].1.id.as_str(), newest);
             assert!(matches!(
                 store.superseded_by(PROJECT_ID, &successor).await,
                 Err(BlackboardStoreError::EntryIdentityConflict(_))
