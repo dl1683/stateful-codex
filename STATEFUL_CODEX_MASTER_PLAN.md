@@ -118,3 +118,18 @@ These follow the selection rules in the "External benchmark program" section of 
 - never Harvey LAB.
 
 The full candidate list and its status up to 2026-10-08 are in that archived section and SC-EVAL-036/037; later results are in [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md).
+
+### Acceptance gate decision (council 2026-10-12b, Codex and Droid converged; sc_dogfood/council/council_20261012b_gate_FINAL.md)
+
+Evidence: the three-way showed Qwen clean exits falling 98 to 3 after the acceptance-ledger gate. Named bugs: plain questions end Blocked; non-git workspaces cannot verify; schema and revision repair loops.
+
+Decision: verification becomes opt-in for explicitly started Work with declared criteria. Ordinary Autonomous answers end Answered (not verified); unfinished work ends partial. Completed stays evidence-bound.
+
+Next in order:
+1. P1;
+2. answer safety;
+3. git-independent identity;
+4. simplified Work verification;
+5. P2 refrozen;
+6. the matched 216-session release check (floors 98 and 54) plus a Luna non-git journey;
+7. lean 3a.
