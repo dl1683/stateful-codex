@@ -40,8 +40,17 @@ system should work, and lets it proceed.
   does not infer which project a request belongs to.
 - The user chooses whether to continue, create, or fork a thread. Threads are
   conversation and execution views, not project-memory boundaries.
-- The user chooses Autonomous, Collaborative, or Socratic mode. The system does
-  not infer the mode.
+- The user chooses how the system works, and the system does not infer it:
+  - **Ask** is a run-less thread attached to the project. It answers from the
+    project's memory (its root, rules and decisions) and keeps capturing, but it
+    starts no run, carries no run or acceptance obligations, and ends with an
+    ordinary turn. A question should never need a run to be answered.
+  - **Work** is sustained, explicitly started work on a run, in Autonomous,
+    Collaborative, or Socratic mode. Only Work has runs, and only Work can end
+    Blocked.
+
+  Implementation status, including which mode is the default, is in
+  [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md).
 - Autonomous mode should keep working without unnecessary checkpoints. The user
   may leave it unattended or intervene when their judgment is useful.
 - Important project understanding survives compaction and thread changes.

@@ -1,6 +1,6 @@
 # Stateful Codex current state
 
-Updated 2026-10-07. This page says what the published code does, what has and
+Updated 2026-10-12. This page says what the published code does, what has and
 has not been measured, where unmerged work lives, and how to operate the
 system safely. It is the only current-state page; it is not a chronological
 handoff.
@@ -11,12 +11,15 @@ Reading order:
 2. [`STATEFUL_CODEX_PRODUCT_INTENT.md`](./STATEFUL_CODEX_PRODUCT_INTENT.md):
    the product requirements. These are intent, not demonstrated results.
 3. [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md): the
-   canonical build plan, agreed 2026-10-07. Its reference design is
-   [`STATEFUL_CODEX_MEMORY_PLAN.md`](./STATEFUL_CODEX_MEMORY_PLAN.md). Where an
-   older plan conflicts with the master plan, the master plan wins.
+   canonical build plan, agreed 2026-10-07. Its reference design is archived
+   unchanged as
+   [`STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md`](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md).
+   Where an older plan conflicts with the master plan, the master plan wins.
 4. This page.
 5. [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md): the single
    evidence ledger, including failed, stopped, invalid and retired work.
+   SC-EVAL-001 to 037 are archived verbatim in
+   [`STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md`](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md).
 6. The evaluation references:
    [`LONGITUDINAL_PROTOCOL.md`](./clients/stateful-codex/eval/LONGITUDINAL_PROTOCOL.md),
    [`bixbench/README.md`](./clients/stateful-codex/eval/bixbench/README.md) and
@@ -29,120 +32,73 @@ the ledger on 2026-10-07. Their text is recoverable from Git at
 
 ## 1. Which code this describes
 
-The fork began as `feature/stateful-codex` on upstream `origin/main` at
-`48f897e4ce94152818ce0563b3a8aac3a70ce9b8`. The published branch is
-`stateful/main` at `5eacf03387` (2026-09-30), the
-upstream sync that carries the fork at `4ea34e7d10`. Everything in sections 3
-to 6 is read from that source. This page is a source description, not a fresh
-build or test run: the 2026-10-07 cleanup audit ran only `npm test` in
-`clients/stateful-codex` (46 reported tests, of which two are discovered
-fixture modules) and the BixBench adapter unit tests (17 pass, fixtures and
-mocks only). No Rust suite, live model run or browser session was run for this
-page.
+This page describes `stateful/main`, read at `e2249ad43` (2026-10-12). Its
+code is identical to the pushed head `f097a8008` (2026-10-11); the later commits
+change docs only. The paused October branches were integrated onto `main` one
+reviewed checkpoint at a time from 2026-10-07; the landings are summarized in
+section 2. The fork began
+as `feature/stateful-codex` on upstream `origin/main` at
+`48f897e4ce94152818ce0563b3a8aac3a70ce9b8`.
 
-The October memory work is **not** in this code. The frozen builds measured in
-SC-EVAL-035 (`cont_0e160ee0f6`, `cont_9a3c2109d8`, `cont_27aa1988f8`,
-`cont_c466898af7`, `cont_e9ee21021e`) came from the unmerged branches below.
-Do not attribute their behavior to `stateful/main`.
+This page is a source description, not a fresh build or test run. The most
+recent test results are in the landing records below. The frozen builds measured
+in SC-EVAL-035 (`cont_0e160ee0f6`, `cont_9a3c2109d8`, `cont_27aa1988f8`,
+`cont_c466898af7`, `cont_e9ee21021e`) came from the then-unmerged branches; do
+not attribute their measured behavior to the current `main` without a rerun.
 
-## 2. Unmerged work on the `stateful` remote
+The September source pin, the integration log for each step and the 2026-10-03
+inventory of paused branches are archived verbatim in
+[`STATEFUL_CODEX_PLAN_HISTORY.md`](./STATEFUL_CODEX_PLAN_HISTORY.md), part 3.
 
-### Integration on `main` (in progress, 2026-10-07)
+## 2. What has landed on `main`
 
-The paused branches are being integrated directly on `stateful/main`, one reviewed
-checkpoint at a time (plan: `sc_dogfood/integrate/INTEGRATION_PLAN.md`; log:
-`sc_dogfood/integrate/EXEC_LOG.md`). Landed so far:
+Integration plan: `sc_dogfood/integrate/INTEGRATION_PLAN.md`; log:
+`sc_dogfood/integrate/EXEC_LOG.md`. The full landing records for the earlier
+checkpoints are in the plan history, part 3.
 
-- **Step 1, foundation and direct control** (`052741b9c`..`6839ad4f5`): the
-  shared continuity base `52694362a1` merged once; transactional capture writer
-  and journal; explicit unscoped `/memory add|correct|forget` with `ID@REV`
-  targets, expected-project admission and client result fences; bounded review
-  and exact reads. Verdict: landable with named limitations after the repair cap.
-  **Cut** from this slice, acceptance rows OPEN: automatic word-for-word rule
-  capture from messages, quotation-backed user decisions, investigations and
-  scoped rules (historical scoped entries are held back and readable), model
-  editing or replacement of user-provenance memory, and historical scope titles
-  in review. A narrower automatic-capture contract is scheduled around Step 3.
-  Linux: 0 new failures against the 83eee86b6 baseline.
+| Checkpoint | Commits | Outcome |
+| --- | --- | --- |
+| Step 1, foundation and direct control | `052741b9c`..`6839ad4f5` | Landable with named limitations after the repair cap |
+| Cleanup K1 | `fd89dfca5`..`f5f9fea96` | Eval and test hygiene; the backfill-warning JSON fix was reverted |
+| Step 2, migration map and store classification | `716e3ae5e`..`e334727cb` | Landable with named limitations |
+| Capture C2, source, identity and storage foundation | `7ae0a43b5`..`a7e0bb127` | Landed with cuts |
+| Capture C3, model proposals and exact source | `3fe03dfa6`..`42370b992` | Landed with cuts |
+| Cleanup K2, portable tool schemas | `738e1c401`..`68638f6e6` | Landed with an open gap |
+| Checkpoint E, evidence-bound completion | `fb148cb38`..`0a83b1f58` | Not shippable alone; followed by E1b, E1c and E1d |
+| Checkpoint E1b, real-repository check qualification | `056912335`..`179be19c4` | Landed; its read-only exemption was cut |
+| Checkpoint E1c, no-tool completion exemption | `0df6aedbd`..`668602bb8` | CUT; code restored to E1b's behaviour |
+| Capture slice C4-C6, capture-to-use | `11a08f976`..`92efdff9f` | Landed with a cut (record below) |
+| Checkpoint E1d, plain answers in Autonomous runs | `ec7910a06`..`e009fa83f` | Landed as the fallback (record below) |
+| Stack pushed 2026-10-11 | from `ebac34e91`; pushed head `f097a8008` | Pushed on local evidence; the later cloud gate found 0 new failures caused by the stack (record below) |
 
-Step 2's final cut additionally refuses model lifecycle operations when any recorded
-revision of the target has non-Agent provenance, including Agent entries produced by
-older binaries from imported memory. Explicit user correction and Forget remain available.
+### Open items and cuts carried from the earlier landings
 
-| Acceptance row | Status |
-| --- | --- |
-| Model lifecycle of entries with any non-Agent revision history | **OPEN** — cut from the retained model mutation, promotion, retirement, supersession and committed replay surface. |
+Each item is quoted or condensed from its landing record in the plan history,
+part 3.
 
-- **Cleanup K1** (`fd89dfca5`..`f5f9fea96`): eval script usage/port fixes, test-only
-  TUI version stamp, platform shell in a Stateful test, boxed dispatcher futures.
-  The backfill-warning JSON fix was reverted (it lost the warning under default
-  log filters).
-- **Step 2, migration map and store classification** (`716e3ae5e`..`e334727cb`):
-  every store open checks its applied migration history in one read snapshot and
-  refuses unknown or incompatible histories (paused item-4/item-5 `0018`, runtime
-  `0005`+) with a precise error, leaving the store untouched; common-prefix and
-  continuity stores upgrade normally. No offline converter (no data-bearing
-  incompatible store exists). Also: legacy context is bounded before it is read,
-  predecessor fan-in is bounded, and the model can change or retire only memory
-  whose every revision is assistant-authored. Verdict: landable with named
-  limitations. Linux: 0 new failures.
+- **Step 1, acceptance rows OPEN** (cut from that slice): quotation-backed user
+  decisions, investigations and scoped rules (historical scoped entries are held
+  back and readable), model editing or replacement of user-provenance memory,
+  and historical scope titles in review. Automatic word-for-word rule capture,
+  also cut there, has since landed in C4-C6.
+- **Step 2, acceptance row OPEN:** model lifecycle of entries with any non-Agent
+  revision history. The model can change or retire only memory whose every
+  revision is assistant-authored; explicit user correction and Forget remain
+  available.
+- **C2 cuts:** root predecessor-content publication, legacy alias replay on
+  upgraded stores, historical-findings run completion, and existing-entry reuse
+  for new source groups.
+- **C3 cuts:** automatic exact-source and source-search recall, and automatic
+  proposal recall.
+- **K2 gap (OPEN):** providers whose bridge puts very long data in call IDs
+  (LiteLLM with Gemini thought signatures) are refused rather than supported,
+  and there is no host-enforced cap on a model that never produces a valid
+  completion.
+- **Checkpoint E:** checker adequacy is not independently judged.
+- **E1b:** non-Git roots and files inside embedded repositories fail closed.
+- **E1c:** migration `0012` stays as applied history, unused.
 
-- **Capture C2, source/identity/storage foundation** (`7ae0a43b5`..`a7e0bb127`):
-  sealed user-turn sources with byte ranges and digests, durable source locators
-  and bounded source search, typed temporal context (unknown stays unknown),
-  canonical identity/aliases and one retirement fence shared by every writer and
-  automatic read, project-fenced source groups (forward PI migrations
-  `0020`-`0023`, native `0060`). No new user-authority producer yet (that is
-  C3/C4). Cut: root predecessor-content publication, legacy alias replay on
-  upgraded stores, historical-findings run completion, existing-entry reuse for
-  new source groups. Contract: `sc_dogfood/integrate/capture/CONTRACT.md`
-  (capture-c1-v3). Linux: 0 new failures.
-
-- **Capture C3, model proposals and exact source** (`3fe03dfa6`..`42370b992`):
-  the model can record a bounded, non-applied proposal citing byte ranges of the
-  same sealed user turn (never assistant text, summaries or compaction output);
-  proposals carry verbatim detail and temporal spans, are stored atomically
-  without user authority, and are labelled as proposals. Cut for now (no
-  post-hook publication fence exists, so a result held by a hook could outlive a
-  Forget): automatic exact-source/source-search recall and automatic proposal
-  recall. Linux: 0 new failures.
-
-- **Cleanup K2, portable tool schemas** (`738e1c401`..`68638f6e6`): Stateful tool
-  schemas stay within a portable JSON Schema subset (checked by a test);
-  rejections name the field and show a valid call within the response budget;
-  call IDs are recorded verbatim, and empty, control-character or over-512-byte
-  IDs are refused up front with a clear reason. Known gap (OPEN): providers whose
-  bridge puts very long data in call IDs (LiteLLM with Gemini thought signatures)
-  are refused rather than supported, and there is no host-enforced cap on a model
-  that never produces a valid completion.
-
-- **Checkpoint E, evidence-bound completion** (`fb148cb38`..`0a83b1f58`): a run-owned
-  acceptance ledger (criteria linked to request text, required/optional,
-  dependencies, revisions), host-observed check evidence and one completion gate
-  for every writer of Completed; admitted open issues end the run Blocked with a
-  partial result. Autonomous runs can complete unattended against a host-admitted
-  frozen checker. **Not shippable alone:** after the final cut a trivial lookup
-  cannot complete and checks settle only in fully pinned workspaces; checkpoint
-  E1b restores a host-decided read-only exemption first. Checker adequacy is not
-  independently judged.
-
-- **Checkpoint E1b, real-repository check qualification** (`056912335`..`179be19c4`):
-  checks settle in real Git repositories through bounded content identity (tracked
-  and untracked non-ignored files, HEAD and index; never size or mtime). Non-Git
-  roots and files inside embedded repositories fail closed. The read-only exemption
-  it was meant to restore was cut after review.
-
-- **Checkpoint E1c, no-tool completion exemption: CUT** (`0df6aedbd`..`668602bb8`):
-  three repair rounds closed each reviewed witness, but the final review found an
-  auxiliary user-shell command and an interrupt that could still coexist with an
-  exempt completion, so the code was restored to E1b's behaviour (migration 0012
-  stays as applied history, unused).
-  **Known limitation until E1d lands:** an Autonomous run that only answers a
-  question still ends Blocked, because every completion owes acceptance criteria
-  and an admitted check. Successor E1d ("host-ended Autonomous Q&A": the host
-  finalizes a text-only, no-tool turn inside its task under the task's cancellation
-  token, with user-shell submission refused or queued while an eligible run's turn
-  is active) is scheduled after the C4-C6 capture slice.
+### Recent landing records
 
 - **Capture slice C4-C6, capture-to-use: LANDED WITH A CUT** (`11a08f976`..`92efdff9f`):
   stated project rules are saved word for word at ingress with a receipt and
@@ -227,30 +183,23 @@ older binaries from imported memory. Explicit user correction and Forget remain 
   attempt should carry provenance per inserted span, not per draft, and can land
   the additive server half first with capture unchanged.
 
-The table below describes the branch tips as paused; rows are consumed as their
-checkpoints land.
-
-All of these branches start from `stateful/main` (merge base `5eacf03387`).
-None is merged. Master plan priority 1 is to integrate them into one build
-with one migration map and rebuild from a clean tree. Status lines come from the
-builder logs (`sc_dogfood/fix/*_LOG.md`) at the 2026-10-03 pause.
-
-| Branch | Tip | Status |
-| --- | --- | --- |
-| `fix/continuity` | `d10057bac0` | **Consumed by Step 1 (curated, cuts above).** Continuity line (base `3da78a47c4`): trimmed packet, exact delivery floor, standing rules, deferred tools, lean protocol and window budget, each reviewed clean; frozen builds `cont_0e160ee0f6`, `cont_9a3c2109d8` and `cont_c466898af7` came from it. Also carries items 1-3 (`/memory`, `codex memory`, investigations), which hit the repair cap and stay open; on-demand indexing stopped at the cap with a zero-entry once-cell defect; two post-cap commits (`9b09858e40`, `d10057bac0`) are unreviewed fixes. |
-| `h1done/foundation` | `9de1ef0052` | **Consumed by Step 1 (curated, cuts above).** `fix/continuity` plus one unreviewed `wip` commit extracting the items 1-3 foundation (action-ID fence, root projection module, explicit-only investigation join/end, host background capture off). When saved it left 4 app-server Stateful tests failing; the rubric review was not run. |
-| `h1done/item4` | `7be002b288` | Item 4 reduced contract (base `52694362a1`): 2 of 4 slices committed, unreviewed (canonical identity index; capture judged by canonical identity inside the commit). Parser and recall slices must be redone. Its migration `0018` may clash with other branches. |
-| `h1done/item5file` | `4418ddc737` | File-level "needs check" replacement for item 5 (base `52694362a1`): project-intelligence jobs and `paths_changed_between` committed and tested but unreviewed, plus a `wip` worker commit. Read adapters, the remaining tests and the review are left. The rejected regex-confirmation pivot stays on `h1done/item5` (`0b458025a2`). |
-| `h1done/item6` | `d265021d3e` | Execution-waste item (base `52694362a1`): the final scoped Codex check rated it safe to land as partial. Open: thin 2 KiB opening packet, topic card, per-response attribution, recipe executor identity, and the other named limits in its log. |
-| `h1done/item7` | `d0c7ea9c8a` | Visibility item: the Rust head reviewed before the reduced contract (`12a3dc65ad`) was rejected (2 P1, 7 P2). The reduced contract (recap cut, `memory_add` revert, reconnect fencing) is committed as unreviewed `wip`; one TUI reconnect snapshot test was failing at the pause. |
-| `h1done/insession` | `f7aebbc01` | In-session memory (base `52694362a1`): 25 reviewed commits. Step 1 (smaller tool schemas) is landable. Step 2 (render mode) is capped with 3 open findings. Steps 3 (window journal) and 5 (run admission) are STOP/CUT. Step 4 (task capsule) has its second repair committed as unreviewed `wip` with one review round left. |
-| `fix/web` | `dfff18633c` | Web client line: gateway origin check, long-project glance, memory panel, item 7 web (approved at `28a971c4c0`). The tip ("turn the return card off") is an unreviewed pure cut; `npm test` 195/195. |
-| `h1done/web-items123` | `067272525f` | Web side of items 1-3 (About you, Add form, paging, revision-keyed drafts), from `fix/web` at `e753c36676`; repair round 1 applied; `npm test` 198/198. Kept off `fix/web`; the integrator merges it. |
-
-Other remote branches (`dogfood/*`, `fix/phase1`, `bench/horizon`,
-`harness/scbench`, `checkpoint/stateful-region-routing-unsafe-20260925`) are
-historical or evaluation-only. The checkpoint branch holds the rejected
-bare-line-range routing prototype at `a6cdb157de`; it must not be merged.
+- **Parked: the capsule working-set scaffold.** Parked 2026-10-12 (entropy
+  pass); the code deletion lands in the entropy code slice. It is the inactive
+  capsule stage (a) storage and publication scaffold listed in the stack above.
+  - Tag: `parked/capsule-scaffold-2026-10-12`, on `e2249ad43`.
+  - To revive, restore from the tag
+    `codex-rs/project-intelligence/src/working_set_storage.rs`,
+    `working_set_storage/publication.rs`, their tests
+    (`working_set_storage_tests.rs` and `working_set_storage/publication_tests.rs`),
+    and the shared file-sample types and constants, which the entropy code
+    slice moves into the extension.
+  - Migrations `0024_working_set_capsule.sql` and
+    `0025_capsule_source_observation.sql` stay in the tree.
+  - Why it would be revived: the structural floor results in SC-EVAL-041.
+    "The floor holds both hard gates on within3: zero wrong-active rules and
+    zero rejected-working routes over 104 capsules." Its tuned-set row
+    (`c96429fa1`, 512 tok) scored 5/5 plain and 5/5 Stateful; on within3, now
+    a regression set, 2/5 and 2/5.
 
 ## 3. Architecture and source reading path
 
@@ -260,10 +209,10 @@ database.
 
 | Concern | Source |
 | --- | --- |
-| Startup and identity | `codex-rs/app-server-client/src/stateful.rs` binds an explicit project and root and starts the run; exec and the TUI reuse it. Root CLI flags (`--stateful <mode>`, `--stateful-project`) propagate into `codex exec`. Autonomous runs default to 24 continuations and 14,400 seconds (`DEFAULT_STATEFUL_MAX_CONTINUATIONS`, `DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS`), not unlimited activity. |
-| Project intelligence | `codex-rs/project-intelligence`: hierarchy, context map, blackboard, evidence links, relations and premises (migrations `0001`-`0014`); `indexer.rs` scans, publishes and tracks refresh generation and health. |
-| Runs, steering, measurement | `codex-rs/stateful-runtime`: runs, obligations, steering, autonomous leases and per-turn measurements (migrations `0001`-`0004`). |
-| Agent integration | `codex-rs/ext/stateful`: context, tools, tool policy, turn and thread lifecycle. `tools/mod.rs` registers 13 tools: `blackboard_query`, `blackboard_record`, `blackboard_record_batch`, `blackboard_update_batch`, `blackboard_relate`, `context_map_query`, `context_map_refresh`, `evidence_read`, `obligation_update`, `stateful_run_update`, `stateful_run_read`, `steering_query`, `steering_reconcile`. `world_state.rs`, `run_world_state.rs` and `outcome_world_state.rs` own the incremental, bounded model context. |
+| Startup and identity | `codex-rs/app-server-client/src/stateful.rs` binds an explicit project and root and, for the Work modes, starts the run; exec and the TUI reuse it. A bare `--stateful` is Ask, which starts no run (`StatefulModeCliArg` in `codex-rs/utils/cli/src/stateful_mode_cli_arg.rs`). Root CLI flags (`--stateful <mode>`, `--stateful-project`) propagate into `codex exec`. Autonomous runs default to 24 continuations and 14,400 seconds (`DEFAULT_STATEFUL_MAX_CONTINUATIONS`, `DEFAULT_STATEFUL_MAX_ELAPSED_SECONDS`), not unlimited activity. |
+| Project intelligence | `codex-rs/project-intelligence`: hierarchy, context map, blackboard, evidence links, relations and premises, repository observations, knowledge context and capture sources (migrations `0001`-`0025`); `indexer.rs` scans, publishes and tracks refresh generation and health. |
+| Runs, steering, measurement | `codex-rs/stateful-runtime`: runs, obligations, steering, autonomous leases, per-turn measurements, the acceptance ledger and host answers (migrations `0001`-`0004` and `0010`-`0013`). |
+| Agent integration | `codex-rs/ext/stateful`: context, tools, tool policy, turn and thread lifecycle. `tools/mod.rs` registers 14 tools. Every Stateful thread gets the 8 project tools: `blackboard_query`, `blackboard_record_batch`, `blackboard_update_batch`, `blackboard_relate`, `memory_read`, `context_map_query`, `context_map_refresh`, `evidence_read`. A thread with a run also gets the 6 run tools: `obligation_update`, `stateful_run_update`, `stateful_acceptance_update`, `stateful_run_read`, `steering_query`, `steering_reconcile`; an Ask thread does not (`RunTools::Hidden`). `world_state.rs` and `run_world_state.rs` own the incremental, bounded model context. |
 | Trust and completion | `source_freshness.rs`, `read_receipts.rs`, `visible_root.rs`, `completion.rs`, `autonomy.rs`, `socratic.rs`, `checkpoint.rs`: read receipts, point-of-use freshness, revision-bound completion aliases, owner fencing and mode gates. |
 | API | `codex-rs/app-server/src/request_processors/stateful.rs` and `stateful/api.rs`, `blackboard.rs`, `context_map.rs`, `project_intelligence.rs`, `extensions.rs`, `stateful_store.rs`, `turn_trajectory.rs`; app-server protocol v2 types and the generated TypeScript and Python models. All Stateful methods are experimental v2. |
 | TUI and exec | `codex-rs/tui/src/stateful_ui.rs` and the app-server event modules; `codex-rs/exec` Stateful startup, attribution (`stateful_attribution.rs`) and `startup_warning_deduper.rs`. |
@@ -348,6 +297,12 @@ cargo build -p codex-cli -p codex-code-mode-host
 `--stateful-project` selects an existing project. SC-EVAL-033 found that
 `codex --stateful` requires a prompt at launch.
 
+Ask is the default. A bare `--stateful` means `--stateful ask`, which starts no
+run (`default_missing_value = "ask"` in `codex-rs/tui/src/cli.rs:30` and
+`codex-rs/exec/src/cli.rs:37`), and the browser client's setup form starts in
+Ask (`mode: "ask"`, `clients/stateful-codex/public/setup-controller.mjs:19-20`).
+`autonomous`, `collaborative` and `socratic` start a Work run.
+
 The browser client starts a loopback-only gateway (default
 `http://127.0.0.1:4173`, override with `STATEFUL_CODEX_PORT`):
 
@@ -401,9 +356,9 @@ follow-up, so an event during an in-flight read causes one final read.
   message of a session became a Stateful run, steering was not durable, a
   Socratic run could not be moved to execution, and `resume --stateful` was
   unusable. The published source does route obligation notifications to a TUI
-  history cell (`stateful_ui.rs`, covered by a snapshot test), but no live TUI
-  check has been recorded since. The memory-visible TUI measured in SC-EVAL-035
-  is on the unmerged branches.
+  history cell (`stateful_ui.rs`, covered by a snapshot test). The memory-visible
+  TUI measured in SC-EVAL-035 was on then-unmerged branches; the later TUI
+  journeys are SC-EVAL-038, 039 and 042.
 
 ## 6. Persistence and compatibility
 
@@ -433,8 +388,12 @@ follow-up, so an event during an in-flight read causes one final read.
 
 The ledger is the authority; this is a pointer.
 
-**Latest evidence** (SC-EVAL-035, 2026-10-02/03, unmerged candidate builds,
-every test n=1 per arm):
+**Newest evidence** is SC-EVAL-038 to 043 (2026-10-09 to 10-12): the capture,
+Ask and restored-read journeys, the restricted-read within1 baseline, the
+capsule offline tests and the open-model ladder.
+
+**Cross-session campaign** (SC-EVAL-035, 2026-10-02/03, unmerged candidate
+builds, every test n=1 per arm):
 
 - Across fresh threads, memory helps: on the 20-session horizon series
   Stateful used 0.73x-0.89x the ordinary input, but the crossover depends on the
@@ -446,7 +405,7 @@ every test n=1 per arm):
   80%) and it recalled never-restated facts 2/3 against 0/3. Ratios within about
   0.15 of 1.0 are noise at n=1, and within1's resume turns ran under
   workspace-write in both arms.
-- The first session costs more (1.7-1.9x per the master plan).
+- The superseded master priorities recorded a first-session premium of 1.7-1.9x; see `STATEFUL_CODEX_PLAN_HISTORY.md`, part 1. This is a historical observation, not a fresh measurement of this snapshot.
 
 **Earlier evidence still standing:** SC-EVAL-034 (one run per arm; 13.4%
 cheaper over 25 questions, more expensive on small one-shot batches);
@@ -460,8 +419,10 @@ freeze; neither is an official score.
 
 **Open gates** (each needs evidence, not more components):
 
-- Within-run cost: the master plan's Gate B replay and the within1 replay
-  (cost at or below plain, 3.70M units; at most 18 compactions).
+- Within-run cost: the bounded within1 run in the master plan's canonical
+  order. The reference is the SC-EVAL-040 restricted-read baseline's plain arm
+  (1.94M units, 10 compactions), which replaced the earlier 3.70M-unit,
+  18-compaction reference.
 - First-session premium and fixed overhead on trivial requests.
 - Stale state: point-of-use freshness for changes outside the agent's own
   sources.
@@ -478,6 +439,13 @@ freeze; neither is an official score.
   explicit approval.
 - Whether the full root stays loaded after an in-thread compaction is the
   master plan's open decision.
+
+### Benchmark position (summary)
+
+- Benchmark reruns are suspended.
+- The positioning is one general harness competitive with the best model- or benchmark-specific harnesses, not a plain-Codex parity study.
+- Real-task comparisons (the open-model ladder, SC-EVAL-043) are the current evidence.
+- Selection rules and earlier benchmark results: "External benchmark program" in [`STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md`](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md).
 
 ### Harness robustness backlog (from the open-model ladder)
 

@@ -40,7 +40,7 @@ each model's or benchmark's own published harness on Terminal-Bench 2.1, SWE-ben
 on several of them, for example Luna on TB2.1: 76.6% against 75.7% for released Codex. The exception is DeepSeek V4.1
 Flash, which trails DeepSeek's own 1M-context harness at max effort: 83.9% against 90.6% on TB2.1, and 61.1% against
 74.2% on DeepSWE. Most of that gap is timeouts from long reasoning. On memory-native MemoryArena it leads or ties every
-published number we found. Details, caveats and judges: [SC-EVAL-037](./STATEFUL_CODEX_EVALUATION.md).
+published number we found. Details, caveats and judges: [SC-EVAL-037](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md).
 
 | Evaluation | Observed result | Important limitation |
 | --- | --- | --- |
@@ -99,10 +99,10 @@ when the branch CLI is elsewhere.
 - [`STATEFUL_CODEX_PRODUCT_INTENT.md`](./STATEFUL_CODEX_PRODUCT_INTENT.md): the
   user problem and requirements; the highest-level source of truth.
 - [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md): the
-  canonical build plan; its reference design is
-  [`STATEFUL_CODEX_MEMORY_PLAN.md`](./STATEFUL_CODEX_MEMORY_PLAN.md).
+  canonical build plan; its reference design is archived as
+  [`STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md`](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md).
 - [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md):
-  architecture, source reading path, unmerged branches, open gates and
+  architecture, source reading path, what has landed, open gates and
   operating rules.
 - [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md): the
   append-only evidence record, including negative and invalidated runs.
@@ -117,89 +117,12 @@ when the branch CLI is elsewhere.
 
 ## Built on Codex
 
-Stateful Codex is built on the open-source Codex CLI. The upstream Codex
-quickstart and links are retained below for provenance and contributor context.
-
----
-
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
-
----
-
-## Quickstart
-
-### Installing and running Codex CLI
-
-Run the following on Mac or Linux to install Codex CLI:
-
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-```
-
-Run the following on Windows to install Codex CLI:
-
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
-```
-
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
-
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
-```
-
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
-```
-
-Codex CLI can also be installed via the following package managers:
-
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
-
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
-
-Then simply run `codex` to get started.
-
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
+Stateful Codex is a fork of the open-source [OpenAI Codex CLI](https://github.com/openai/codex),
+a coding agent that runs locally. This fork is built from source as described in
+[Try it](#try-it); to install released upstream Codex instead, follow the
+[upstream installation instructions](https://github.com/openai/codex#quickstart) or the
+[Codex documentation](https://developers.openai.com/codex). Upstream's
+[contributing](./docs/contributing.md) and [installing and building](./docs/install.md)
+guides and the [open source fund](./docs/open-source-fund.md) page are kept in `docs/`.
 
 This repository is licensed under the [Apache-2.0 License](LICENSE).
