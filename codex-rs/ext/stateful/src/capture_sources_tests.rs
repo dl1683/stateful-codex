@@ -3,6 +3,7 @@ use codex_extension_api::PreviousWorldStateSection;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
+use sha2::Digest;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -81,4 +82,28 @@ async fn c3r1_source_handle_redelivery_preserves_honest_bounded_lower_bound() {
         assert_eq!(next.snapshot(), ninth.snapshot());
         assert_eq!(turn_store.get::<SourceHandles>().unwrap().handles.len(), 8);
     }
+    // The ninth part has no handle, yet its sealed original stays exactly readable.
+    let store = extension
+        .services
+        .as_ref()
+        .unwrap()
+        .blackboard()
+        .await
+        .unwrap();
+    let hex = |text: &str| format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+    let locator = hex(&serde_json::to_string(&(&project_id, "original-9", 1, 0)).unwrap());
+    assert_eq!(
+        store
+            .read_source_page(
+                &project_id,
+                &locator,
+                &hex("source-9"),
+                /*revision*/ 1,
+                /*offset*/ 0
+            )
+            .await
+            .unwrap()
+            .exact_text,
+        "source-9"
+    );
 }

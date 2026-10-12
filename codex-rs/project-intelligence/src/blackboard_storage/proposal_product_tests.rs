@@ -191,6 +191,18 @@ async fn c3_product_imported_rules_and_long_qualifier_source_are_never_promoted(
             category:ProposalCategory::Rule,interpretation:format!("Imported interpretation {index}"),dependency:None,temporal:None,event_status:None,attribution:Some(ProposalAttribution::ImportedMaterial),speaker_span:None,
         }]).await.unwrap();
         assert_eq!(result[0].status,if index==0 {ProposalStatus::Proposed} else {ProposalStatus::Omitted});
+        if index == 1 {
+            // The omitted qualifier's original bytes stay exactly readable.
+            let start = text.find("motor was not damaged").unwrap() as u32;
+            assert_eq!(
+                store
+                    .read_source_range("project-1", &seal.exact_source_locator, &seal.digest, start, start + 21)
+                    .await
+                    .unwrap()
+                    .exact_text,
+                "motor was not damaged"
+            );
+        }
     }
     assert!(
         store

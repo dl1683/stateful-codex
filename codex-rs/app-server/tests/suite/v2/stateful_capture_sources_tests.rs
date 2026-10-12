@@ -610,6 +610,27 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_reope
             /*busy_timeout*/ None,
         )
         .await?;
+    // The independent second part stays exactly readable after Forget and reopen.
+    let second = "Independent original second part.";
+    let metadata: String = sqlx::query_scalar(
+        "SELECT metadata FROM capture_sources WHERE project_id = ? AND part_index = 1",
+    )
+    .bind(&project)
+    .fetch_one(&cold_pool)
+    .await?;
+    let second_seal: SourceSeal = serde_json::from_str(&metadata)?;
+    assert_eq!(
+        cold.read_source_range(
+            &project,
+            &second_seal.exact_source_locator,
+            &second_seal.digest,
+            /*start*/ 0,
+            second.len() as u32
+        )
+        .await?
+        .exact_text,
+        second
+    );
     let before = snapshot(&cold_pool).await?;
     assert_eq!(
         cold.observe_source(seal.observation.clone(), text).await?,

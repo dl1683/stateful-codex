@@ -223,6 +223,27 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
             .bind(&proposal.source.source_id)
             .fetch_one(&pool)
             .await?;
+    // The independent control's original stays exactly readable after Forget and reopen.
+    let control = "independent unrelated control";
+    let metadata: String = sqlx::query_scalar("SELECT source.metadata FROM capture_sources AS source JOIN capture_source_chunks AS chunk ON chunk.source_id = source.source_id WHERE source.project_id = ? AND chunk.exact_bytes = ?")
+        .bind(&project)
+        .bind(control)
+        .fetch_one(&pool)
+        .await?;
+    let control_seal: codex_project_intelligence::SourceSeal = serde_json::from_str(&metadata)?;
+    assert_eq!(
+        reopened
+            .read_source_page(
+                &project,
+                &control_seal.exact_source_locator,
+                &control_seal.digest,
+                control_seal.observation.source_revision,
+                /*offset*/ 0
+            )
+            .await?
+            .exact_text,
+        control
+    );
     assert!(
         reopened
             .propose_sources(&admission, node, &turn, vec![proposal.source])
