@@ -140,6 +140,14 @@ async fn harness() -> Result<Harness> {
 
 impl Harness {
     async fn start_run(&mut self, mode: StatefulWorkflowMode) -> Result<StatefulRun> {
+        self.start_keyed_run(mode, "answered-run").await
+    }
+
+    async fn start_keyed_run(
+        &mut self,
+        mode: StatefulWorkflowMode,
+        key: &str,
+    ) -> Result<StatefulRun> {
         let params = StatefulRunStartParams {
             project_id: self.project_id.clone(),
             thread_id: self.thread_id.clone(),
@@ -149,7 +157,7 @@ impl Harness {
                 max_continuations: 1,
                 max_elapsed_seconds: 3_600,
             },
-            idempotency_key: "answered-run".to_string(),
+            idempotency_key: key.to_string(),
         };
         let started: StatefulRunStartResponse = self
             .server
@@ -710,6 +718,41 @@ async fn inherited_block_quotes_no_result() -> Result<()> {
             (TurnStatus::Completed, vec![STATUS_ONLY.to_string()], 1),
             blocked
         )
+    );
+    Ok(())
+}
+
+/// After a run is cancelled, a genuinely new run on the same thread warns again.
+#[tokio::test]
+async fn a_new_run_on_the_same_thread_warns_again() -> Result<()> {
+    let mut harness = harness().await?;
+    let first = harness.start_run(COLLABORATIVE).await?;
+    let script = vec![message("r1", "Done."), message("r2", "Done.")];
+    responses::mount_sse_sequence(&harness.responses_server, script).await;
+    let turn_id = harness.start_turn().await?;
+    let first_turn = harness.outcome(&turn_id, /*next*/ false).await?;
+    let params = codex_app_server_protocol::StatefulRunCancelParams {
+        run_id: first.id.clone(),
+        expected_revision: first.revision,
+    };
+    let _: codex_app_server_protocol::StatefulRunCancelResponse = harness
+        .server
+        .request(|request_id| ClientRequest::StatefulRunCancel { request_id, params })
+        .await?;
+    let second = harness.start_keyed_run(COLLABORATIVE, "second-run").await?;
+    let turn_id = harness.start_turn().await?;
+    let second_turn = harness.outcome(&turn_id, /*next*/ false).await?;
+
+    let warned = |requests| {
+        (
+            TurnStatus::Completed,
+            vec![STATUS_ONLY.to_string()],
+            requests,
+        )
+    };
+    assert_eq!(
+        (first_turn, second_turn, second.id != first.id),
+        (warned(1), warned(2), true)
     );
     Ok(())
 }
