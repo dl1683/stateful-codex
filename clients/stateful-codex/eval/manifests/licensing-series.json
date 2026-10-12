@@ -1,5 +1,6 @@
 {
   "name": "SC-EVAL-005 licensing follow-up series",
+  "historical": "Frozen 2026-09-22 for SC-EVAL-005. maturationUsage is SC-EVAL-004's one-time maturation (649,173 full, 94,677 uncached, 15 responses), the default lifetime cost when no --maturation-rollout is passed; new series should pass their own maturation rollouts. Current acceptance lives in STATEFUL_CODEX_MASTER_PLAN.md.",
   "maturationUsage": {
     "totalTokens": 649173,
     "uncachedTotalTokens": 94677,

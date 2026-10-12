@@ -1,9 +1,15 @@
 # Stateful Codex longitudinal evaluation protocol
 
+> **Historical (September 2026).** This six-project longitudinal protocol froze
+> how the September evidence was collected. It does not govern current
+> acceptance: the current build steps and their acceptance checks are in the
+> [master build plan](../../../STATEFUL_CODEX_MASTER_PLAN.md). The commands and
+> scripts below remain usable for reproduction and new runs.
+
 This protocol measures whether durable project intelligence improves work over
 time. It is not a search for five favorable demos. The product-intent document
-defines the desired outcome; this file freezes how the next evidence is
-collected.
+defines the desired outcome; this file froze how the September longitudinal
+evidence was collected.
 
 ## Experimental unit and selection
 
@@ -338,7 +344,10 @@ npm run eval:series -- --manifest eval/manifests/licensing-series.json `
 
 Repeat `--maturation-rollout` for each independently matured project in a
 multi-project distribution. Omitting it uses the frozen aggregate recorded in
-the manifest. A manifest may set `expectedMaturationRollouts` to reject an
+the manifest. In `licensing-series.json` that aggregate is historical: it is
+SC-EVAL-004's one-time maturation (649,173 full, 94,677 uncached tokens, 15
+model responses), the lifetime-cost default used by SC-EVAL-005 on 2026-09-22.
+A new series should pass its own maturation rollouts rather than rely on it. A manifest may set `expectedMaturationRollouts` to reject an
 accidentally incomplete lifetime-cost calculation. These literal term checks
 are one-rollout-per-question tools and remain diagnostic; they cannot measure a
 continued thread, which is why the longitudinal evaluator above exists.
