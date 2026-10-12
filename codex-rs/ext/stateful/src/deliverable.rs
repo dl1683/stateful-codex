@@ -65,13 +65,26 @@ impl TurnRunCommits {
     }
 }
 
-/// Whether `text` is only a bare status line such as "Task completed." or "**Done!**".
+/// Whether `text` is only status lines such as "Task completed." or "**Done!** All done.":
+/// every nonempty sentence or line must be a status phrase.
 pub(crate) fn is_status_only(text: &str) -> bool {
-    let text = text.trim();
-    let text = ["**", "*", "_", "`"]
+    let mut phrases = strip_wrapper(text.trim())
+        .split(['.', '!', '?', '\n'])
+        .map(str::trim)
+        .filter(|phrase| !phrase.is_empty())
+        .peekable();
+    phrases.peek().is_some() && phrases.all(is_status_phrase)
+}
+
+fn strip_wrapper(text: &str) -> &str {
+    ["**", "*", "_", "`"]
         .iter()
         .find_map(|wrapper| text.strip_prefix(wrapper)?.strip_suffix(wrapper))
-        .unwrap_or(text);
+        .unwrap_or(text)
+}
+
+fn is_status_phrase(text: &str) -> bool {
+    let text = strip_wrapper(text);
     let words = text
         .to_ascii_lowercase()
         .split_whitespace()

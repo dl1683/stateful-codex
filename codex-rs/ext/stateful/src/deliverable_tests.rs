@@ -22,8 +22,11 @@ fn status_only_replies_are_recognized() {
         "**Done!**",
         "run completed successfully",
         "Work done.",
+        "Task completed. All done.",
+        "Done.\nAll done.",
+        "Task complete. Finished.",
     ];
-    assert_eq!(replies.map(is_status_only), [true; 4], "{replies:?}");
+    assert_eq!(replies.map(is_status_only), [true; 7], "{replies:?}");
 }
 
 #[test]
@@ -36,8 +39,12 @@ fn real_answers_are_never_status_only() {
         "Done — fixed X; tests pass.",
         "Run completed. The final answer is: the gate is C7-42.",
         "Run completed successfully. The deck is ready — see the final answer above for the outline.",
+        "Task completed. The answer is 7.",
+        "Done. See src/lib.rs",
+        "Renamed parse_config to load_config in src/config.rs.",
+        "Task completed. All tests pass in 3 files.",
     ];
-    assert_eq!(replies.map(is_status_only), [false; 7], "{replies:?}");
+    assert_eq!(replies.map(is_status_only), [false; 11], "{replies:?}");
 }
 
 /// 20-digit revision; reply cut in `é`; 5 KiB result cut before `😀`; 2 KiB prior warning.
