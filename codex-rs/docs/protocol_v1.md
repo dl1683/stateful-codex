@@ -1,3 +1,5 @@
+> **Deprecated (2026-10-12).** This document describes an older protocol. `Op::ConfigureSession` no longer exists in [`protocol.rs`](../protocol/src/protocol.rs), and `TurnCompleteEvent` no longer carries a `response_id`; it has `turn_id`, `last_agent_message` and `error`. The `agent.rs` link is dead. Treat [`protocol.rs`](../protocol/src/protocol.rs) as the source of truth. The text below is kept for history and is not authoritative.
+
 Overview of Protocol defined in [protocol.rs](../protocol/src/protocol.rs) and [agent.rs](../core/src/agent.rs).
 
 The goal of this document is to define terminology used in the system and explain the expected behavior of the system.

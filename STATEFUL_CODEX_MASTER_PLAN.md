@@ -62,13 +62,13 @@ Earlier orders, the reasons they changed and the evidence behind each change are
 - Each step gets its own hands-on acceptance check.
 
 **Order:**
-1. **3b: the final message carries the deliverable.** Status: in confirmation.
+1. **3b: the final message carries the deliverable.** Status: landed and closed (`64e6176ed`, follow-on `9eddc1af4`); no R1-R4 revert; R1 is 0/317 after adjudication. OPEN: q36a3 critical-error rate 3.7% to 9.3%, checked in the step-7 release rerun.
    - Freeze: `sc_dogfood/integrate/briefs/step3b_freeze.md`. One review plus one confirmation, then push.
    - Then remeasure on the open-model ladder: rerun the affected ladder tasks (`dsg/ladder`) on the pushed 3b head, counting real usefulness and false positives.
    - The predeclared revert criteria R1-R4 are in `campaign2/FINDINGS.md` ("[PREDECLARED 2026-10-11", as amended there).
    - The length or status-only heuristic is a warning only, never blocking.
 2. **The robustness preflight** (council 12a). It is short and separately frozen, and comes after 3b and before lean 3a.
-   - Items 1-5 are frozen in `sc_dogfood/integrate/briefs/robustness_preflight_freeze.md`; none has landed. Production packets P1-P5 cover items 1-4, with P4 conditional on the Step rerun. P3 (the idle-continuation stop, R2c) is deferred to its own freeze; the active item-2 acceptance is the R2a+R2b-only criterion. Item 5 is diagnostics only.
+   - Items 1-5 are frozen in `sc_dogfood/integrate/briefs/robustness_preflight_freeze.md`. P1 (item 3) landed at `b8dcee46f` with named limitations; the remaining packets have not landed. Production packets P1-P5 cover items 1-4, with P4 conditional on the Step rerun. P3 (the idle-continuation stop, R2c) is deferred to its own freeze; the active item-2 acceptance is the R2a+R2b-only criterion. Item 5 is diagnostics only.
    - Item 1: tool-argument normalization at the extension boundary only.
    - Item 2: completion-loop classification and recovery.
    - Item 3: codex-exec bounded hydration.
@@ -125,9 +125,11 @@ Evidence: the three-way showed Qwen clean exits falling 98 to 3 after the accept
 
 Decision: verification becomes opt-in for explicitly started Work with declared criteria. Ordinary Autonomous answers end Answered (not verified); unfinished work ends partial. Completed stays evidence-bound.
 
-Next in order:
-1. P1;
-2. answer safety;
+Status: slice 0 complete (P1 landed at `b8dcee46f`; the causal probe is done). Slice 1 step F1 landed at `f256e307e`; activation is pending. The cleanup landed (`4d6706d6a` to `01aeba725`). Slice 2 is next.
+
+Order:
+1. P1 (landed);
+2. answer safety (F1 landed; activation pending);
 3. git-independent identity;
 4. simplified Work verification;
 5. P2 refrozen;
