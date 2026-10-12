@@ -661,7 +661,7 @@ async fn update_run_in_transaction(
         .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))
 }
 
-async fn append_obligation_in_transaction(
+pub(crate) async fn append_obligation_in_transaction(
     connection: &mut SqliteConnection,
     id: String,
     value: NewObligation,
@@ -805,7 +805,7 @@ pub(crate) async fn load_run(
     }))
 }
 
-async fn load_obligation_by_id(
+pub(crate) async fn load_obligation_by_id(
     connection: &mut SqliteConnection,
     id: &str,
 ) -> Result<Option<StatefulObligation>, StatefulRunStoreError> {
@@ -906,7 +906,7 @@ fn parse_u32(value: i64) -> Result<u32, StatefulRunStoreError> {
     u32::try_from(value).map_err(|_| StatefulRunStoreError::CorruptCount)
 }
 
-fn validate_record_id(value: &str) -> Result<(), StatefulRunStoreError> {
+pub(crate) fn validate_record_id(value: &str) -> Result<(), StatefulRunStoreError> {
     if value.is_empty() || value.len() > 512 || value.chars().any(char::is_control) {
         return Err(StatefulRunStoreError::InvalidRecordId);
     }
@@ -962,6 +962,8 @@ pub enum StatefulRunStoreError {
     ObligationIdentityConflict(String),
     #[error("obligation not found: {0}")]
     ObligationNotFound(String),
+    #[error("nothing changed: {0}")]
+    ObligationOperationRefused(String),
     #[error("stored obligation sequence has no record: {0}")]
     CorruptObligationSequence(i64),
     #[error("turn measurement does not belong to a thread in the run")]

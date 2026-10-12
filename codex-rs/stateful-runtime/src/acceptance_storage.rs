@@ -319,25 +319,13 @@ pub(crate) async fn enforce_acceptance_gate(
         commit.verification.attempt,
     )
     .await?;
-    let latest = sqlx::query_as::<_, (i64, String)>(
-        "SELECT sequence, packet_json FROM stateful_obligations
-         WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
-    )
-    .bind(run.id.as_str())
-    .fetch_optional(&mut *connection)
-    .await?;
-    let latest_sequence = latest
-        .as_ref()
-        .map(|(sequence, _)| u64::try_from(*sequence))
-        .transpose()
-        .map_err(|_| StatefulRunStoreError::CorruptCount)?;
-    if latest_sequence != commit.validated_obligation_sequence {
+    let latest =
+        crate::obligation_operations::latest_obligation_packet(connection, &run.id).await?;
+    if latest.as_ref().map(|(sequence, _)| *sequence) != commit.validated_obligation_sequence {
         return Err(StatefulRunStoreError::AcceptanceChanged);
     }
     if let Some((_, packet)) = latest
-        && !serde_json::from_str::<crate::ObligationPacket>(&packet)?
-            .blockers
-            .is_empty()
+        && !packet.blockers.is_empty()
     {
         return Err(StatefulRunStoreError::AcceptanceGate(
             "the latest recorded obligation declares open blockers".to_string(),

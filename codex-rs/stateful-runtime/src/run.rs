@@ -11,7 +11,7 @@ const MAX_GOAL_BYTES: usize = 16 * 1024;
 const MAX_STRATEGY_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_RESULT_BYTES: usize = 32 * 1024;
 const MAX_PACKET_FIELD_BYTES: usize = 8 * 1024;
-const MAX_PACKET_LIST_ITEMS: usize = 32;
+pub(crate) const MAX_PACKET_LIST_ITEMS: usize = 32;
 const MAX_CONTINUATIONS: u32 = 1_000;
 const MAX_ELAPSED_SECONDS: u32 = 7 * 24 * 60 * 60;
 
