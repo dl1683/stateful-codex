@@ -3,16 +3,35 @@
 //! against the last observed content do. The caller reads bytes through the selected
 //! executor filesystem; nothing here interprets an executor path as a host path.
 
-use codex_project_intelligence::FileSampleCoverage;
-use codex_project_intelligence::MAX_WORKING_SET_FILE_BYTES;
-use codex_project_intelligence::WorkingSetFileSample;
 use sha2::Digest;
 use sha2::Sha256;
 
+const MAX_WORKING_SET_FILE_BYTES: usize = 64 * 1024;
 /// Total sampled bytes per collection; the reader also applies a two-second deadline.
 pub(crate) const MAX_TOTAL_SAMPLE_BYTES: usize = 512 * 1024;
 const MAX_HUNK_LINES: usize = 16;
 const MAX_HUNK_BYTES: usize = 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FileSampleCoverage {
+    Complete,
+    Truncated,
+    Binary,
+    Oversized,
+    Unreadable,
+    OutOfRoot,
+}
+
+/// Bounded content sample of one task-touched file read through its executor filesystem.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WorkingSetFileSample {
+    pub executor_id: String,
+    pub root: String,
+    pub relative_path: String,
+    pub sample_event: String,
+    pub coverage: FileSampleCoverage,
+    pub content: Option<String>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FileWitness {

@@ -70,8 +70,6 @@ pub use promotion::PromotionCategory;
 pub use promotion::PromotionRequest;
 pub use review::ReviewContext;
 pub use review::ReviewPage;
-pub(crate) use source::source_turn_eligible_on;
-pub(crate) use source::text_eligible_on;
 pub use source_group::ExistingWording;
 pub use source_group::SourceCaptureGroup;
 pub use source_group::SourceCaptureMember;

@@ -345,11 +345,6 @@ async fn migration_history_incompatible_and_unknown_refused_by_every_pi_opener_u
                 .err()
                 .unwrap()
                 .to_string(),
-            crate::WorkingSetStore::open(&sqlite)
-                .await
-                .err()
-                .unwrap()
-                .to_string(),
         ] {
             assert!(error.contains(&expected), "{error}");
             assert_eq!(Sha256::digest(std::fs::read(&path).unwrap()), before);
@@ -607,11 +602,6 @@ async fn migration_history_nonempty_untracked_database_refuses_every_opener_unch
                 .err()
                 .unwrap()
                 .to_string(),
-            crate::WorkingSetStore::open(&sqlite)
-                .await
-                .err()
-                .unwrap()
-                .to_string(),
         ] {
             for expected in [
                 "unsupported migration history",
@@ -681,16 +671,21 @@ async fn migration_history_populated_0023_store_gains_capsule_generation_from_ze
     let home = TempDir::new().unwrap();
     let sqlite = SqliteConfig::new_for_testing(home.path().abs());
     seed(&sqlite, &prefix(/*version*/ 23)).await;
-    let store = crate::WorkingSetStore::open(&sqlite).await.unwrap();
-    assert_eq!(store.eligibility_generation("project").await.unwrap(), 0);
     let blackboard = BlackboardStore::open(&sqlite).await.unwrap();
+    let generation = || {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE((SELECT generation FROM capsule_eligibility_generations WHERE project_id = 'project'), 0)",
+        )
+        .fetch_one(&blackboard.pool)
+    };
+    assert_eq!(generation().await.unwrap(), 0);
     sqlx::query(
         "INSERT INTO capture_source_exclusions VALUES ('project', 'digest', 0, 1, 'legacy')",
     )
     .execute(&blackboard.pool)
     .await
     .unwrap();
-    assert_eq!(store.eligibility_generation("project").await.unwrap(), 1);
+    assert_eq!(generation().await.unwrap(), 1);
     check_integrity(&blackboard.pool).await;
     blackboard.pool.close().await;
 }

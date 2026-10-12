@@ -1,16 +1,13 @@
-use codex_project_intelligence::FileSampleCoverage;
 use pretty_assertions::assert_eq;
 
+use super::working_files::FileSampleCoverage;
 use super::working_files::FileWitness;
 use super::working_files::WitnessOutcome;
+use super::working_files::WorkingSetFileSample;
 use super::working_files::compare_samples;
 use super::working_files::sample_file;
 
-fn sample(
-    path: &str,
-    event: &str,
-    read: std::io::Result<Vec<u8>>,
-) -> codex_project_intelligence::WorkingSetFileSample {
+fn sample(path: &str, event: &str, read: std::io::Result<Vec<u8>>) -> WorkingSetFileSample {
     let mut budget = 1 << 20;
     sample_file("remote-linux", "/work/repo", path, event, read, &mut budget)
 }

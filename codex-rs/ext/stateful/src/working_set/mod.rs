@@ -2,10 +2,10 @@
 //! thread has observed (next action, tool routes, delivered values, constraints and changed
 //! file content), reduced from host observations with no model call, and its checked
 //! model-visible rendering. Neither representation is authority; the projection is a
-//! rebuildable derived cache persisted through `codex_project_intelligence::WorkingSetStore`.
+//! rebuildable derived cache.
 //!
-//! Inactive: nothing registers or installs the capsule yet (stage (c) wires lifecycle
-//! callbacks, executor file reads and the checked install).
+//! Inactive: nothing registers, persists or installs the capsule yet. The parked persistence
+//! and publication scaffold is preserved at tag `parked/capsule-scaffold-2026-10-12`.
 #![allow(dead_code)]
 
 mod commands;
@@ -16,7 +16,6 @@ mod render;
 mod retain;
 mod working_files;
 
-use codex_project_intelligence::MAX_WORKING_SET_PAYLOAD_BYTES;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -32,6 +31,7 @@ pub(crate) const GRAMMAR_VERSION: u32 = 1;
 pub(crate) const MAX_CANDIDATES: usize = 128;
 pub(crate) const MAX_CANDIDATE_TEXT_BYTES: usize = 512;
 pub(crate) const MAX_REFERENCES: usize = 4;
+const MAX_WORKING_SET_PAYLOAD_BYTES: usize = 128 * 1024;
 
 /// Authoritative location of the original bytes a candidate quotes.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -127,7 +127,7 @@ impl Candidate {
     }
 }
 
-/// Serialized projection payload stored by `WorkingSetStore`.
+/// Serialized projection payload.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct Projection {
     pub grammar_version: u32,
