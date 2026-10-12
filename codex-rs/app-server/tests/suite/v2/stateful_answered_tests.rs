@@ -489,7 +489,7 @@ impl TurnNotifications {
             .iter()
             .filter(|notification| notification.method == "statefulRun/updated")
             .filter_map(|notification| notification.params.as_ref()?.get("revision")?.as_u64())
-            .last()
+            .next_back()
     }
 }
 
@@ -500,10 +500,12 @@ impl Harness {
     }
 
     async fn store(&self) -> Result<codex_stateful_runtime::StatefulRunStore> {
-        Ok(codex_stateful_runtime::StatefulRunStore::open(&SqliteConfig::new_for_testing(
-            self.codex_home.path().abs(),
-        ))
-        .await?)
+        Ok(
+            codex_stateful_runtime::StatefulRunStore::open(&SqliteConfig::new_for_testing(
+                self.codex_home.path().abs(),
+            ))
+            .await?,
+        )
     }
 
     /// A second writer moves the run to `status` with a new result.
@@ -534,7 +536,8 @@ impl Harness {
     async fn collect(&mut self, turn_id: &str, next: bool) -> Result<TurnNotifications> {
         let mut notifications = Vec::new();
         loop {
-            let JSONRPCMessage::Notification(notification) = self.server.read_next_message().await?
+            let JSONRPCMessage::Notification(notification) =
+                self.server.read_next_message().await?
             else {
                 continue;
             };
@@ -582,7 +585,9 @@ async fn status_only_after_commit_warns_per_route() -> Result<()> {
         Route::RefusedCompletions,
     ] {
         let mut harness = harness_in(CHECK_SANDBOX).await?;
-        let run = harness.start_run(StatefulWorkflowMode::Collaborative).await?;
+        let run = harness
+            .start_run(StatefulWorkflowMode::Collaborative)
+            .await?;
         let revision = run.revision;
         let (name, status, mut script) = match route {
             Route::Completion => {
@@ -731,7 +736,9 @@ async fn answered_status_only_body_warns_and_stays_answered() -> Result<()> {
 #[tokio::test]
 async fn already_blocked_at_start_quotes_no_result() -> Result<()> {
     let mut harness = harness().await?;
-    let run = harness.start_run(StatefulWorkflowMode::Collaborative).await?;
+    let run = harness
+        .start_run(StatefulWorkflowMode::Collaborative)
+        .await?;
     harness
         .write_run_elsewhere(&run.id, codex_stateful_runtime::StatefulRunStatus::Blocked)
         .await?;
@@ -762,7 +769,9 @@ async fn already_blocked_at_start_quotes_no_result() -> Result<()> {
 #[tokio::test]
 async fn revision_change_after_commit_omits_result() -> Result<()> {
     let mut harness = harness().await?;
-    let run = harness.start_run(StatefulWorkflowMode::Collaborative).await?;
+    let run = harness
+        .start_run(StatefulWorkflowMode::Collaborative)
+        .await?;
     let mock = responses::mount_response_sequence(
         &harness.responses_server,
         vec![
@@ -776,9 +785,15 @@ async fn revision_change_after_commit_omits_result() -> Result<()> {
     let store = harness.store().await?;
     let run_id = codex_stateful_runtime::StatefulRunId::parse(run.id.as_str())?;
     tokio::time::timeout(Duration::from_secs(10), async {
-        while store.get_run(&run_id).await.ok().flatten().is_none_or(|current| {
-            current.status != codex_stateful_runtime::StatefulRunStatus::Blocked
-        }) {
+        while store
+            .get_run(&run_id)
+            .await
+            .ok()
+            .flatten()
+            .is_none_or(|current| {
+                current.status != codex_stateful_runtime::StatefulRunStatus::Blocked
+            })
+        {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -816,7 +831,9 @@ async fn revision_change_after_commit_omits_result() -> Result<()> {
 #[tokio::test]
 async fn substantive_final_after_commit_does_not_warn() -> Result<()> {
     let mut harness = harness_in(CHECK_SANDBOX).await?;
-    let run = harness.start_run(StatefulWorkflowMode::Collaborative).await?;
+    let run = harness
+        .start_run(StatefulWorkflowMode::Collaborative)
+        .await?;
     harness.seed_plan(&run.id).await?;
     let mock = responses::mount_sse_sequence(
         &harness.responses_server,

@@ -101,9 +101,9 @@ pub(crate) fn is_status_only(text: &str) -> bool {
         .unwrap_or(normalized);
     let bare = matches!(normalized, "done" | "all done" | "finished" | "completed");
     let prefixed = ["run ", "task ", "work "].iter().any(|prefix| {
-        normalized.strip_prefix(prefix).is_some_and(|state| {
-            matches!(state, "complete" | "completed" | "finished" | "done")
-        })
+        normalized
+            .strip_prefix(prefix)
+            .is_some_and(|state| matches!(state, "complete" | "completed" | "finished" | "done"))
     });
     bare || prefixed
 }
@@ -150,7 +150,11 @@ impl ReceiptCheck {
 
 /// Adds the status-only diagnostic to the turn's finalization outcome without changing what
 /// was committed: core treats `Recorded` and `Warning` alike apart from the warning event.
-pub(crate) fn warn(outcome: TurnFinalizeOutcome, reply: &str, check: &ReceiptCheck) -> TurnFinalizeOutcome {
+pub(crate) fn warn(
+    outcome: TurnFinalizeOutcome,
+    reply: &str,
+    check: &ReceiptCheck,
+) -> TurnFinalizeOutcome {
     match outcome {
         TurnFinalizeOutcome::NotHandled | TurnFinalizeOutcome::Recorded => {
             TurnFinalizeOutcome::Warning(diagnostic(reply, check, MAX_WARNING_BYTES))
@@ -192,10 +196,7 @@ fn diagnostic(reply: &str, check: &ReceiptCheck, budget: usize) -> String {
     let total = result.len();
     // Reserved at the longest a marker can be: the cut never exceeds the total.
     let reserved = format!(" [shortened at {total} of {total} bytes]").len();
-    let excerpt = utf8_prefix(
-        result,
-        budget.saturating_sub(prefix.len() + reserved),
-    );
+    let excerpt = utf8_prefix(result, budget.saturating_sub(prefix.len() + reserved));
     format!(
         "{prefix}{excerpt} [shortened at {} of {total} bytes]",
         excerpt.len()

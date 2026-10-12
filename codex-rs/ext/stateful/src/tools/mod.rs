@@ -56,6 +56,7 @@ pub(super) enum RunTools {
     Hidden,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn project_intelligence_tools(
     project_id: String,
     thread_id: String,

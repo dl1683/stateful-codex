@@ -2106,7 +2106,10 @@ async fn stateful_deliverable_warning() {
     let [cell] = drain_insert_history_transcript(&mut rx)
         .try_into()
         .expect("expected one warning history cell");
-    assert_chatwidget_snapshot!("stateful_deliverable_warning", lines_to_single_string(&cell));
+    assert_chatwidget_snapshot!(
+        "stateful_deliverable_warning",
+        lines_to_single_string(&cell)
+    );
 }
 
 #[tokio::test]

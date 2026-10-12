@@ -35,11 +35,7 @@ fn real_answers_are_never_status_only() {
         "Run completed. The final answer is: the gate is C7-42.",
         "Run completed successfully. The deck is ready — see the final answer above for the outline.",
     ];
-    assert_eq!(
-        replies.map(is_status_only),
-        [false; 7],
-        "{replies:?}"
-    );
+    assert_eq!(replies.map(is_status_only), [false; 7], "{replies:?}");
 }
 
 fn matched(result: String) -> ReceiptCheck {
