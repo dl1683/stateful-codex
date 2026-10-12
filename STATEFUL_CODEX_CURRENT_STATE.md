@@ -388,9 +388,11 @@ follow-up, so an event during an in-flight read causes one final read.
 
 The ledger is the authority; this is a pointer.
 
-**Newest evidence** is SC-EVAL-038 to 043 (2026-10-09 to 10-12): the capture,
+**Newest evidence** is SC-EVAL-038 to 044 (2026-10-09 to 10-12): the capture,
 Ask and restored-read journeys, the restricted-read within1 baseline, the
-capsule offline tests and the open-model ladder.
+capsule offline tests, the open-model ladder (measured on bundle 83eee86b6,
+before the acceptance-ledger completion gate) and the pre-grading three-way
+harness regression check.
 
 **Cross-session campaign** (SC-EVAL-035, 2026-10-02/03, unmerged candidate
 builds, every test n=1 per arm):
@@ -444,7 +446,7 @@ freeze; neither is an official score.
 
 - Benchmark reruns are suspended.
 - The positioning is one general harness competitive with the best model- or benchmark-specific harnesses, not a plain-Codex parity study.
-- Real-task comparisons (the open-model ladder, SC-EVAL-043) are the current evidence.
+- Real-task comparisons (the open-model ladder, SC-EVAL-043, measured on bundle 83eee86b6, before the acceptance-ledger completion gate; the later three-way check is SC-EVAL-044, pre-grading) are the current evidence.
 - Selection rules and earlier benchmark results: "External benchmark program" in [`STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md`](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md).
 
 ### Harness robustness backlog (from the open-model ladder)
@@ -456,7 +458,30 @@ each one is a place where the harness, not only the model, decides whether the
 user gets an answer. Paths are under `sc_dogfood/dsg/ladder/` unless stated.
 Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
 
-1. **Status-only finals.** ms4 (Mistral-Small-4): 40 of 108 session-final
+> **Label: the ladder evidence in items 2-8 was measured on bundle 83eee86b6, before the acceptance-ledger
+> completion gate.** Item 1 comes from the later three-way check (SC-EVAL-044, pre-grading).
+
+1. **Acceptance-mediated failures in Qwen control; harness-wide verification with gpt-6-luna pending.**
+   In SC-EVAL-044 (pre-grading), Qwen3.6-35B-A3B rc0 fell from 98 (original, 83eee86b6) to 3 (control,
+   7c4707230) and 2 (3b, 64e6176ed) of 108. The regression contains directly evidenced acceptance-mediated
+   blocked runs and acceptance-repair loops, alongside timeout failures; the gate's individual aggregate effect is
+   not identified and environmental contributions are not excluded. A causal gate-bypass check is planned.
+   - (a) **Non-git workspaces record passing checks as "unavailable"** (`777fac767` removed non-Git workspace
+     enumeration). Qwen control `csv__t1/s1` runs checks returning exit code zero and `OK`; the ledger records
+     `outcome:"unavailable"` ("the check changed files no criterion pins, or the workspace could not be
+     identified, so its effects are unknown"). The snapshot contains no Git repository. This does not prove that
+     every unavailable receipt has that cause. **Harness-wide: verification with gpt-6-luna pending.**
+   - (b) **Plain questions end Blocked after acceptance refusals.** Qwen control `qaconcept__t2/s1` exits rc1
+     after 211 seconds ("completion refused; the run stays running (refusal 1 of 3 without acceptance progress
+     before the host blocks it as partial). Unmet acceptance gates: C1 ... omission proposal awaiting review"),
+     with `status:"blocked", revision:20`; its final explains that the answer was already supplied. **Harness-wide: verification
+     with gpt-6-luna pending.**
+   - (c) **Acceptance repair produces schema and revision loops.** Control errors include
+     "nothing changed: changes[0] needs text for this action" (189 times across control), "nothing changed:
+     changes[0] does not take statement for this action" and "openIssues is only valid when status is
+     completed", plus failures over missing criteria, checker files, pinned artifacts and incompatible manual
+     observations. **Harness-wide: verification with gpt-6-luna pending.**
+2. **Status-only finals.** ms4 (Mistral-Small-4): 40 of 108 session-final
    answers are only a status line, across 25 tasks (30 are `Task completed.`).
    Two more ms4 finals are the raw completion-tool JSON. Other arms: q36a3 1,
    mmm3m 2, every other row 0. This mirrors baseline Codex finishing without
@@ -468,7 +493,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    `sc_dogfood/integrate/briefs/step3b_freeze.md`), **in progress**. 3b never
    re-prompts. A bounded harness re-prompt for the deliverable stays a candidate
    if the predeclared 3b rerun leaves omissions.
-2. **Tool-argument type mismatches.** step37f (Step-3.7-Flash): 1,743
+3. **Tool-argument type mismatches.** step37f (Step-3.7-Flash): 1,743
    argument-type rejections in 104 of 108 sessions (`codex_core::tools::router`
    in `s*.err`). 1,279 rejections supplied unsigned decimal digit strings to
    integer fields (`"1"` for a u64). Twenty supplied other strings, including
@@ -483,7 +508,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    Fix: lenient schema coercion at the tool boundary (a lossless numeric string
    becomes an integer; a JSON-encoded string becomes the expected object or
    array), with a logged warning and a counter. Anything else stays rejected.
-3. **Loops on the completion step.** q36a3 (Qwen3.6-35B-A3B): 10 of 108
+4. **Loops on the completion step.** q36a3 (Qwen3.6-35B-A3B): 10 of 108
    sessions exit rc=1. 9 of the 10 ran to exactly 25 turns without completing
    the run. All 10 carry completion-contract rejections (46 lines, for example
    "completionDisposition noReusableLearning completes with the result only;
@@ -507,7 +532,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    rejecting it. After repeated completion rejections in one run, it returns a
    minimal valid example, or ends the turn with the answer and a clear blocked
    status, rather than continuing to the turn ceiling.
-4. **Hydration error on every continuation (separate harness defect).** In
+5. **Hydration error on every continuation (separate harness defect).** In
    Autonomous exec, `thread/read` is called with `include_turns: true`
    (`codex-rs/exec/src/lib.rs` 1730-1737 in `reconcile_autonomous_wait`, and
    2180-2187). The app-server answers with its paginated-thread deprecation
@@ -521,7 +546,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    one-per-continuation count.
    Fix: page with `thread/turns/list` (or read only the latest turn), and do
    not surface a deprecation notice as an error.
-5. **Chat template rejects the `developer` role.** ms4 needed a bridge-side
+6. **Chat template rejects the `developer` role.** ms4 needed a bridge-side
    hook (`devrole.py`: leading developer/system messages become `system`,
    mid-thread ones become `user`) and a chat-completions bridge path. Without
    them it failed "Unexpected role 'system' after role 'assistant'" and
@@ -532,7 +557,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    Fix: a role-fallback adapter in the harness's provider layer, driven by a
    per-model capability, instead of the bridge hook. Mid-thread developer
    injections are themselves a portability cost.
-6. **Token use on small models.** Usage counters are cumulative per session,
+7. **Token use on small models.** Usage counters are cumulative per session,
    so each session's final counter is used once (results.json snapshot
    2026-10-12 02:29Z). An earlier version of this item summed the counters
    across turns and was inflated.
@@ -554,8 +579,8 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
 
    Fix: record prefix and tool-schema tokens per request, and completion-retry
    tokens, in the trajectory (SC-EVAL-040 measured a prefix of about 2.5k
-   tokens on Luna). End completion loops (item 3).
-7. **Capacity saturation and timeouts on small GPUs.** q35d9 on 2xL4 with 64 concurrent
+   tokens on Luna). End completion loops (item 4).
+8. **Capacity saturation and timeouts on small GPUs.** q35d9 on 2xL4 with 64 concurrent
    chains: 54 of 70 finished sessions hit the 3,600 s session timeout. gr42d8 on
    2xL4: 20 of 20 rc=1 at about 47 min each. gr42d8h on 1xH100: KV cache at 92%,
    8 running against 55-110 waiting requests, aborted at 3 of 108 sessions.

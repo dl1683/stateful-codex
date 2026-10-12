@@ -62,7 +62,8 @@ records between them, were moved verbatim to
 | SC-EVAL-040 | 10-10 | Frozen within1 baseline, restricted-read | Plain ahead: 1.94M vs 2.27M units, 10 vs 13 compactions (n=1) | [entry](#sc-eval-040-frozen-long-thread-baseline-restricted-read-2026-10-10) |
 | SC-EVAL-041 | 10-11 | Working-set capsule offline tests, piggyback cut | Tuned gains did not generalise; structural floor 0 wrong-active and 0 rejected-working; piggyback cut | [entry](#sc-eval-041-working-set-capsule-offline-tests-and-the-piggyback-cut-2026-10-11) |
 | SC-EVAL-042 | 10-11 | Hands-on restored reads and Ask (73d97824a; f097a8008 control) | Cold recall and rule application pass after manual admission; spoken correction not saved as supersession | [entry](#sc-eval-042-hands-on-restored-reads-and-ask-build-73d97824a-with-a-control-repeat-on-f097a8008-2026-10-11) |
-| SC-EVAL-043 | 10-11/12 | Open-model ladder, one harness across open models (Stateful only) | 11 arms, quality 4.74-9.71; harness failure classes recorded; no Stateful-off arm | [entry](#sc-eval-043-open-model-ladder-one-harness-across-open-models-2026-10-11-runs-ended-2026-10-12-0149z) |
+| SC-EVAL-043 | 10-11/12 | Open-model ladder, one harness across open models (Stateful only) | Measured on bundle 83eee86b6, before the acceptance-ledger completion gate; 11 arms, quality 4.74-9.71; harness failure classes recorded; no Stateful-off arm | [entry](#sc-eval-043-open-model-ladder-one-harness-across-open-models-2026-10-11-runs-ended-2026-10-12-0149z) |
+| SC-EVAL-044 | 10-12 | Harness regression check: original 83eee86b6 vs control 7c4707230 vs 3b 64e6176ed (pre-grading) | Counts reproduce; Qwen rc0 98 / 3 / 2; R2 not triggered (B=14, C=19); R1, R3, R4 pending; grading in progress | [entry](#sc-eval-044-harness-regression-check-original-83eee86b6-vs-control-7c4707230-vs-3b-64e6176ed-pre-grading-2026-10-12) |
 
 Unnumbered records, all archived in the [history file](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md): live
 interface validation (09-21/22), open release evidence, project-state
@@ -233,6 +234,9 @@ Evidence: sc_dogfood/campaign2/handson_73d9/JOURNEY.md, campaign2/handson_f097/C
 
 ## SC-EVAL-043: open-model ladder, one harness across open models (2026-10-11; runs ended 2026-10-12 01:49Z)
 
+> **Label: every result in this entry was measured on bundle 83eee86b6, before the acceptance-ledger completion
+> gate.** Later bundles behave differently on open models; see SC-EVAL-044.
+
 This was a Stateful-only run: bundle 83eee86b6, Autonomous, effort high unless noted. It used the frozen r2+r3 real
 tasks: 32 tasks, 2 trials, 108 sessions per model, isolated chains. Grading was blind Claude grading, 0-10, against
 rubrics frozen before any output.
@@ -315,7 +319,138 @@ robustness backlog"):
   of the quality gap each class causes has not been isolated.
 - q35d9h has only 4 nonzero exits but a 25.0% critical rate.
 - No Stateful-off arm was run, so the ladder says nothing about Stateful's contribution.
-- The 3b rerun of ms4 and q36a3 is predeclared and pending.
+- The predeclared 3b rerun of ms4 and q36a3 has run, with a control matched on evaluated keys, external prompts and chain order (full operational matching remains incompletely evidenced); see SC-EVAL-044 (pre-grading).
 
 Evidence: sc_dogfood/dsg/ladder/results.json, costs.json, excluded.json, LOG.md, finish.log, keys/ and
 grading_scores/, runs/<arm>/sessions.jsonl; sc_dogfood/dsg/RUN_LOG.md (2026-10-11 17:15Z onward).
+
+## SC-EVAL-044: harness regression check: original 83eee86b6 vs control 7c4707230 vs 3b 64e6176ed (pre-grading, 2026-10-12)
+
+**Status: pre-grading.** Grading is in progress. R1, R3 and R4 are pending. A causal gate-bypass check is planned.
+No overall shipping verdict is established.
+
+This is the predeclared 3b rerun (FINDINGS 2026-10-11, "3b ladder rerun: revert criteria", Amendment 2). ms4
+(Mistral-Small-4) and q36a3 (Qwen3.6-35B-A3B) ran the frozen r2+r3 tasks, 108 sessions per arm, on a control
+bundle 7c4707230 (matched on evaluated keys, external prompts and chain order; full operational matching remains incompletely evidenced) and on the 3b bundle 64e6176ed. They are reported beside the original 83eee86b6 ladder arms
+(SC-EVAL-043). Git confirms 12 commits between control and 3b: the 11 3b commits plus the test timing fix.
+
+A Codex error hunt (`sc_dogfood/integrate/reviews/threeway_hunt.md`) independently parsed the raw logs. All stored
+descriptive counts reproduce; its corrections concern definitions, interpretation and provenance. The corrected
+wording is:
+- **R2:** "R2 inputs on 108 identical session keys: B=14 section-3 status-only session finals, C=19; 4B=56≤57=3C.
+  Coverage is 14/14=100%. R2’s revert condition is not triggered. Separately, raw answer-file closed-set counts are
+  13 and 19."
+- **Regex counts:** "Completion/acceptance-related router-error lines, selected by the documented keyword regex:
+  424 / 2000 / 2155. These are error-line counts, not counts of rejected completion attempts."
+- **Operational identity:** "Control and 3b have identical evaluated keys, retained external prompts and chain
+  order, and documented matching nominal serving and runner configurations. Full operational matching remains
+  incompletely evidenced; the manifests are not identical apart from the bundle."
+- **False positives:** "Confirmed false positives: 0; reviewed diagnostic dispositions: 0/317; unknown: 317. The
+  false-positive rate is undetermined. R1 and R4 remain pending."
+- **Denominators:** "Each arm has 108 independently reconciled unique sessions. Original-arm denominator ledgers are
+  retained; new-arm denominators were reconstructed from logs because their prescribed `sessions.jsonl` files are
+  absent."
+
+Verified counts:
+
+| Metric | ms4 original | ms4 ctl | ms4 3b | Qwen original | Qwen ctl | Qwen 3b |
+|---|---:|---:|---:|---:|---:|---:|
+| Unique sessions | 108 | 108 | 108 | 108 | 108 | 108 |
+| Tasks | 32 | 32 | 32 | 32 | 32 | 32 |
+| rc0 | 54 | 29 | 26 | 98 | 3 | 2 |
+| rc1 | 48 | 75 | 70 | 10 | 79 | 79 |
+| rc124 | 6 | 4 | 12 | 0 | 26 | 27 |
+| Nonzero exits | 54 | 79 | 82 | 10 | 105 | 106 |
+| Sessions with failed turn | 0 | 1 | 1 | 0 | 0 | 0 |
+| Failed turns | 0 | 1 | 1 | 0 | 0 | 0 |
+| Hydration-notice sessions | 102 | 101 | 101 | 107 | 101 | 102 |
+| Hydration-notice sessions with rc0 | 52 | 27 | 22 | 97 | 3 | 2 |
+| Started turns | 1436 | 1306 | 1488 | 548 | 346 | 326 |
+| Mean turns/session | 13.30 | 12.09 | 13.78 | 5.07 | 3.20 | 3.02 |
+| Sessions with ≥25 turns | 48 | 44 | 45 | 9 | 2 | 2 |
+| Turns without nonempty final candidate | 2 | 0 | 11 | 1 | 0 | 0 |
+| Router-error lines | 497 | 971 | 816 | 659 | 3156 | 3295 |
+| Completion/acceptance regex matches | 224 | 406 | 300 | 424 | 2000 | 2155 |
+| Stderr lines containing `acceptance` | 0 | 219 | 199 | 0 | 1607 | 1726 |
+| Sessions containing those lines | 0 | 73 | 71 | 0 | 103 | 101 |
+| Raw answer-file closed-set finals | 40 | 19 | 13 | 1 | 0 | 0 |
+| Tasks with those raw finals | 25 | 13 | 9 | 1 | 0 | 0 |
+| Missing answer files | 6 | 5 | 13 | 0 | 26 | 27 |
+| Section-3 session-final candidates | 40 | 19 | **14** | 1 | 0 | 0 |
+| Section-3 status-only turn candidates | 590 | 348 | 317 | 9 | 0 | 0 |
+| Raw closed-set turn candidates | 590 | 348 | 316 | 9 | 0 | 0 |
+| Accepted answer-block turn candidates | 0 | 33 | 29 | 0 | 3 | 3 |
+| Deliverable-diagnostic turns | 0 | 0 | 317 | 0 | 0 | 0 |
+| Diagnostic-bearing sessions | 0 | 0 | 23 | 0 | 0 | 0 |
+| Diagnostic turns outside section-3 set | 0 | 0 | 0 | 0 | 0 | 0 |
+| Established eligible status-only turns | 0 | 0 | 317 | 0 | 0 | 0 |
+| Unresolved status-only turns | 590 | 348 | 0 | 9 | 0 | 0 |
+| Established eligible session-final turns | 0 | 0 | 14 | 0 | 0 | 0 |
+| Unresolved session-final turns | 40 | 19 | 0 | 1 | 0 | 0 |
+
+Required hand-checks (every disposition unknown): diagnostic false positives 317 (ms4 3b), short session-final
+answers 13 (ms4 3b), pointer candidates 6 / 5 / 6 / 11 / 11 / 15, R4 causal reviews 22 (ms4 3b).
+
+**Qwen failure modes** (control; the evidence points strongly to intervening harness behavior, but does not isolate
+one commit's aggregate effect):
+- **Plain questions become blocked after acceptance rejection.** `qaconcept__t2/s1` exits rc1 after 211 seconds:
+  "completion refused; the run stays running (refusal 1 of 3 without acceptance progress before the host blocks it
+  as partial). Unmet acceptance gates: C1 ... omission proposal awaiting review". The host tool output records
+  `status:"blocked", revision:20`; the final explains that the floating-point answer was already supplied.
+- **Passing checks can remain unavailable in non-Git tasks.** `csv__t1/s1` runs checks returning exit code zero and
+  `OK`, but the acceptance ledger records `outcome:"unavailable"`: "the check changed files no criterion pins, or the
+  workspace could not be identified, so its effects are unknown". The CSV snapshot contains no Git repository. Stderr
+  repeats "nothing changed: C1 needs checker files (the tests or scripts the command runs) and pinned artifacts
+  before its plan can be admitted". The session ends rc124.
+- **Acceptance repair produces schema and revision loops:** "nothing changed: changes[0] needs text for this action"
+  (189 times across control), "nothing changed: changes[0] does not take statement for this action", "openIssues is
+  only valid when status is completed". Bayes control ends blocked while reporting unmet framework-generated
+  criteria.
+- **Some timeouts involve ordinary model work.** `tests__t1/s1` is still in its first turn, debugging escaped
+  JSON-pointer tests, near the wall-clock deadline; nothing shows that acceptance rejection caused it.
+
+Relevant changes in `83eee86b6..7c4707230`: `fb148cb38` (acceptance ledger and transactional completion gate),
+`7b4d3a778` and `522e729c5` (host-admitted plans need pinned artifacts and checker files), `777fac767` (non-Git
+workspace enumeration removed; a non-Git root makes identity unavailable), `e1f577641` (ledger-free completion
+exemptions removed), the refusal path (three refusals without semantic progress can block the run) and exec status
+handling (Blocked contributes to rc1). The non-Git interaction does not prove that every unavailable receipt has
+that cause.
+
+Timeouts alone cannot explain Qwen's original-to-control change: the 95 fewer rc0 sessions correspond to 69
+additional rc1 exits and 26 additional timeouts. Only two of control's 79 rc1 sessions reach 25 turns. Acceptance
+lines occur in 76/79 control rc1 sessions and 25/26 control timeouts, but also in 2/3 control rc0 sessions, so
+presence alone is not causal proof. HTTP-451 transport messages occur in all 108 sessions of every audited arm, and
+hydration notices are abundant in successful original sessions; neither is a new explanation.
+
+**Environment comparison:**
+
+| Factor | Verified evidence and limitation |
+|---|---|
+| Run time | Original Qwen: Oct 11, 18:18–18:36Z; original Mistral: 20:07–21:38Z. 3b: Oct 12, approximately 05:09–06:33Z. Control: approximately 13:48–15:27Z. |
+| vLLM | Control/3b manifests specify the same `c1c9f6fd…` digest. Raw 3b captures confirm it. Original equality is operator-reported; equivalent original raw manifest captures are absent. |
+| Bridge | Raw 3b capture: LiteLLM 1.104.2, four workers, request timeout 1800; Qwen default path, Mistral chat-completions plus devrole v2. Control reports matching setup, but lacks equivalent raw captures. |
+| Runner | Control/3b document on-demand `n2-standard-64`, 64 chains, high effort. Control adds shutdown safeguards. |
+| Tasks | All 108 external request texts match across original/3b and control/3b for both models. Control/3b chain files are byte-identical. Full control seed/archive hashes remain unverified. |
+| Spot | GPU nodes are Spot; control follows intentional restarts. No retained evidence establishes a preemption during these six measured arms. Absence of a complete event ledger limits that conclusion. |
+| Timeout | rc124 sessions end at 3602 seconds, except one Qwen 3b session at 3603. The runner imposes a 3600-second wall timeout. |
+| Cache/load | Restarts separate serving/cache lifecycles; equivalence of cache and request load is unverified. Mistral 3b additionally shared serving with one human-output session, 05:09:50–05:48:44Z. |
+| Patch boundary | Git confirms 12 commits between control and 3b: the 11 3b commits plus the test timing fix. This establishes the source boundary, not full operational matching. |
+
+**Conclusions supported before grading** (verbatim from the hunt):
+- "The descriptive three-way counts reproduce. Mistral’s raw closed-set session finals are 40/19/13; section-3
+  session-final counts are 40/19/14. All 317 observed Mistral 3b status-only turn candidates receive the specified
+  diagnostic."
+- "With corrected section-3 inputs B=14 and C=19, R2’s numerical revert condition is not triggered. This does not
+  establish improved usefulness."
+- "R1 and R4 remain pending because required hand-check dispositions are absent. R3 remains pending before matched
+  grading. No overall shipping verdict is established."
+- "The Qwen original-to-control regression contains directly evidenced acceptance-mediated blocked runs and
+  acceptance-repair loops, alongside timeout failures. Timeout growth alone cannot explain the rc0 drop. The
+  historical comparison does not identify the acceptance gate’s individual aggregate effect or exclude environmental
+  contributions."
+- "Control and 3b have verified matching keys, external requests and chain order, plus documented matching nominal
+  configurations. Full operational equivalence is not established by the retained manifests. Neither improved answer
+  quality nor diagnostic-caused failures may be concluded from this table alone."
+
+Backlog: STATEFUL_CODEX_CURRENT_STATE.md section 7, "Acceptance-mediated failures in Qwen control; harness-wide verification with gpt-6-luna pending." Evidence: sc_dogfood/dsg/ladder/measure_3b.py, measure_3b.md, manifests/,
+runs/{ms4_ctl,ms4_3b,q36a3_ctl,q36a3_3b}/logs/ and snap/; sc_dogfood/integrate/reviews/threeway_hunt.md.
