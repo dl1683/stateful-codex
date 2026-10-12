@@ -1,8 +1,6 @@
 //! Storage of entry context, scopes, capture groups and the memory-change journal. Context and
 //! journal rows are written in the same transaction as the entry revision they describe.
 
-use std::collections::HashMap;
-
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
 
@@ -93,22 +91,6 @@ impl BlackboardStore {
     ) -> Result<Option<KnowledgeContext>, BlackboardStoreError> {
         let mut connection = self.pool.acquire().await?;
         context_of(&mut connection, project_id, id.as_str()).await
-    }
-
-    /// Contexts of several entries, by entry ID; entries without one are legacy.
-    pub async fn knowledge_contexts(
-        &self,
-        project_id: &str,
-        ids: &[BlackboardEntryId],
-    ) -> Result<HashMap<String, KnowledgeContext>, BlackboardStoreError> {
-        let mut connection = self.pool.acquire().await?;
-        let mut contexts = HashMap::with_capacity(ids.len());
-        for id in ids {
-            if let Some(context) = context_of(&mut connection, project_id, id.as_str()).await? {
-                contexts.insert(id.to_string(), context);
-            }
-        }
-        Ok(contexts)
     }
 
     /// Records `context` for an existing revision of an entry (a revision another writer

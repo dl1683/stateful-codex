@@ -128,7 +128,6 @@ pub use repository_observation_storage::RepositoryObservationStore;
 pub use repository_observation_storage::RepositoryObservationStoreError;
 pub use status::ProjectIntelligenceStatus;
 pub use status::ProjectRefreshStatus;
-pub use storage::HierarchyRegionSourceUpdate;
 pub use storage::HierarchySourceUpdate;
 pub use storage::HierarchyStore;
 pub use storage::HierarchyStoreError;
