@@ -1129,16 +1129,16 @@ and memory-benchmark-harness (reserved replication, agent-memory evaluation
 software). The first five are the longitudinal cohort if the screen is valid;
 the sixth is never substituted for an unfavorable result; procurement is
 excluded as the frozen development case. Source selections and one question
-per project are frozen in `eval/archive/2026-09/manifests/breadth-projects.json`.
+per project are frozen in
+`clients/stateful-codex/eval/archive/2026-09/manifests/breadth-projects.json`.
 Each arm gets an isolated copy of the `rg --files`-visible corpus without
 caches, build outputs, credentials, prior `.blackboard` or `.codex` state; the
-AGI corpus is
-bounded to the root thesis controls plus `publication` and `reviews` (its
-multi-gigabyte raw experiment store is outside the screen). The six pre-run
-corpus hashes and file counts are in
-`eval/archive/2026-09/manifests/breadth-snapshot-hashes.json`; preparation
-verifies byte identity between arms and the runner rehashes before and after
-every turn. Both arms: branch debug binary, cached login with API keys removed,
+AGI corpus is bounded to the root thesis controls plus `publication` and
+`reviews` (its multi-gigabyte raw experiment store is outside the screen). The
+six pre-run corpus hashes and file counts are in
+`clients/stateful-codex/eval/archive/2026-09/manifests/breadth-snapshot-hashes.json`;
+preparation verifies byte identity between arms and the runner rehashes before
+and after every turn. Both arms: branch debug binary, cached login with API keys removed,
 Luna at high effort, read-only permissions, one continuous thread per project;
 Stateful in explicit Autonomous mode. A run is valid only if it completes,
 preserves the corpus, exposes project state, commits its durable result, and
