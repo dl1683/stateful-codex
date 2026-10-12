@@ -79,24 +79,6 @@ impl ConptyInstance {
     }
 }
 
-/// Create a ConPTY with backing pipes.
-///
-/// This is public so callers that need lower-level PTY setup can build on the same
-/// primitive, although the common entry point is `spawn_conpty_process_as_user`.
-#[allow(dead_code)]
-pub fn create_conpty(cols: i16, rows: i16) -> Result<ConptyInstance> {
-    let raw = RawConPty::new(cols, rows)?;
-    let (pseudoconsole, input_write, output_read) = raw.into_handles();
-
-    Ok(ConptyInstance {
-        pseudoconsole: Some(pseudoconsole),
-        input_write: input_write.into_raw_handle() as HANDLE,
-        output_read: output_read.into_raw_handle() as HANDLE,
-        job: None,
-        _desktop: None,
-    })
-}
-
 /// Spawn a process under `h_token` with ConPTY attached.
 ///
 /// This is the main shared ConPTY entry point and is used by both the legacy/direct path
