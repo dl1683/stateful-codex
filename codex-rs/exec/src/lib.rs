@@ -1331,6 +1331,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let mut awaiting_autonomous_turn = false;
     let mut awaited_autonomous_run_id = None;
     let mut autonomous_follow_deadline = None;
+    let mut last_streamed_agent_message: Option<(String, String)> = None;
     let mut pending_autonomous_turn = None;
     let primary_thread_id_for_requests = primary_thread_id.to_string();
     let mut startup_warning_deduper = StartupWarningDeduper::new(&config.startup_warnings);
@@ -1554,11 +1555,18 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     {
                         continue;
                     }
+                    if let ServerNotification::ItemCompleted(completed) = &notification
+                        && let codex_app_server_protocol::ThreadItem::AgentMessage { id, .. } =
+                            &completed.item
+                    {
+                        last_streamed_agent_message = Some((completed.turn_id.clone(), id.clone()));
+                    }
                     maybe_backfill_turn_completed_items(
                         config.ephemeral,
                         &client,
                         &mut request_ids,
                         &mut notification,
+                        last_streamed_agent_message.as_ref(),
                     )
                     .await;
 
@@ -2147,6 +2155,7 @@ async fn maybe_backfill_turn_completed_items(
     client: &InProcessAppServerClient,
     request_ids: &mut RequestIdSequencer,
     notification: &mut ServerNotification,
+    last_streamed_agent_message: Option<&(String, String)>,
 ) {
     // In-process delivery may drop non-terminal item notifications under backpressure while still
     // guaranteeing `turn/completed`. Because app-server currently emits that completion with an
@@ -2173,7 +2182,10 @@ async fn maybe_backfill_turn_completed_items(
         })
         .await;
 
-    history_backfill::apply_turn_backfill(&mut payload.turn, items);
+    let streamed_agent_message_id = last_streamed_agent_message
+        .filter(|(turn_id, _)| *turn_id == payload.turn.id)
+        .map(|(_, item_id)| item_id.as_str());
+    history_backfill::apply_turn_backfill(&mut payload.turn, items, streamed_agent_message_id);
 }
 
 /// Returns true only when `exec` can safely recover missing turn items from

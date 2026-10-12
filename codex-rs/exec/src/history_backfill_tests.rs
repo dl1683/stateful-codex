@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use super::*;
 use crate::event_processor::EventProcessor;
 use crate::event_processor_with_human_output::EventProcessorWithHumanOutput;
+use crate::event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
 use crate::tests::TestLogWriter;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
@@ -20,7 +21,7 @@ fn plan(index: usize) -> ThreadItem {
 
 fn agent_message(text: String) -> ThreadItem {
     ThreadItem::AgentMessage {
-        id: "final".to_string(),
+        id: text.chars().take(24).collect(),
         text,
         phase: None,
         memory_citation: None,
@@ -106,31 +107,56 @@ async fn backfill_stops_at_exhaustion_and_repeated_cursor() {
     );
 }
 
+/// How the final answer reached exec before the bounded backfill ran.
+#[derive(Clone, Copy)]
+enum Delivery {
+    Streamed,
+    InCompletion,
+}
+
+/// Delivers `delivered`, applies `backfill` to the completed turn as exec does, and completes the
+/// turn through both the human and the JSON processors. Returns both `-o` texts, the turn items and
+/// the log.
 async fn complete_with_backfill(
     delivered: &str,
+    delivery: Delivery,
     backfill: Result<Vec<ThreadItem>, String>,
-) -> (String, Vec<ThreadItem>, String) {
+) -> ([String; 2], Vec<ThreadItem>, String) {
     let home = tempfile::tempdir().expect("codex home");
     let config = codex_core::config::ConfigBuilder::default()
         .codex_home(home.path().to_path_buf())
         .build()
         .await
         .expect("config");
-    let last_message_path = home.path().join("last-message.txt");
-    let mut processor = EventProcessorWithHumanOutput::create_with_ansi(
-        /*with_ansi*/ false,
-        &config,
-        Some(last_message_path.clone()),
-    );
-    processor.process_server_notification(ServerNotification::ItemCompleted(
-        ItemCompletedNotification {
-            item: agent_message(delivered.to_string()),
-            thread_id: "thread-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            completed_at_ms: 0,
-        },
-    ));
+    let paths = [home.path().join("human.txt"), home.path().join("json.txt")];
+    let mut processors: [Box<dyn EventProcessor>; 2] = [
+        Box::new(EventProcessorWithHumanOutput::create_with_ansi(
+            /*with_ansi*/ false,
+            &config,
+            Some(paths[0].clone()),
+        )),
+        Box::new(EventProcessorWithJsonOutput::new(Some(paths[1].clone()))),
+    ];
+    let delivered = agent_message(delivered.to_string());
     let mut turn = summary_turn("turn-1", TurnStatus::Completed);
+    let streamed_id = match (delivery, &delivered) {
+        (Delivery::Streamed, ThreadItem::AgentMessage { id, .. }) => Some(id.clone()),
+        (Delivery::InCompletion, _) | (Delivery::Streamed, _) => None,
+    };
+    if streamed_id.is_some() {
+        for processor in &mut processors {
+            processor.process_server_notification(ServerNotification::ItemCompleted(
+                ItemCompletedNotification {
+                    item: delivered.clone(),
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    completed_at_ms: 0,
+                },
+            ));
+        }
+    } else {
+        turn.items = vec![delivered];
+    }
     let buffer = Arc::new(Mutex::new(Vec::new()));
     let writer = TestLogWriter {
         buffer: Arc::clone(&buffer),
@@ -139,18 +165,45 @@ async fn complete_with_backfill(
         .with_ansi(false)
         .with_writer(writer)
         .finish();
-    tracing::subscriber::with_default(subscriber, || apply_turn_backfill(&mut turn, backfill));
+    tracing::subscriber::with_default(subscriber, || {
+        apply_turn_backfill(&mut turn, backfill, streamed_id.as_deref());
+    });
     let items = turn.items.clone();
-    processor.process_server_notification(ServerNotification::TurnCompleted(
-        TurnCompletedNotification {
-            thread_id: "thread-1".to_string(),
-            turn,
-        },
-    ));
-    processor.print_final_output();
-    let output = std::fs::read_to_string(last_message_path).expect("last message");
+    for processor in &mut processors {
+        processor.process_server_notification(ServerNotification::TurnCompleted(
+            TurnCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn: turn.clone(),
+            },
+        ));
+        processor.print_final_output();
+    }
+    let outputs = paths.map(|path| std::fs::read_to_string(path).expect("last message"));
     let logs = String::from_utf8(buffer.lock().expect("log buffer").clone()).expect("utf8");
-    (output, items, logs)
+    (outputs, items, logs)
+}
+
+#[tokio::test]
+async fn stale_backfill_never_replaces_a_delivered_final_answer() {
+    // The projection lags: its newest items end at an earlier progress message.
+    let stale = vec![agent_message("earlier progress".to_string())];
+    let final_answer = agent_message("final answer".to_string());
+
+    let mut outcomes = Vec::new();
+    for delivery in [Delivery::Streamed, Delivery::InCompletion] {
+        let (outputs, items, _) =
+            complete_with_backfill("final answer", delivery, Ok(stale.clone())).await;
+        outcomes.push((outputs, items));
+    }
+
+    let final_answer_out = ["final answer".to_string(), "final answer".to_string()];
+    assert_eq!(
+        outcomes,
+        vec![
+            (final_answer_out.clone(), Vec::new()),
+            (final_answer_out, vec![final_answer]),
+        ]
+    );
 }
 
 /// Also `backfill_follows_page_two`: the newest 100 items span two pages.
@@ -168,11 +221,20 @@ async fn backfill_final_message_outside_suffix_is_not_recovered_and_warns() {
         vec![items_params(/*cursor*/ None), items_params(Some("50"))]
     );
     // That incomplete suffix neither displaces the delivered answer nor lets a plan stand in.
-    let (output, items, logs) = complete_with_backfill("final answer", items).await;
-    assert_eq!((output.as_str(), items), ("final answer", Vec::new()));
+    let (outputs, items, logs) =
+        complete_with_backfill("final answer", Delivery::Streamed, items).await;
+    assert_eq!(
+        (outputs, items),
+        (
+            ["final answer".to_string(), "final answer".to_string()],
+            Vec::new()
+        )
+    );
     assert!(
         logs.contains("turn_id=turn-1")
-            && logs.contains("no final agent message among the newest backfilled turn items"),
+            && logs.contains(
+                "the newest backfilled turn items lack the delivered final agent message"
+            ),
         "{logs}"
     );
 }
@@ -180,8 +242,13 @@ async fn backfill_final_message_outside_suffix_is_not_recovered_and_warns() {
 #[tokio::test]
 async fn backfill_unavailable_history_warns() {
     let error = Err("thread/items/list: unsupported".to_string());
-    let (output, items, logs) = complete_with_backfill("delivered answer", error).await;
-    assert_eq!((output.as_str(), items), ("delivered answer", Vec::new()));
+    let (outputs, items, logs) =
+        complete_with_backfill("delivered answer", Delivery::Streamed, error).await;
+    let delivered = "delivered answer".to_string();
+    assert_eq!(
+        (outputs, items),
+        ([delivered.clone(), delivered], Vec::new())
+    );
     assert!(
         logs.contains("turn_id=turn-1")
             && logs.contains("failed to backfill turn items for turn completion"),
@@ -191,15 +258,24 @@ async fn backfill_unavailable_history_warns() {
 
 #[tokio::test]
 async fn backfill_large_single_item_is_passed_through() {
-    // Pages and items are bounded, bytes are not (L3-3): the 1 MiB final message comes back whole.
+    // Pages and items are bounded, bytes are not (L3-3): the 1 MiB final message comes back whole
+    // and is recovered, since its notification was lost after the streamed progress note.
     let final_message = "x".repeat(1024 * 1024);
-    let turn = vec![plan(/*index*/ 0), agent_message(final_message.clone())];
+    let turn = vec![
+        agent_message("progress note".to_string()),
+        plan(/*index*/ 0),
+        agent_message(final_message.clone()),
+    ];
 
     let (items, requests) = backfill_from(&turn).await;
     assert_eq!(requests, vec![items_params(/*cursor*/ None)]);
-    let (output, items, logs) = complete_with_backfill("progress note", items).await;
+    let (outputs, items, logs) =
+        complete_with_backfill("progress note", Delivery::Streamed, items).await;
 
-    assert_eq!((output, items, logs), (final_message, turn, String::new()));
+    assert_eq!(
+        (outputs, items, logs),
+        ([final_message.clone(), final_message], turn, String::new())
+    );
 }
 
 fn summary_turn(id: &str, status: TurnStatus) -> Turn {
