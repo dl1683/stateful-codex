@@ -102,39 +102,20 @@ where
     Ok(items)
 }
 
-/// Fills a completed turn from a bounded backfill only when no delivered final answer exists. The
-/// completion's own agent message is authoritative, and so is the agent message exec last saw
-/// streamed for the turn, which a stale backfill does not hold. A backfill without an agent message
-/// never fills the turn, so a plan cannot stand in for the final message.
-pub(crate) fn apply_turn_backfill(
-    turn: &mut Turn,
-    backfill: Result<Vec<ThreadItem>, String>,
-    streamed_agent_message_id: Option<&str>,
-) {
+/// Fills a completed turn from a bounded backfill only when the completion carries no agent
+/// message: a delivered final answer in the completion is authoritative. A backfill without an
+/// agent message never fills the turn, so a plan cannot stand in for the final message.
+pub(crate) fn apply_turn_backfill(turn: &mut Turn, backfill: Result<Vec<ThreadItem>, String>) {
     let turn_id = turn.id.as_str();
     let is_agent_message = |item: &ThreadItem| matches!(item, ThreadItem::AgentMessage { .. });
-    let items = match backfill {
-        Ok(items) => items,
-        Err(err) => {
-            warn!(%turn_id, "failed to backfill turn items for turn completion: {err}");
-            return;
-        }
-    };
-    if turn.items.iter().any(is_agent_message) {
-        return;
-    }
-    let holds_streamed = streamed_agent_message_id.is_none_or(|streamed| {
-        items
-            .iter()
-            .any(|item| matches!(item, ThreadItem::AgentMessage { id, .. } if id == streamed))
-    });
-    if holds_streamed && items.iter().any(is_agent_message) {
-        turn.items = items;
-    } else {
-        warn!(
+    match backfill {
+        Ok(_) if turn.items.iter().any(is_agent_message) => {}
+        Ok(items) if items.iter().any(is_agent_message) => turn.items = items,
+        Ok(_) => warn!(
             %turn_id,
-            "the newest backfilled turn items lack the delivered final agent message; keeping the delivered items"
-        );
+            "no final agent message among the newest backfilled turn items; keeping the delivered items"
+        ),
+        Err(err) => warn!(%turn_id, "failed to backfill turn items for turn completion: {err}"),
     }
 }
 

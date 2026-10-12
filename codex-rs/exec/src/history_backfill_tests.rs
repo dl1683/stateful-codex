@@ -139,11 +139,7 @@ async fn complete_with_backfill(
     ];
     let delivered = agent_message(delivered.to_string());
     let mut turn = summary_turn("turn-1", TurnStatus::Completed);
-    let streamed_id = match (delivery, &delivered) {
-        (Delivery::Streamed, ThreadItem::AgentMessage { id, .. }) => Some(id.clone()),
-        (Delivery::InCompletion, _) | (Delivery::Streamed, _) => None,
-    };
-    if streamed_id.is_some() {
+    if matches!(delivery, Delivery::Streamed) {
         for processor in &mut processors {
             processor.process_server_notification(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
@@ -166,7 +162,7 @@ async fn complete_with_backfill(
         .with_writer(writer)
         .finish();
     tracing::subscriber::with_default(subscriber, || {
-        apply_turn_backfill(&mut turn, backfill, streamed_id.as_deref());
+        apply_turn_backfill(&mut turn, backfill);
     });
     let items = turn.items.clone();
     for processor in &mut processors {
@@ -189,20 +185,34 @@ async fn stale_backfill_never_replaces_a_delivered_final_answer() {
     let stale = vec![agent_message("earlier progress".to_string())];
     let final_answer = agent_message("final answer".to_string());
 
-    let mut outcomes = Vec::new();
-    for delivery in [Delivery::Streamed, Delivery::InCompletion] {
-        let (outputs, items, _) =
-            complete_with_backfill("final answer", delivery, Ok(stale.clone())).await;
-        outcomes.push((outputs, items));
-    }
+    // The completion carries the final answer, so the stale page is never applied. A final answer
+    // delivered only by stream is not protected (limitation L-R5).
+    let (outputs, items, _) =
+        complete_with_backfill("final answer", Delivery::InCompletion, Ok(stale)).await;
 
-    let final_answer_out = ["final answer".to_string(), "final answer".to_string()];
     assert_eq!(
-        outcomes,
-        vec![
-            (final_answer_out.clone(), Vec::new()),
-            (final_answer_out, vec![final_answer]),
-        ]
+        (outputs, items),
+        (
+            ["final answer".to_string(), "final answer".to_string()],
+            vec![final_answer]
+        )
+    );
+}
+
+#[tokio::test]
+async fn backfill_recovers_the_final_answer_when_streamed_progress_is_outside_the_suffix() {
+    // The progress note streamed early in a long turn; the final message's notification was lost.
+    let mut turn = vec![agent_message("progress note".to_string())];
+    turn.extend((0..120).map(plan));
+    turn.push(agent_message("final answer".to_string()));
+
+    let (items, _) = backfill_from(&turn).await;
+    assert_eq!(items, Ok(turn[22..].to_vec()));
+    let (outputs, _, _) = complete_with_backfill("progress note", Delivery::Streamed, items).await;
+
+    assert_eq!(
+        outputs,
+        ["final answer".to_string(), "final answer".to_string()]
     );
 }
 
@@ -232,9 +242,7 @@ async fn backfill_final_message_outside_suffix_is_not_recovered_and_warns() {
     );
     assert!(
         logs.contains("turn_id=turn-1")
-            && logs.contains(
-                "the newest backfilled turn items lack the delivered final agent message"
-            ),
+            && logs.contains("no final agent message among the newest backfilled turn items"),
         "{logs}"
     );
 }
