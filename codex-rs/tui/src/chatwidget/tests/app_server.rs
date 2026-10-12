@@ -2091,6 +2091,24 @@ async fn permission_discovery_invalidates_on_thread_settings_and_uses_updated_cw
     assert_eq!(thread_cwd, Some(test_path_buf("/tmp/thread-settings")));
 }
 
+/// The Stateful deliverable diagnostic renders as an ordinary runtime warning history cell.
+#[tokio::test]
+async fn stateful_deliverable_warning() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.warning_display_state.startup_complete = true;
+    chat.handle_server_notification(
+        ServerNotification::Warning(WarningNotification {
+            thread_id: None,
+            message: "This final reply may omit the deliverable: it contains only a status line (\"Task completed.\"). This turn's recorded result (completed, revision 4): parse_config returns Result<Config, Error>.".to_string(),
+        }),
+        /*replay_kind*/ None,
+    );
+    let [cell] = drain_insert_history_transcript(&mut rx)
+        .try_into()
+        .expect("expected one warning history cell");
+    assert_chatwidget_snapshot!("stateful_deliverable_warning", lines_to_single_string(&cell));
+}
+
 #[tokio::test]
 async fn sqlite_log_write_warning_is_visible_in_warnings() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;

@@ -1,0 +1,7 @@
+---
+source: tui/src/chatwidget/tests/app_server.rs
+expression: lines_to_single_string(&cell)
+---
+⚠ This final reply may omit the deliverable: it contains only a status line
+  ("Task completed."). This turn's recorded result (completed, revision 4):
+  parse_config returns Result<Config, Error>.
