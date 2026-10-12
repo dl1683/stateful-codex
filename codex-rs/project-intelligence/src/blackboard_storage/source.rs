@@ -121,7 +121,7 @@ impl BlackboardStore {
     }
 
     /// A native summary can join text parts; a forgotten part excludes that turn fallback.
-    /// Eligible independent original ranges remain separately searchable/readable.
+    /// Eligible independent original ranges remain separately exactly readable.
     pub async fn source_turn_eligible(
         &self,
         project_id: &str,

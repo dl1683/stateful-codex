@@ -49,7 +49,8 @@ pub(crate) struct CapsuleHeader<'a> {
 pub(crate) struct RenderedCapsule {
     pub text: String,
     pub tokens: usize,
-    /// Complete alias map persisted beside the capsule; aliases are not retrieval tools.
+    /// Complete alias map returned with the capsule (persisting it is parked future wiring);
+    /// aliases are not retrieval tools.
     pub aliases: Vec<(String, SourceRef)>,
     pub source_turn_ids: Vec<String>,
     pub source_texts: Vec<String>,
@@ -249,7 +250,7 @@ fn record_line(
         let partial = if c.partial { " [partial quote]" } else { "" };
         format!("{}{partial}", escape(c.text.as_deref().unwrap_or_default()))
     };
-    // Stable source aliases in render order; the full map is persisted with the capsule.
+    // Stable source aliases in render order; the full map is returned with the capsule.
     let mut alias = |c: &Candidate| {
         let named: Vec<String> = c
             .sources
