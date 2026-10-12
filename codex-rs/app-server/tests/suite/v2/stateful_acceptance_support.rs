@@ -21,10 +21,22 @@ use sha2::Digest;
 use sha2::Sha256;
 
 const OUTPUT: &str = "accepted.txt";
+// The admitted checker runs under an interpreter every supported OS's test environment has.
+#[cfg(not(target_os = "windows"))]
 const CHECKER: &str = "verify-acceptance.sh";
-const CHECKER_SCRIPT: &str = "test -s accepted.txt\n";
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg(not(target_os = "windows"))]
+const CHECKER_SCRIPT: &str = "test -s accepted.txt
+";
+#[cfg(not(target_os = "windows"))]
 pub(super) const CHECK_COMMAND: &str = "sh verify-acceptance.sh";
+#[cfg(target_os = "windows")]
+const CHECKER: &str = "verify-acceptance.py";
+#[cfg(target_os = "windows")]
+const CHECKER_SCRIPT: &str = "import os, sys
+sys.exit(0 if os.path.getsize('accepted.txt') else 1)
+";
+#[cfg(target_os = "windows")]
+pub(super) const CHECK_COMMAND: &str = "python verify-acceptance.py";
 
 /// Writes the pinned output and its checker into `root`, which must hold no other files.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
