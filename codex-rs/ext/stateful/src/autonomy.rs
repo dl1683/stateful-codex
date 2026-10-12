@@ -374,6 +374,8 @@ impl TurnLifecycleContributor for StatefulExtension {
     fn on_turn_stop<'a>(&'a self, input: TurnStopInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
+            // A turn that ends without a genuine final never reaches finalization.
+            self.run_commits.take(input.turn_store.level_id());
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }
@@ -422,7 +424,12 @@ impl TurnLifecycleContributor for StatefulExtension {
             .await;
             match status_only {
                 Some(reply) => {
-                    let check = crate::deliverable::ReceiptCheck::read(store, receipt).await;
+                    let check = crate::deliverable::ReceiptCheck::read(
+                        store,
+                        receipt,
+                        &active_turn.run_id,
+                    )
+                    .await;
                     crate::deliverable::warn(outcome, reply, &check)
                 }
                 None => outcome,

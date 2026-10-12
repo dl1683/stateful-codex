@@ -44,17 +44,6 @@ pub(crate) struct RunCommitReceipt {
     result: Option<String>,
 }
 
-impl RunCommitReceipt {
-    fn of(run: &StatefulRun) -> Self {
-        Self {
-            run_id: run.id.clone(),
-            revision: run.revision,
-            status: run.status,
-            result: run.result.clone(),
-        }
-    }
-}
-
 /// Process-local receipts of the run commits each turn made, keyed by turn id.
 #[derive(Clone, Default)]
 pub(crate) struct TurnRunCommits(Arc<Mutex<VecDeque<(String, RunCommitReceipt)>>>);
@@ -64,7 +53,15 @@ impl TurnRunCommits {
     pub(crate) fn record(&self, turn_id: &str, run: &StatefulRun) {
         let mut receipts = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         receipts.retain(|(turn, _)| turn != turn_id);
-        receipts.push_back((turn_id.to_string(), RunCommitReceipt::of(run)));
+        receipts.push_back((
+            turn_id.to_string(),
+            RunCommitReceipt {
+                run_id: run.id.clone(),
+                revision: run.revision,
+                status: run.status,
+                result: run.result.clone(),
+            },
+        ));
         while receipts.len() > MAX_TURN_RECEIPTS {
             receipts.pop_front();
         }
@@ -135,8 +132,13 @@ pub(crate) enum ReceiptCheck {
 }
 
 impl ReceiptCheck {
-    pub(crate) async fn read(store: &StatefulRunStore, receipt: Option<RunCommitReceipt>) -> Self {
-        let Some(receipt) = receipt else {
+    /// A receipt for any run other than the turn's `bound_run` is unavailable here.
+    pub(crate) async fn read(
+        store: &StatefulRunStore,
+        receipt: Option<RunCommitReceipt>,
+        bound_run: &StatefulRunId,
+    ) -> Self {
+        let Some(receipt) = receipt.filter(|receipt| receipt.run_id == *bound_run) else {
             return Self::NoReceipt;
         };
         match store.get_run(&receipt.run_id).await {
