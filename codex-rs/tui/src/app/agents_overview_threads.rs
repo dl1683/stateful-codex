@@ -370,6 +370,7 @@ impl App {
                                                 limit: Some(1),
                                                 sort_direction: None,
                                                 items_view: None,
+                                                persist_before_list: false,
                                             },
                                         },
                                     )

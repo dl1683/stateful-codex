@@ -256,6 +256,7 @@ impl AppServerSession {
                     limit: Some(limit),
                     sort_direction: Some(SortDirection::Desc),
                     items_view: Some(TurnItemsView::NotLoaded),
+                    persist_before_list: false,
                 },
             })
             .await

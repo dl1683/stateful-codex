@@ -396,6 +396,7 @@ async fn execute_inner(
                         limit: Some(turn_limit),
                         sort_direction: Some(SortDirection::Desc),
                         items_view: Some(TurnItemsView::Full),
+                        persist_before_list: false,
                     },
                 })
                 .await;
@@ -577,6 +578,7 @@ async fn execute_inner(
                             limit: Some(1),
                             sort_direction: Some(SortDirection::Desc),
                             items_view: Some(TurnItemsView::NotLoaded),
+                            persist_before_list: false,
                         },
                     })
                     .await;
@@ -793,6 +795,7 @@ async fn execute_inner(
                                             limit: Some(1),
                                             sort_direction: Some(SortDirection::Desc),
                                             items_view: Some(TurnItemsView::Summary),
+                                            persist_before_list: false,
                                         },
                                     },
                                 ),

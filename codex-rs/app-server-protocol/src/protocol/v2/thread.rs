@@ -1715,7 +1715,7 @@ pub struct ThreadInjectItemsParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadInjectItemsResponse {}
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadTurnsListParams {
@@ -1732,6 +1732,11 @@ pub struct ThreadTurnsListParams {
     /// How much item detail to include for each returned turn; defaults to summary.
     #[ts(optional = nullable)]
     pub items_view: Option<TurnItemsView>,
+    /// Retry a loaded thread's history projection before listing, so turns a swallowed
+    /// projection failure left out are listed again. Costs a flush and a projection catch-up.
+    #[experimental("thread/turns/list.persistBeforeList")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub persist_before_list: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

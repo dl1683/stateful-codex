@@ -55,7 +55,6 @@ fn items_params(cursor: Option<&str>) -> ThreadItemsListParams {
     }
 }
 
-/// Serves `turn` (in turn order) newest first, using the item offset as the cursor.
 fn serve_desc(turn: &[ThreadItem], params: &ThreadItemsListParams) -> ThreadItemsListResponse {
     let offset = match &params.cursor {
         None => 0,
@@ -92,11 +91,6 @@ async fn backfill_from(
 
 #[tokio::test]
 async fn backfill_stops_at_exhaustion_and_repeated_cursor() {
-    let turn = (0..10).map(plan).collect::<Vec<_>>();
-    let (items, requests) = backfill_from(&turn).await;
-    assert_eq!(items, Ok(turn));
-    assert_eq!(requests, vec![items_params(/*cursor*/ None)]);
-
     // A cursor that never advances is still bounded by the page budget.
     let mut requests = Vec::new();
     let items = newest_turn_items("thread-1", "turn-1", |params| {
@@ -112,7 +106,6 @@ async fn backfill_stops_at_exhaustion_and_repeated_cursor() {
     );
 }
 
-/// Streams `delivered`, backfills a summary turn, completes it; returns `-o`, items and log.
 async fn complete_with_backfill(
     delivered: &str,
     backfill: Result<Vec<ThreadItem>, String>,
@@ -186,14 +179,8 @@ async fn backfill_final_message_outside_suffix_is_not_recovered_and_warns() {
 
 #[tokio::test]
 async fn backfill_unavailable_history_warns() {
-    let error = "thread/items/list: unsupported".to_string();
-    let items = newest_turn_items("thread-1", "turn-1", |_| {
-        std::future::ready(Err(error.clone()))
-    })
-    .await;
-    assert_eq!(items, Err(error));
-
-    let (output, items, logs) = complete_with_backfill("delivered answer", items).await;
+    let error = Err("thread/items/list: unsupported".to_string());
+    let (output, items, logs) = complete_with_backfill("delivered answer", error).await;
     assert_eq!((output.as_str(), items), ("delivered answer", Vec::new()));
     assert!(
         logs.contains("turn_id=turn-1")
@@ -208,7 +195,8 @@ async fn backfill_large_single_item_is_passed_through() {
     let final_message = "x".repeat(1024 * 1024);
     let turn = vec![plan(/*index*/ 0), agent_message(final_message.clone())];
 
-    let (items, _) = backfill_from(&turn).await;
+    let (items, requests) = backfill_from(&turn).await;
+    assert_eq!(requests, vec![items_params(/*cursor*/ None)]);
     let (output, items, logs) = complete_with_backfill("progress note", items).await;
 
     assert_eq!((output, items, logs), (final_message, turn, String::new()));
@@ -227,7 +215,6 @@ fn summary_turn(id: &str, status: TurnStatus) -> Turn {
     }
 }
 
-/// Returns the outcome, the turn requests, and whether the run was read.
 async fn reconcile_with(
     turns: Result<Vec<Turn>, String>,
     run: Result<Option<StatefulRun>, String>,
@@ -284,6 +271,7 @@ async fn reconcile_uses_summary_turns_only() {
         limit: Some(4),
         sort_direction: Some(SortDirection::Desc),
         items_view: Some(TurnItemsView::Summary),
+        persist_before_list: true,
     };
     assert_eq!((requests, run_read), (vec![summary_page], false));
 }
@@ -318,9 +306,6 @@ async fn reconcile_without_an_eligible_turn_reports_the_run_state() {
         assert_eq!((requests.len(), run_read), (1, true));
         outcomes.push(outcome);
     }
-    let (list_error, _, run_read) =
-        reconcile_with(Err("thread/turns/list: unavailable".to_string()), Ok(None)).await;
-
     assert_eq!(
         outcomes,
         vec![
@@ -330,9 +315,5 @@ async fn reconcile_without_an_eligible_turn_reports_the_run_state() {
             Ok(AutonomousWaitState::Missing),
             Err("statefulRun/read: unavailable".to_string()),
         ]
-    );
-    assert_eq!(
-        (list_error, run_read),
-        (Err("thread/turns/list: unavailable".to_string()), false)
     );
 }

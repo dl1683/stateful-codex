@@ -66,6 +66,7 @@ impl AppServerSession {
                         limit: Some(READ_ONLY_HISTORY_TURN_LIMIT),
                         sort_direction: Some(SortDirection::Desc),
                         items_view: Some(TurnItemsView::Summary),
+                        persist_before_list: false,
                     },
                 })
                 .await?;

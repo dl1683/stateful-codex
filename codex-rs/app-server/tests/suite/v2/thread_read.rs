@@ -403,6 +403,7 @@ async fn paginated_stored_thread_routes_projected_turns() -> Result<()> {
             limit: None,
             sort_direction: None,
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let turns_list_resp: JSONRPCResponse = timeout(
@@ -455,6 +456,7 @@ async fn thread_turns_list_can_page_backward_and_forward() -> Result<()> {
             limit: Some(2),
             sort_direction: Some(SortDirection::Desc),
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let ThreadTurnsListResponse {
@@ -477,6 +479,7 @@ async fn thread_turns_list_can_page_backward_and_forward() -> Result<()> {
             limit: Some(10),
             sort_direction: Some(SortDirection::Desc),
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let ThreadTurnsListResponse { data, .. } =
@@ -492,6 +495,7 @@ async fn thread_turns_list_can_page_backward_and_forward() -> Result<()> {
             limit: Some(10),
             sort_direction: Some(SortDirection::Asc),
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let ThreadTurnsListResponse { data, .. } =
@@ -894,6 +898,7 @@ async fn thread_turns_list_reads_store_history_without_rollout_path() -> Result<
                 limit: Some(10),
                 sort_direction: Some(SortDirection::Asc),
                 items_view: None,
+                persist_before_list: false,
             },
         })
         .await?
@@ -1181,6 +1186,7 @@ async fn thread_resume_initial_turns_page_matches_requested_turns_list_page() ->
             limit: Some(2),
             sort_direction: Some(SortDirection::Asc),
             items_view: Some(TurnItemsView::NotLoaded),
+            persist_before_list: false,
         })
         .await?;
     let turns_list_resp: JSONRPCResponse = timeout(
@@ -1250,6 +1256,7 @@ async fn thread_turns_list_rejects_cursor_when_anchor_turn_is_rolled_back() -> R
             limit: Some(2),
             sort_direction: Some(SortDirection::Desc),
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let ThreadTurnsListResponse {
@@ -1270,6 +1277,7 @@ async fn thread_turns_list_rejects_cursor_when_anchor_turn_is_rolled_back() -> R
             limit: Some(10),
             sort_direction: Some(SortDirection::Asc),
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let read_err: JSONRPCError = timeout(
@@ -1617,6 +1625,7 @@ async fn thread_turns_list_rejects_unmaterialized_loaded_thread() -> Result<()> 
             limit: None,
             sort_direction: None,
             items_view: None,
+            persist_before_list: false,
         })
         .await?;
     let read_err: JSONRPCError = timeout(
@@ -2170,7 +2179,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
 }
 
 #[tokio::test]
-async fn thread_turns_list_recovers_a_lagging_projection_of_a_loaded_thread() -> Result<()> {
+async fn thread_turns_list_persists_a_lagging_projection_only_when_asked() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -2181,12 +2190,12 @@ async fn thread_turns_list_recovers_a_lagging_projection_of_a_loaded_thread() ->
     let start_id = mcp
         .send_thread_start_request_with_auto_env(ThreadStartParams {
             model: Some("mock-model".to_string()),
-            history_mode: Some(ThreadHistoryMode::Paginated),
             ..Default::default()
         })
         .await?;
     let ThreadStartResponse { thread, .. } =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+    assert_eq!(thread.history_mode, ThreadHistoryMode::Paginated);
     let turn_start_id = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
@@ -2221,18 +2230,30 @@ async fn thread_turns_list_recovers_a_lagging_projection_of_a_loaded_thread() ->
             .await?;
     }
 
-    let page = read_turns_page(
-        &mut mcp,
-        codex_protocol::ThreadId::from_string(&thread.id)?,
-        /*cursor*/ None,
-        Some(4),
-        SortDirection::Desc,
-        Some(TurnItemsView::Summary),
-    )
-    .await?;
+    let mut listed = Vec::new();
+    for persist_before_list in [false, true] {
+        let request_id = mcp
+            .send_thread_turns_list_request(ThreadTurnsListParams {
+                thread_id: thread.id.clone(),
+                cursor: None,
+                limit: Some(4),
+                sort_direction: Some(SortDirection::Desc),
+                items_view: Some(TurnItemsView::Summary),
+                persist_before_list,
+            })
+            .await?;
+        let response: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+        )
+        .await??;
+        let page: ThreadTurnsListResponse = to_response(response)?;
+        listed.push(page.data.into_iter().map(|t| (t.id, t.status)));
+    }
 
-    let listed: Vec<_> = page.data.into_iter().map(|t| (t.id, t.status)).collect();
-    assert_eq!(listed, vec![(turn.id, TurnStatus::Completed)]);
+    // Without the opt-in nothing is persisted, so the turn stays missing.
+    let listed: Vec<Vec<_>> = listed.into_iter().map(Iterator::collect).collect();
+    assert_eq!(listed, [vec![], vec![(turn.id, TurnStatus::Completed)]]);
     Ok(())
 }
 
@@ -2396,6 +2417,7 @@ async fn read_single_turn_items_view(
             limit: Some(10),
             sort_direction: Some(SortDirection::Asc),
             items_view,
+            persist_before_list: false,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(
@@ -2424,6 +2446,7 @@ async fn read_turns_page(
             limit,
             sort_direction: Some(sort_direction),
             items_view,
+            persist_before_list: false,
         })
         .await?;
     let response: JSONRPCResponse = timeout(

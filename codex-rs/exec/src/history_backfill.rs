@@ -25,8 +25,7 @@ const RECONCILE_TURNS_LIMIT: u32 = 4;
 const TURN_ITEMS_PAGE_LIMIT: u32 = 50;
 const TURN_ITEMS_MAX_PAGES: usize = 2;
 
-/// Reconciles an Autonomous wait: the newest in-progress turn other than `current_turn_id` in one
-/// summary page of the thread's newest turns, otherwise the run's state.
+/// Reconciles an Autonomous wait from one summary page of turns, otherwise from the run state.
 pub(crate) async fn reconcile_autonomous_wait<T, TFut, R, RFut>(
     thread_id: &str,
     current_turn_id: &str,
@@ -45,6 +44,7 @@ where
         limit: Some(RECONCILE_TURNS_LIMIT),
         sort_direction: Some(SortDirection::Desc),
         items_view: Some(TurnItemsView::Summary),
+        persist_before_list: true,
     })
     .await?;
     if let Some(turn) = page
@@ -71,8 +71,7 @@ where
     })
 }
 
-/// Returns the newest items of `turn_id` in turn order from at most `TURN_ITEMS_MAX_PAGES` pages,
-/// even if the cursor never advances. Older items of a longer turn are not returned.
+/// The newest items of `turn_id` in turn order, from at most `TURN_ITEMS_MAX_PAGES` pages.
 pub(crate) async fn newest_turn_items<F, Fut>(
     thread_id: &str,
     turn_id: &str,

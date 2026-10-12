@@ -3135,6 +3135,7 @@ impl ThreadRequestProcessor {
             limit,
             sort_direction,
             items_view,
+            persist_before_list,
         } = params;
         let thread_uuid = ThreadId::from_string(&thread_id)
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
@@ -3148,6 +3149,17 @@ impl ThreadRequestProcessor {
             .await
         {
             Ok(thread) if thread.history_mode == ThreadHistoryMode::Paginated => {
+                // Opt-in barrier: retry a projection that a swallowed failure left behind the
+                // durable rollout of a live thread, as `thread/read` with turns does.
+                if persist_before_list
+                    && self.thread_manager.get_thread(thread_uuid).await.is_ok()
+                    && let Err(err) = self
+                        .thread_store
+                        .persist_thread(thread_uuid, PersistContext::Standard)
+                        .await
+                {
+                    warn!("failed to persist thread {thread_uuid} before listing turns: {err}");
+                }
                 return self
                     .paginated_thread_turns_list_response(
                         thread_uuid,
@@ -3291,18 +3303,6 @@ impl ThreadRequestProcessor {
             TurnItemsView::Summary => StoredTurnItemsView::Summary,
             TurnItemsView::Full => StoredTurnItemsView::NotLoaded,
         };
-        let loaded_thread = self.thread_manager.get_thread(thread_id).await.ok();
-        // A swallowed projection failure can leave SQLite behind the durable rollout of a live
-        // thread. Retry the projection first, as `thread/read` with turns does, so the newest
-        // turns are listed.
-        if loaded_thread.is_some()
-            && let Err(err) = self
-                .thread_store
-                .persist_thread(thread_id, PersistContext::Standard)
-                .await
-        {
-            warn!("failed to persist thread {thread_id} before listing turns: {err}");
-        }
         let page = self
             .thread_store
             .list_turns(StoreListTurnsParams {
@@ -3334,6 +3334,7 @@ impl ThreadRequestProcessor {
             }
             turns.push(turn);
         }
+        let loaded_thread = self.thread_manager.get_thread(thread_id).await.ok();
         let has_live_running_thread = match loaded_thread.as_ref() {
             Some(thread) => matches!(thread.agent_status().await, AgentStatus::Running),
             None => false,

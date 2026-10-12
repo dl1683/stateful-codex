@@ -147,6 +147,7 @@ async fn thread_shell_command_history_responses_exclude_persisted_command_execut
                 limit: None,
                 sort_direction: Some(SortDirection::Asc),
                 items_view: None,
+                persist_before_list: false,
             },
         })
         .await?;

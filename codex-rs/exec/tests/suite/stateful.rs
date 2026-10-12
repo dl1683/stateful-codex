@@ -85,6 +85,7 @@ async fn exec_stateful_with_positional_prompt_does_not_wait_for_open_stdin() -> 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// Also `backfill_recovers_exact_final_message` with no hydration notice (in the trace: no output).
 async fn ordinary_exec_reports_neutral_trajectory_without_stateful_attribution()
 -> anyhow::Result<()> {
     let test = test_codex_exec();
@@ -93,14 +94,19 @@ async fn ordinary_exec_reports_neutral_trajectory_without_stateful_attribution()
         &server,
         responses::sse(vec![
             responses::ev_response_created("response-1"),
+            responses::ev_assistant_message("message-0", "An earlier progress note."),
             responses::ev_assistant_message("message-1", "done"),
             responses::ev_completed("response-1"),
         ]),
     )
     .await;
+    let last_message_path = test.cwd_path().join("last-message.txt");
 
     let assertion = test
         .cmd_with_server(&server)
+        .env("RUST_LOG", "codex_app_server::outgoing_message=trace")
+        .arg("--output-last-message")
+        .arg(&last_message_path)
         .arg("--json")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -118,6 +124,16 @@ async fn ordinary_exec_reports_neutral_trajectory_without_stateful_attribution()
         Some(1)
     );
     assert!(completed.get("stateful_attribution").is_none());
+    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr);
+    assert!(
+        stderr.contains("app-server event: turn/completed"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("app-server event: deprecationNotice"),
+        "{stderr}"
+    );
+    assert_eq!(std::fs::read_to_string(&last_message_path)?, "done");
     Ok(())
 }
 
@@ -459,46 +475,5 @@ async fn exec_resume_joins_an_open_collaborative_run_only_without_the_flag() -> 
         stderr.contains("it runs in collaborative mode"),
         "stderr should name the open run's mode: {stderr}"
     );
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn backfill_recovers_exact_final_message_without_hydration_notice() -> anyhow::Result<()> {
-    let test = test_codex_exec();
-    let server = responses::start_mock_server().await;
-    let final_message = "The final answer, recovered verbatim.";
-    responses::mount_sse_once(
-        &server,
-        responses::sse(vec![
-            responses::ev_response_created("response-1"),
-            responses::ev_assistant_message("message-1", "An earlier progress note."),
-            responses::ev_assistant_message("message-2", final_message),
-            responses::ev_completed("response-1"),
-        ]),
-    )
-    .await;
-    let last_message_path = test.cwd_path().join("last-message.txt");
-
-    // A single-turn run exits before a notice reaches its output; watch what app-server sends.
-    let output = test
-        .cmd_with_server(&server)
-        .env("RUST_LOG", "codex_app_server::outgoing_message=trace")
-        .arg("--skip-git-repo-check")
-        .arg("--output-last-message")
-        .arg(&last_message_path)
-        .arg("Answer in two messages")
-        .output()?;
-
-    assert!(output.status.success(), "exec failed: {output:?}");
-    let stderr = String::from_utf8(output.stderr)?;
-    assert!(
-        stderr.contains("app-server event: turn/completed"),
-        "{stderr}"
-    );
-    assert!(
-        !stderr.contains("app-server event: deprecationNotice"),
-        "{stderr}"
-    );
-    assert_eq!(std::fs::read_to_string(&last_message_path)?, final_message);
     Ok(())
 }
