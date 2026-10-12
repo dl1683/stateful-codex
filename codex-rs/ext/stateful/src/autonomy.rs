@@ -422,18 +422,12 @@ impl TurnLifecycleContributor for StatefulExtension {
                 &input,
             )
             .await;
-            match status_only {
-                Some(reply) => {
-                    let check = crate::deliverable::ReceiptCheck::read(
-                        store,
-                        receipt,
-                        &active_turn.run_id,
-                    )
-                    .await;
-                    crate::deliverable::warn(outcome, reply, &check)
-                }
-                None => outcome,
-            }
+            let Some(reply) = status_only else {
+                return outcome;
+            };
+            let bound_run = &active_turn.run_id;
+            let check = crate::deliverable::ReceiptCheck::read(store, receipt, bound_run).await;
+            crate::deliverable::warn(outcome, reply, &check)
         })
     }
 

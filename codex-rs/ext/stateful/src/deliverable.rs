@@ -1,13 +1,7 @@
-//! The final message must carry the deliverable.
-//!
-//! A genuine final reply bound to the current turn's run that is recognizably status-only
-//! ("Task completed.") gets a non-fatal diagnostic warning. The diagnostic never retries,
-//! never rejects an answer, never blocks completion, and never changes the committed run
-//! outcome, turn status or exit status.
-//!
-//! When this turn committed the run (completed or blocked), the warning quotes the recorded
-//! result only if the run still has the exact revision and status the commit returned. Commit
-//! ownership is never inferred from the run's status at the start or end of the turn.
+//! The final message must carry the deliverable: a genuine final reply bound to the turn's
+//! run that is only a status line gets a bounded, non-fatal warning that never retries,
+//! rejects, blocks or changes what was committed. It quotes this turn's own recorded result
+//! only while the run keeps that commit's revision and status.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -24,13 +18,10 @@ use codex_stateful_runtime::StatefulRunStore;
 use crate::answered::Readiness;
 use crate::run_world_state::status_name;
 
-/// The full warning, including any existing finalization warning it joins.
+/// Caps: the warning, its quoted status line, an existing warning; receipts kept (oldest out).
 const MAX_WARNING_BYTES: usize = 1_200;
-/// The quoted status line.
 const MAX_REPLY_BYTES: usize = 60;
-/// An existing finalization warning kept ahead of the diagnostic.
 const MAX_EXISTING_WARNING_BYTES: usize = 400;
-/// Turns whose commit receipt is kept; the oldest is evicted first.
 const MAX_TURN_RECEIPTS: usize = 64;
 const STATUS_ONLY: &str =
     "This final reply may omit the deliverable: it contains only a status line.";
@@ -67,7 +58,6 @@ impl TurnRunCommits {
         }
     }
 
-    /// Removes and returns the turn's receipt.
     pub(crate) fn take(&self, turn_id: &str) -> Option<RunCommitReceipt> {
         let mut receipts = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let position = receipts.iter().position(|(turn, _)| turn == turn_id)?;
@@ -77,38 +67,27 @@ impl TurnRunCommits {
 
 /// Whether `text` is only a bare status line such as "Task completed." or "**Done!**".
 pub(crate) fn is_status_only(text: &str) -> bool {
-    let mut text = text.trim();
-    for wrapper in ["**", "*", "_", "`"] {
-        if let Some(inner) = text
-            .strip_prefix(wrapper)
-            .and_then(|rest| rest.strip_suffix(wrapper))
-        {
-            text = inner;
-            break;
-        }
-    }
-    let normalized = text
+    let text = text.trim();
+    let text = ["**", "*", "_", "`"]
+        .iter()
+        .find_map(|wrapper| text.strip_prefix(wrapper)?.strip_suffix(wrapper))
+        .unwrap_or(text);
+    let words = text
         .to_ascii_lowercase()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    let normalized = normalized.trim_end_matches(['.', '!']).trim_end();
-    let normalized = normalized
-        .strip_suffix(" successfully")
-        .unwrap_or(normalized);
-    let bare = matches!(normalized, "done" | "all done" | "finished" | "completed");
-    let prefixed = ["run ", "task ", "work "].iter().any(|prefix| {
-        normalized
-            .strip_prefix(prefix)
-            .is_some_and(|state| matches!(state, "complete" | "completed" | "finished" | "done"))
-    });
-    bare || prefixed
+    let line = words.trim_end_matches(['.', '!']).trim_end();
+    let line = line.strip_suffix(" successfully").unwrap_or(line);
+    let state = |state: &str| matches!(state, "complete" | "completed" | "finished" | "done");
+    matches!(line, "done" | "all done" | "finished" | "completed")
+        || ["run ", "task ", "work "]
+            .iter()
+            .any(|prefix| line.strip_prefix(prefix).is_some_and(state))
 }
 
-/// The status line of this turn's genuine final reply, when that reply is status-only.
-///
-/// An accepted answer block is classified by its answer body; any other message, including
-/// one with a malformed or non-answer block, is classified whole.
+/// The status line of this turn's genuine final reply, when that reply is status-only: an
+/// accepted answer block is classified by its body, any other message whole.
 pub(crate) fn status_only_reply<'a>(input: &TurnFinalizeInput<'a>) -> Option<&'a str> {
     if !crate::answered::genuine_final(input) {
         return None;
@@ -120,19 +99,16 @@ pub(crate) fn status_only_reply<'a>(input: &TurnFinalizeInput<'a>) -> Option<&'a
     is_status_only(text).then_some(text)
 }
 
-/// What the turn's commit receipt says about the run at finalize.
+/// At finalize: no receipt for the bound run, the run still at the receipt's revision and
+/// status, or the run changed since (or could not be read).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ReceiptCheck {
-    /// This turn committed nothing to the run.
     NoReceipt,
-    /// The run still has the revision and status this turn's commit returned.
     Matched(RunCommitReceipt),
-    /// The run changed after this turn's commit, or could not be read.
     Changed(RunCommitReceipt),
 }
 
 impl ReceiptCheck {
-    /// A receipt for any run other than the turn's `bound_run` is unavailable here.
     pub(crate) async fn read(
         store: &StatefulRunStore,
         receipt: Option<RunCommitReceipt>,
@@ -163,11 +139,8 @@ pub(crate) fn warn(
         }
         TurnFinalizeOutcome::Warning(existing) => {
             let existing = utf8_prefix(&existing, MAX_EXISTING_WARNING_BYTES);
-            let budget = MAX_WARNING_BYTES - existing.len() - 1;
-            TurnFinalizeOutcome::Warning(format!(
-                "{existing}\n{}",
-                diagnostic(reply, check, budget)
-            ))
+            let diagnostic = diagnostic(reply, check, MAX_WARNING_BYTES - existing.len() - 1);
+            TurnFinalizeOutcome::Warning(format!("{existing}\n{diagnostic}"))
         }
     }
 }
