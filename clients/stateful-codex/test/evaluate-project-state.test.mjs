@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { scoreProjectState } from "../eval/evaluate-project-state.mjs";
 
-test("scores semantic recall separately from current evidence support", () => {
+test("scores lexical probe recall separately from current evidence support", () => {
   const manifest = {
     name: "fixture",
     expectedConcepts: [
@@ -28,14 +28,15 @@ test("scores semantic recall separately from current evidence support", () => {
   };
 
   assert.deepEqual(scoreProjectState([supported], manifest), {
+    schemaVersion: 2,
     manifest: "fixture",
     completeSnapshot: true,
-    entries: { total: 1, currentlySupported: 1, supportedEntryPrecision: 1 },
+    entries: { total: 1, currentlySupported: 1, storedSupportEntryRatio: 1 },
     concepts: {
       total: 1,
       matched: 1,
       currentlySupported: 1,
-      semanticRecall: 1,
+      lexicalProbeRecall: 1,
       supportedConceptRecall: 1,
       probes: [
         { name: "decision", matched: true, entryId: "entry-1", supported: true },

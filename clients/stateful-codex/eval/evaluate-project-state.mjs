@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
+// Report schema 2 renamed the schema-1 metrics `semanticRecall` and
+// `supportedEntryPrecision`. Neither is a semantic or independent precision
+// measure: probe matching is case-insensitive substring matching, and entry
+// support only reads the stored state, verification, freshness and evidence
+// fields of each returned entry.
+const REPORT_SCHEMA_VERSION = 2;
+
 export function scoreProjectState(hits, manifest, { truncated = false } = {}) {
   const entries = hits.map((hit) => hit.entry);
   const concepts = manifest.expectedConcepts.map((concept) => {
@@ -18,7 +25,7 @@ export function scoreProjectState(hits, manifest, { truncated = false } = {}) {
       .filter((entry) => includes(entry.content, phrase))
       .map((entry) => ({ phrase, entryId: entry.id })),
   );
-  const semanticRecall = ratio(
+  const lexicalProbeRecall = ratio(
     concepts.filter((concept) => concept.matched).length,
     concepts.length,
   );
@@ -26,30 +33,31 @@ export function scoreProjectState(hits, manifest, { truncated = false } = {}) {
     concepts.filter((concept) => concept.supported).length,
     concepts.length,
   );
-  const supportedEntryPrecision = ratio(supportedEntries.length, hits.length);
+  const storedSupportEntryRatio = ratio(supportedEntries.length, hits.length);
 
   return {
+    schemaVersion: REPORT_SCHEMA_VERSION,
     manifest: manifest.name,
     completeSnapshot: !truncated,
     entries: {
       total: hits.length,
       currentlySupported: supportedEntries.length,
-      supportedEntryPrecision,
+      storedSupportEntryRatio,
     },
     concepts: {
       total: concepts.length,
       matched: concepts.filter((concept) => concept.matched).length,
       currentlySupported: concepts.filter((concept) => concept.supported).length,
-      semanticRecall,
+      lexicalProbeRecall,
       supportedConceptRecall,
       probes: concepts,
     },
     forbiddenClaims,
     passed:
       !truncated &&
-      semanticRecall === 1 &&
+      lexicalProbeRecall === 1 &&
       supportedConceptRecall === 1 &&
-      supportedEntryPrecision === 1 &&
+      storedSupportEntryRatio === 1 &&
       forbiddenClaims.length === 0,
   };
 }
