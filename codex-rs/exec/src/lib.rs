@@ -50,7 +50,6 @@ use codex_app_server_protocol::Thread as AppServerThread;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadHistoryMode;
-use codex_app_server_protocol::ThreadItem as AppServerThreadItem;
 use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
@@ -199,6 +198,7 @@ const DEFAULT_ANALYTICS_ENABLED: bool = true;
 const EXEC_DEFAULT_LOG_FILTER: &str = "error,opentelemetry_sdk=off,opentelemetry_otlp=off";
 const AUTONOMOUS_FOLLOW_TIMEOUT: Duration = Duration::from_secs(150);
 
+#[derive(Debug, PartialEq)]
 enum AutonomousWaitState {
     TurnStarted(Box<TurnStartedNotification>),
     Running,
@@ -1731,34 +1731,19 @@ async fn reconcile_autonomous_wait(
     run_id: &str,
 ) -> Result<AutonomousWaitState, String> {
     let request_id = request_ids.next();
-    let turn =
-        history_backfill::newest_other_in_progress_turn(thread_id, current_turn_id, |params| {
+    history_backfill::reconcile_autonomous_wait(
+        thread_id,
+        current_turn_id,
+        |params| {
             send_request_with_response::<ThreadTurnsListResponse>(
                 client,
                 ClientRequest::ThreadTurnsList { request_id, params },
                 "thread/turns/list",
             )
-        })
-        .await?;
-    if let Some(turn) = turn {
-        return Ok(AutonomousWaitState::TurnStarted(Box::new(
-            TurnStartedNotification {
-                thread_id: thread_id.to_string(),
-                turn,
-            },
-        )));
-    }
-
-    match read_stateful_run(client, request_ids, StatefulRunLookup::Run(run_id)).await? {
-        Some(run)
-            if run.mode == StatefulWorkflowMode::Autonomous
-                && run.status == StatefulRunStatus::Running =>
-        {
-            Ok(AutonomousWaitState::Running)
-        }
-        Some(run) => Ok(AutonomousWaitState::Terminal(run.status)),
-        None => Ok(AutonomousWaitState::Missing),
-    }
+        },
+        move || read_stateful_run(client, request_ids, StatefulRunLookup::Run(run_id)),
+    )
+    .await
 }
 
 fn running_autonomous_run_id(
@@ -2165,9 +2150,8 @@ async fn maybe_backfill_turn_completed_items(
 ) {
     // In-process delivery may drop non-terminal item notifications under backpressure while still
     // guaranteeing `turn/completed`. Because app-server currently emits that completion with an
-    // empty `turn.items`, exec reads the turn's newest items here so human/json output can recover
-    // the final message and reconcile any still-running items before shutdown. The final message
-    // is recovered only when it is among those newest items.
+    // empty `turn.items`, exec reads the turn's newest items (only) so human/json output can recover
+    // the final message and reconcile any still-running items before shutdown.
     if !should_backfill_turn_completed_items(thread_ephemeral, notification) {
         return;
     }
@@ -2176,33 +2160,20 @@ async fn maybe_backfill_turn_completed_items(
         return;
     };
 
-    let turn_id = payload.turn.id.as_str();
-    let items = history_backfill::newest_turn_items(&payload.thread_id, turn_id, |params| {
-        send_request_with_response::<ThreadItemsListResponse>(
-            client,
-            ClientRequest::ThreadItemsList {
-                request_id: request_ids.next(),
-                params,
-            },
-            "thread/items/list",
-        )
-    })
-    .await;
+    let items =
+        history_backfill::newest_turn_items(&payload.thread_id, &payload.turn.id, |params| {
+            send_request_with_response::<ThreadItemsListResponse>(
+                client,
+                ClientRequest::ThreadItemsList {
+                    request_id: request_ids.next(),
+                    params,
+                },
+                "thread/items/list",
+            )
+        })
+        .await;
 
-    match items {
-        Ok(items) => {
-            if !items
-                .iter()
-                .any(|item| matches!(item, AppServerThreadItem::AgentMessage { .. }))
-            {
-                warn!(%turn_id, "no final agent message among the newest backfilled turn items");
-            }
-            payload.turn.items = items;
-        }
-        Err(err) => {
-            warn!(%turn_id, "failed to backfill turn items for turn completion: {err}");
-        }
-    }
+    history_backfill::apply_turn_backfill(&mut payload.turn, items);
 }
 
 /// Returns true only when `exec` can safely recover missing turn items from

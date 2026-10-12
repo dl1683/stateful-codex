@@ -141,17 +141,29 @@ async fn exec_falls_back_to_legacy_history_when_thread_store_cannot_paginate() -
     let server = MockServer::start().await;
     let _response_mock = mount_exec_responses(&server, /*count*/ 1).await;
     let store_id = Uuid::new_v4();
+    let last_message_path = test.cwd_path().join("last-message.txt");
 
-    test.cmd_with_server(&server)
+    let output = test
+        .cmd_with_server(&server)
+        .env("RUST_LOG", "codex_exec=warn")
         .arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!(
             "experimental_thread_store={{type=\"in_memory\",id=\"{store_id}\"}}"
         ))
+        .arg("--output-last-message")
+        .arg(&last_message_path)
         .arg("continue without paginated history")
-        .assert()
-        .success();
+        .output()?;
 
+    // Legacy history cannot page items, so the backfill only warns and the streamed answer stands.
+    assert!(output.status.success(), "exec failed: {output:?}");
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("failed to backfill turn items"), "{stderr}");
+    assert_eq!(
+        std::fs::read_to_string(&last_message_path)?,
+        "exec response"
+    );
     Ok(())
 }
 

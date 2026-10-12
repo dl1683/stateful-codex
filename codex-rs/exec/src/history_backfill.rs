@@ -1,13 +1,12 @@
-//! Bounded reads of persisted thread history.
-//!
-//! Exec never hydrates a whole thread. Reconciling an Autonomous wait reads one summary page of
-//! turns, and the completion backfill reads at most `TURN_ITEMS_MAX_PAGES` pages of
-//! `TURN_ITEMS_PAGE_LIMIT` items of one turn, newest first. The bound covers requests, pages and
-//! item counts only: payload bytes are not bounded, so a single large item is passed through whole.
+//! Bounded reads of persisted thread history: exec never hydrates a whole thread. Requests, pages
+//! and item counts are bounded; payload bytes are not, so a large item is passed through whole.
 
 use std::future::Future;
 
 use codex_app_server_protocol::SortDirection;
+use codex_app_server_protocol::StatefulRun;
+use codex_app_server_protocol::StatefulRunStatus;
+use codex_app_server_protocol::StatefulWorkflowMode;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadItemsListParams;
@@ -16,22 +15,29 @@ use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnItemsView;
+use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
+use tracing::warn;
+
+use crate::AutonomousWaitState;
 
 const RECONCILE_TURNS_LIMIT: u32 = 4;
 const TURN_ITEMS_PAGE_LIMIT: u32 = 50;
 const TURN_ITEMS_MAX_PAGES: usize = 2;
 
-/// Finds the newest in-progress turn other than `current_turn_id` in one page of the thread's
-/// newest summary turns.
-pub(crate) async fn newest_other_in_progress_turn<F, Fut>(
+/// Reconciles an Autonomous wait: the newest in-progress turn other than `current_turn_id` in one
+/// summary page of the thread's newest turns, otherwise the run's state.
+pub(crate) async fn reconcile_autonomous_wait<T, TFut, R, RFut>(
     thread_id: &str,
     current_turn_id: &str,
-    list_turns: F,
-) -> Result<Option<Turn>, String>
+    list_turns: T,
+    read_run: R,
+) -> Result<AutonomousWaitState, String>
 where
-    F: FnOnce(ThreadTurnsListParams) -> Fut,
-    Fut: Future<Output = Result<ThreadTurnsListResponse, String>>,
+    T: FnOnce(ThreadTurnsListParams) -> TFut,
+    TFut: Future<Output = Result<ThreadTurnsListResponse, String>>,
+    R: FnOnce() -> RFut,
+    RFut: Future<Output = Result<Option<StatefulRun>, String>>,
 {
     let page = list_turns(ThreadTurnsListParams {
         thread_id: thread_id.to_string(),
@@ -41,15 +47,32 @@ where
         items_view: Some(TurnItemsView::Summary),
     })
     .await?;
-    Ok(page
+    if let Some(turn) = page
         .data
         .into_iter()
-        .find(|turn| turn.id != current_turn_id && turn.status == TurnStatus::InProgress))
+        .find(|turn| turn.id != current_turn_id && turn.status == TurnStatus::InProgress)
+    {
+        return Ok(AutonomousWaitState::TurnStarted(Box::new(
+            TurnStartedNotification {
+                thread_id: thread_id.to_string(),
+                turn,
+            },
+        )));
+    }
+    Ok(match read_run().await? {
+        Some(run)
+            if run.mode == StatefulWorkflowMode::Autonomous
+                && run.status == StatefulRunStatus::Running =>
+        {
+            AutonomousWaitState::Running
+        }
+        Some(run) => AutonomousWaitState::Terminal(run.status),
+        None => AutonomousWaitState::Missing,
+    })
 }
 
-/// Returns the newest items of `turn_id` in turn order, reading at most `TURN_ITEMS_MAX_PAGES`
-/// pages. Older items of a longer turn are not returned. A cursor that never advances costs at
-/// most the same page budget.
+/// Returns the newest items of `turn_id` in turn order from at most `TURN_ITEMS_MAX_PAGES` pages,
+/// even if the cursor never advances. Older items of a longer turn are not returned.
 pub(crate) async fn newest_turn_items<F, Fut>(
     thread_id: &str,
     turn_id: &str,
@@ -78,6 +101,26 @@ where
     }
     items.reverse();
     Ok(items)
+}
+
+/// Replaces a completed turn's delivered items only with a backfill holding an agent message: an
+/// incomplete suffix must neither displace a delivered answer nor let a plan stand in for it.
+pub(crate) fn apply_turn_backfill(turn: &mut Turn, backfill: Result<Vec<ThreadItem>, String>) {
+    let turn_id = turn.id.as_str();
+    match backfill {
+        Ok(items)
+            if items
+                .iter()
+                .any(|item| matches!(item, ThreadItem::AgentMessage { .. })) =>
+        {
+            turn.items = items;
+        }
+        Ok(_) => warn!(
+            %turn_id,
+            "no final agent message among the newest backfilled turn items; keeping the delivered items"
+        ),
+        Err(err) => warn!(%turn_id, "failed to backfill turn items for turn completion: {err}"),
+    }
 }
 
 #[cfg(test)]

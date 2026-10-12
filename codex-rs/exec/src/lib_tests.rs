@@ -25,11 +25,11 @@ fn test_tracing_subscriber() -> impl tracing::Subscriber + Send + Sync {
 }
 
 #[derive(Clone)]
-struct TestLogWriter {
-    buffer: Arc<Mutex<Vec<u8>>>,
+pub(crate) struct TestLogWriter {
+    pub(crate) buffer: Arc<Mutex<Vec<u8>>>,
 }
 
-struct TestLogSink {
+pub(crate) struct TestLogSink {
     buffer: Arc<Mutex<Vec<u8>>>,
 }
 
@@ -833,7 +833,7 @@ fn sample_thread_start_response() -> ThreadStartResponse {
     }
 }
 
-fn sample_stateful_run() -> codex_app_server_protocol::StatefulRun {
+pub(crate) fn sample_stateful_run() -> codex_app_server_protocol::StatefulRun {
     codex_app_server_protocol::StatefulRun {
         id: "run-1".to_string(),
         project_id: "project-1".to_string(),
