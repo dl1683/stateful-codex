@@ -2,11 +2,12 @@
 //! with the ready outcome block ends its run as Answered (never Completed), with the exact
 //! answer and an explicit unverified basis; anything that is not a genuine, ready final
 //! answer keeps the ordinary route.
-//!
-//! The same harness witnesses the deliverable diagnostic: a status-only final reply bound to
-//! the turn's run warns once, never retries and never changes the run, the turn status or the
-//! committed outcome; it quotes this turn's recorded result only while the run is unchanged.
 
+use std::sync::Mutex;
+use std::sync::PoisonError;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -14,7 +15,6 @@ use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::JSONRPCMessage;
-use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::ProjectCreateParams;
 use codex_app_server_protocol::ProjectCreateResponse;
 use codex_app_server_protocol::ProjectRoot;
@@ -38,6 +38,7 @@ use codex_app_server_protocol::UserInput;
 use codex_app_server_protocol::WarningNotification;
 use codex_features::Feature;
 use codex_state::SqliteConfig;
+use codex_stateful_runtime as runtime;
 use codex_stateful_runtime::ANSWERED_UNVERIFIED_BASIS;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -92,18 +93,14 @@ struct Harness {
     thread_id: String,
 }
 
+/// The admitted acceptance check runs outside the OS sandbox, which is not the subject here.
 async fn harness() -> Result<Harness> {
-    harness_in("read-only").await
-}
-
-/// A harness under `sandbox_mode`; a completion's acceptance check runs a shell command.
-async fn harness_in(sandbox_mode: &str) -> Result<Harness> {
     let responses_server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let project_root = TempDir::new()?;
     super::stateful_acceptance_support::write_acceptance_files(project_root.path())?;
     MockResponsesConfig::new(&responses_server.uri())
-        .with_sandbox_mode(sandbox_mode)
+        .with_sandbox_mode("danger-full-access")
         .enable_feature(Feature::Sqlite)
         .write(codex_home.path())?;
     let mut server = TestAppServer::builder()
@@ -206,7 +203,7 @@ impl Harness {
     }
 
     async fn status(&mut self, run_id: &str) -> Result<StatefulRunStatus> {
-        Ok(self.read(run_id).await?.run.expect("run").status)
+        Ok(self.run(run_id).await?.status)
     }
 
     /// Holds the run store's write lock, so a finalizer waits at its terminal transaction.
@@ -402,501 +399,200 @@ const STATUS_ONLY: &str =
     "This final reply may omit the deliverable: it contains only a status line.";
 const STATUS_LINE: &str = "Task completed.";
 const FALLBACK_METADATA_WARNING: &str = "Model metadata for `mock-model` not found.";
-/// Runs the acceptance check unsandboxed, so the commit routes are witnessed on every OS.
-const CHECK_SANDBOX: &str = "danger-full-access";
+const COLLABORATIVE: StatefulWorkflowMode = StatefulWorkflowMode::Collaborative;
+const UNREAD: &[&str] = &["The source was unread."];
 
-fn tool_call(call_id: &str, tool: &str, arguments: serde_json::Value) -> String {
+/// A model call updating a new run (revision 1): completed with `open_issues`, or blocked.
+fn run_update(call_id: &str, status: &str, open_issues: &[&str]) -> String {
+    let mut arguments =
+        serde_json::json!({"expectedRevision": 1, "status": status, "result": ANSWER});
+    if status == "completed" {
+        arguments["openIssues"] = serde_json::json!(open_issues);
+        arguments["completionDisposition"] = serde_json::json!("noReusableLearning");
+    }
+    let arguments = arguments.to_string();
     responses::sse(vec![
         responses::ev_response_created(call_id),
-        responses::ev_function_call(call_id, tool, &arguments.to_string()),
+        responses::ev_function_call(call_id, "stateful_run_update", &arguments),
         responses::ev_completed(call_id),
     ])
 }
 
-fn complete(call_id: &str, revision: u64, open_issues: &[&str]) -> String {
-    tool_call(
-        call_id,
-        "stateful_run_update",
-        serde_json::json!({
-            "expectedRevision": revision,
-            "status": "completed",
-            "openIssues": open_issues,
-            "completionDisposition": "noReusableLearning",
-            "result": ANSWER,
-        }),
-    )
-}
-
-fn block(call_id: &str, revision: u64) -> String {
-    tool_call(
-        call_id,
-        "stateful_run_update",
-        serde_json::json!({
-            "expectedRevision": revision,
-            "status": "blocked",
-            "result": "Blocked: the parser source is missing.",
-        }),
-    )
-}
-
-/// The match variant, derived from the durable run by the frozen budget rule.
-fn matched_warning(reply: &str, run: &StatefulRun) -> String {
-    let status = serde_json::to_value(run.status).expect("status serializes");
-    let prefix = format!(
-        "This final reply may omit the deliverable: it contains only a status line (\"{reply}\"). This turn's recorded result ({}, revision {}): ",
-        status.as_str().expect("status name"),
-        run.revision
-    );
-    let result = run.result.clone().unwrap_or_default();
-    if prefix.len() + result.len() <= 1_200 {
-        return format!("{prefix}{result}");
+/// Serves `bodies` in order; the response at `gate` waits until the returned sender fires.
+async fn mount_gated(
+    server: &wiremock::MockServer,
+    bodies: Vec<String>,
+    gate: usize,
+) -> std::sync::mpsc::Sender<()> {
+    struct Gated(Vec<String>, usize, AtomicUsize, Mutex<mpsc::Receiver<()>>);
+    impl wiremock::Respond for Gated {
+        fn respond(&self, _: &wiremock::Request) -> wiremock::ResponseTemplate {
+            let call = self.2.fetch_add(1, Ordering::SeqCst);
+            if call == self.1 {
+                let _ = self.3.lock().unwrap_or_else(PoisonError::into_inner).recv();
+            }
+            responses::sse_response(self.0[call].clone())
+        }
     }
-    let total = result.len();
-    let reserved = format!(" [shortened at {total} of {total} bytes]").len();
-    let cut = result.floor_char_boundary(1_200 - prefix.len() - reserved);
-    format!(
-        "{prefix}{} [shortened at {cut} of {total} bytes]",
-        &result[..cut]
-    )
+    let (release, open) = mpsc::channel();
+    let gated = Gated(bodies, gate, AtomicUsize::new(0), Mutex::new(open));
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path_regex(".*/responses$"))
+        .respond_with(gated)
+        .mount(server)
+        .await;
+    release
 }
 
-/// Every notification of one turn, up to and including its `turn/completed`.
-struct TurnNotifications {
-    completed: TurnCompletedNotification,
-    notifications: Vec<JSONRPCNotification>,
-}
-
-impl TurnNotifications {
-    fn warnings(&self) -> Vec<String> {
-        self.notifications
-            .iter()
-            .filter(|notification| notification.method == "warning")
-            .map(|notification| {
-                serde_json::from_value::<WarningNotification>(
-                    notification.params.clone().expect("warning params"),
-                )
-                .expect("warning notification")
-                .message
-            })
-            // The mock model's fallback-metadata notice is per turn and unrelated.
-            .filter(|message| !message.starts_with(FALLBACK_METADATA_WARNING))
-            .collect()
-    }
-
-    /// The revision of the last run update this turn emitted, if any.
-    fn last_run_update_revision(&self) -> Option<u64> {
-        self.notifications
-            .iter()
-            .filter(|notification| notification.method == "statefulRun/updated")
-            .filter_map(|notification| notification.params.as_ref()?.get("revision")?.as_u64())
-            .next_back()
-    }
-}
+type Outcome = (TurnStatus, Vec<String>, usize);
 
 impl Harness {
-    async fn seed_plan(&self, run_id: &str) -> Result<()> {
-        super::stateful_acceptance_support::seed_admitted_plan(self.codex_home.path(), run_id, &[])
-            .await
+    async fn run(&mut self, run_id: &str) -> Result<StatefulRun> {
+        Ok(self.read(run_id).await?.run.expect("run"))
     }
 
-    async fn store(&self) -> Result<codex_stateful_runtime::StatefulRunStore> {
-        Ok(
-            codex_stateful_runtime::StatefulRunStore::open(&SqliteConfig::new_for_testing(
-                self.codex_home.path().abs(),
-            ))
-            .await?,
-        )
-    }
-
-    /// A second writer moves the run to `status` with a new result.
-    async fn write_run_elsewhere(
-        &self,
-        run_id: &str,
-        status: codex_stateful_runtime::StatefulRunStatus,
-    ) -> Result<()> {
-        let store = self.store().await?;
-        let run_id = codex_stateful_runtime::StatefulRunId::parse(run_id)?;
-        let current = store.get_run(&run_id).await?.expect("run");
-        store
-            .update_run(
-                &run_id,
-                codex_stateful_runtime::StatefulRunUpdate {
-                    expected_revision: current.revision,
-                    status,
-                    strategy: current.strategy,
-                    result: Some("Changed by another writer.".to_string()),
-                },
-            )
-            .await?;
+    /// Another writer blocks the run with a new result, as a second client would.
+    async fn block_elsewhere(&self, run_id: &str) -> Result<()> {
+        let sqlite = SqliteConfig::new_for_testing(self.codex_home.path().abs());
+        let store = runtime::StatefulRunStore::open(&sqlite).await?;
+        let id = runtime::StatefulRunId::parse(run_id)?;
+        let current = store.get_run(&id).await?.expect("run");
+        let update = runtime::StatefulRunUpdate {
+            expected_revision: current.revision,
+            status: runtime::StatefulRunStatus::Blocked,
+            strategy: current.strategy,
+            result: Some("Changed by another writer.".to_string()),
+        };
+        store.update_run(&id, update).await?;
         Ok(())
     }
 
-    /// Reads every notification up to the `turn/completed` of `turn_id`, or of the next turn
-    /// other than `turn_id` when `next` is set.
-    async fn collect(&mut self, turn_id: &str, next: bool) -> Result<TurnNotifications> {
-        let mut notifications = Vec::new();
+    /// Polls until the run reaches `status`, returning that durable snapshot.
+    async fn committed(&mut self, run_id: &str, status: StatefulRunStatus) -> Result<StatefulRun> {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let run = self.run(run_id).await?;
+                if run.status == status {
+                    return Ok(run);
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await?
+    }
+
+    /// Collects turn `turn_id` (or, when `next`, the next other turn) up to its completion.
+    async fn outcome(&mut self, turn_id: &str, next: bool) -> Result<Outcome> {
+        let mut warnings = Vec::new();
         loop {
             let JSONRPCMessage::Notification(notification) =
                 self.server.read_next_message().await?
             else {
                 continue;
             };
-            let completed = (notification.method == "turn/completed")
-                .then(|| {
-                    serde_json::from_value::<TurnCompletedNotification>(
-                        notification.params.clone()?,
-                    )
-                    .ok()
-                })
-                .flatten()
-                .filter(|completed| (completed.turn.id == turn_id) != next);
-            notifications.push(notification);
-            if let Some(completed) = completed {
-                return Ok(TurnNotifications {
-                    completed,
-                    notifications,
-                });
+            let params = notification.params.unwrap_or_default();
+            if notification.method == "warning" {
+                let message = serde_json::from_value::<WarningNotification>(params)?.message;
+                if !message.starts_with(FALLBACK_METADATA_WARNING) {
+                    warnings.push(message);
+                }
+            } else if notification.method == "turn/completed" {
+                let completed = serde_json::from_value::<TurnCompletedNotification>(params)?;
+                if (completed.turn.id == turn_id) != next {
+                    let requests = self.responses_server.received_requests().await;
+                    let requests = requests.unwrap_or_default().into_iter();
+                    let requests = requests.filter(|call| call.url.path().ends_with("/responses"));
+                    return Ok((completed.turn.status, warnings, requests.count()));
+                }
             }
         }
     }
-
-    async fn collected_turn(&mut self) -> Result<TurnNotifications> {
-        let turn_id = self.start_turn().await?;
-        self.collect(&turn_id, /*next*/ false).await
-    }
 }
 
-/// A status-only final reply after this turn's own commit warns once with the match variant
-/// on every commit route: ordinary completion (R1), an explicit blocked update (R2), a
-/// completion that declares open issues (R3), and repeated refused completions that the host
-/// blocks (R4). Nothing retries and the committed run is unchanged by finalization.
+/// W1/C1: after this turn's own commit (R1-R4), a status-only final warns once with the match
+/// variant and a real answer does not; the run read at its commit is unchanged afterwards.
 #[tokio::test]
 async fn status_only_after_commit_warns_per_route() -> Result<()> {
-    enum Route {
-        Completion,
-        BlockedUpdate,
-        OpenIssues,
-        RefusedCompletions,
-    }
-    for route in [
-        Route::Completion,
-        Route::BlockedUpdate,
-        Route::OpenIssues,
-        Route::RefusedCompletions,
+    for (name, status, last) in [
+        ("R1", StatefulRunStatus::Completed, STATUS_LINE),
+        ("C1", StatefulRunStatus::Completed, "42"),
+        ("R2", StatefulRunStatus::Blocked, STATUS_LINE),
+        ("R3", StatefulRunStatus::Blocked, STATUS_LINE),
+        ("R4", StatefulRunStatus::Blocked, STATUS_LINE),
     ] {
-        let mut harness = harness_in(CHECK_SANDBOX).await?;
-        let run = harness
-            .start_run(StatefulWorkflowMode::Collaborative)
-            .await?;
-        let revision = run.revision;
-        let (name, status, mut script) = match route {
-            Route::Completion => {
-                harness.seed_plan(&run.id).await?;
-                (
-                    "R1",
-                    StatefulRunStatus::Completed,
-                    vec![
-                        super::stateful_acceptance_support::run_check(
-                            "check",
-                            harness.project_root.path(),
-                        ),
-                        complete("complete", revision, &[]),
-                    ],
-                )
-            }
-            Route::BlockedUpdate => (
-                "R2",
-                StatefulRunStatus::Blocked,
-                vec![block("block", revision)],
-            ),
-            Route::OpenIssues => (
-                "R3",
-                StatefulRunStatus::Blocked,
-                vec![complete(
-                    "complete",
-                    revision,
-                    &["The parser source was not read."],
-                )],
-            ),
-            Route::RefusedCompletions => (
-                "R4",
-                StatefulRunStatus::Blocked,
-                (1..=3)
-                    .map(|attempt| complete(&format!("complete-{attempt}"), revision, &[]))
-                    .collect(),
-            ),
+        let mut harness = harness().await?;
+        let run = harness.start_run(COLLABORATIVE).await?;
+        let home = harness.codex_home.path();
+        super::stateful_acceptance_support::seed_admitted_plan(home, &run.id, &[]).await?;
+        let root = harness.project_root.path();
+        let mut script = match name {
+            "R1" | "C1" => vec![
+                super::stateful_acceptance_support::run_check("check", root),
+                run_update("complete", "completed", &[]),
+            ],
+            "R2" => vec![run_update("block", "blocked", &[])],
+            "R3" => vec![run_update("complete", "completed", UNREAD)],
+            _ => (1..=3)
+                .map(|attempt| run_update(&format!("complete-{attempt}"), "completed", &[]))
+                .collect(),
         };
-        script.push(message("final", STATUS_LINE));
+        script.push(message("final", last));
         let scripted = script.len();
-        let mock = responses::mount_sse_sequence(&harness.responses_server, script).await;
+        let release = mount_gated(&harness.responses_server, script, scripted - 1).await;
+        let turn_id = harness.start_turn().await?;
+        let snapshot = harness.committed(&run.id, status).await?;
+        release.send(())?;
 
-        let turn = harness.collected_turn().await?;
+        let turn = harness.outcome(&turn_id, /*next*/ false).await?;
 
-        let durable = harness.read(&run.id).await?.run.expect("run");
+        let status = serde_json::to_value(snapshot.status)?;
+        let warnings: Vec<_> = (last == STATUS_LINE).then(|| format!(
+            "This final reply may omit the deliverable: it contains only a status line (\"{STATUS_LINE}\"). This turn's recorded result ({}, revision {}): {}",
+            status.as_str().expect("status name"),
+            snapshot.revision,
+            snapshot.result.as_deref().unwrap_or_default()
+        )).into_iter().collect();
         assert_eq!(
-            (
-                turn.completed.turn.status.clone(),
-                durable.status,
-                turn.last_run_update_revision(),
-                turn.warnings(),
-                mock.requests().len(),
-            ),
-            (
-                TurnStatus::Completed,
-                status,
-                Some(durable.revision),
-                vec![matched_warning(STATUS_LINE, &durable)],
-                scripted,
-            ),
+            (turn, harness.run(&run.id).await?),
+            ((TurnStatus::Completed, warnings, scripted), snapshot),
             "{name}"
         );
     }
     Ok(())
 }
 
-/// A running Autonomous turn that ends with a status line and no Stateful call warns with
-/// the exact base sentence and quotes no result; the run stays running and the host's
-/// ordinary continuation still follows.
+/// W2/C2: a running turn with no commit warns with the base sentence only for a status line;
+/// finalization writes nothing (the held continuation's claim is the only change).
 #[tokio::test]
-async fn running_continuation_status_only_warns_without_result() -> Result<()> {
-    let mut harness = harness().await?;
-    let run = harness.start_run(StatefulWorkflowMode::Autonomous).await?;
-    let mock = responses::mount_sse_sequence(
-        &harness.responses_server,
-        vec![message("r1", STATUS_LINE), message("r2", ANSWER)],
-    )
-    .await;
-
-    let turn = harness.collected_turn().await?;
-    let continuation = harness
-        .collect(&turn.completed.turn.id, /*next*/ true)
-        .await?;
-
-    // The continuation proves the run was still running after the status-only turn; that
-    // turn's finalization wrote nothing to the run.
-    assert_eq!(
-        (
-            turn.completed.turn.status.clone(),
-            turn.warnings(),
-            // Only the continuation claim may report the run, at its unchanged revision.
-            turn.last_run_update_revision()
-                .filter(|revision| *revision != run.revision),
-            continuation.warnings(),
-            harness.read(&run.id).await?.host_answer,
-            mock.requests().len(),
-        ),
-        (
-            TurnStatus::Completed,
-            vec![STATUS_ONLY.to_string()],
-            None,
-            Vec::<String>::new(),
-            None,
-            2,
-        )
-    );
-    Ok(())
-}
-
-/// An accepted answer block whose body is only a status line still ends the run answered
-/// (unchanged) and warns with the base sentence.
-#[tokio::test]
-async fn answered_status_only_body_warns_and_stays_answered() -> Result<()> {
-    let mut harness = harness().await?;
-    let run = harness.start_run(StatefulWorkflowMode::Autonomous).await?;
-    let mock = responses::mount_sse_once(
-        &harness.responses_server,
-        message("r1", &format!("Done.\n\n{BLOCK}")),
-    )
-    .await;
-
-    let turn = harness.collected_turn().await?;
-
-    let read = harness.read(&run.id).await?;
-    assert_eq!(
-        (
-            turn.completed.turn.status.clone(),
-            read.run.expect("run").status,
-            read.host_answer.map(|answer| answer.turn_id),
-            turn.warnings(),
-            mock.requests().len(),
-        ),
-        (
-            TurnStatus::Completed,
-            StatefulRunStatus::Answered,
-            Some(turn.completed.turn.id.clone()),
-            vec![STATUS_ONLY.to_string()],
-            1,
-        )
-    );
-    Ok(())
-}
-
-/// A run that was already blocked when the turn started, with no commit in the turn, gets
-/// the base sentence: its earlier result is never attributed to this turn.
-#[tokio::test]
-async fn already_blocked_at_start_quotes_no_result() -> Result<()> {
-    let mut harness = harness().await?;
-    let run = harness
-        .start_run(StatefulWorkflowMode::Collaborative)
-        .await?;
-    harness
-        .write_run_elsewhere(&run.id, codex_stateful_runtime::StatefulRunStatus::Blocked)
-        .await?;
-    let before = harness.read(&run.id).await?.run.expect("run");
-    let mock = responses::mount_sse_once(&harness.responses_server, message("r1", "Done.")).await;
-
-    let turn = harness.collected_turn().await?;
-
-    assert_eq!(
-        (
-            turn.completed.turn.status.clone(),
-            harness.read(&run.id).await?.run.expect("run"),
-            turn.warnings(),
-            mock.requests().len(),
-        ),
-        (
-            TurnStatus::Completed,
-            before,
-            vec![STATUS_ONLY.to_string()],
-            1,
-        )
-    );
-    Ok(())
-}
-
-/// When another writer changes the run after this turn's commit and before finalization,
-/// the warning names the turn's own commit but quotes no result.
-#[tokio::test]
-async fn revision_change_after_commit_omits_result() -> Result<()> {
-    let mut harness = harness().await?;
-    let run = harness
-        .start_run(StatefulWorkflowMode::Collaborative)
-        .await?;
-    let mock = responses::mount_response_sequence(
-        &harness.responses_server,
-        vec![
-            responses::sse_response(block("block", run.revision)),
-            held(message("final", STATUS_LINE)),
-        ],
-    )
-    .await;
-    let turn_id = harness.start_turn().await?;
-    // The final reply is held while the turn's commit lands; then another writer moves on.
-    let store = harness.store().await?;
-    let run_id = codex_stateful_runtime::StatefulRunId::parse(run.id.as_str())?;
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while store
-            .get_run(&run_id)
-            .await
-            .ok()
-            .flatten()
-            .is_none_or(|current| {
-                current.status != codex_stateful_runtime::StatefulRunStatus::Blocked
-            })
-        {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await?;
-    let committed = store.get_run(&run_id).await?.expect("run").revision;
-    harness
-        .write_run_elsewhere(&run.id, codex_stateful_runtime::StatefulRunStatus::Blocked)
-        .await?;
-
-    let turn = harness.collect(&turn_id, /*next*/ false).await?;
-
-    let durable = harness.read(&run.id).await?.run.expect("run");
-    assert_eq!(
-        (
-            turn.completed.turn.status.clone(),
-            durable.revision,
-            durable.result.as_deref(),
-            turn.warnings(),
-            mock.requests().len(),
-        ),
-        (
-            TurnStatus::Completed,
-            committed + 1,
-            Some("Changed by another writer."),
-            vec![format!(
-                "This final reply may omit the deliverable: it contains only a status line. This turn recorded the run as blocked at revision {committed}; it has changed since, so its result is not quoted."
-            )],
-            2,
-        )
-    );
-    Ok(())
-}
-
-/// A substantive final reply after this turn's completion never warns.
-#[tokio::test]
-async fn substantive_final_after_commit_does_not_warn() -> Result<()> {
-    let mut harness = harness_in(CHECK_SANDBOX).await?;
-    let run = harness
-        .start_run(StatefulWorkflowMode::Collaborative)
-        .await?;
-    harness.seed_plan(&run.id).await?;
-    let mock = responses::mount_sse_sequence(
-        &harness.responses_server,
-        vec![
-            super::stateful_acceptance_support::run_check("check", harness.project_root.path()),
-            complete("complete", run.revision, &[]),
-            message("final", "42"),
-        ],
-    )
-    .await;
-
-    let turn = harness.collected_turn().await?;
-
-    assert_eq!(
-        (
-            turn.completed.turn.status.clone(),
-            harness.status(&run.id).await?,
-            turn.warnings(),
-            mock.requests().len(),
-        ),
-        (
-            TurnStatus::Completed,
-            StatefulRunStatus::Completed,
-            Vec::<String>::new(),
-            3,
-        )
-    );
-    Ok(())
-}
-
-/// A running turn whose final reply is substantive, or whose last message is commentary,
-/// never warns.
-#[tokio::test]
-async fn running_substantive_and_commentary_do_not_warn() -> Result<()> {
-    for last in [
-        message("r1", "The bug was an off-by-one; fixed."),
-        commentary("r1", STATUS_LINE),
+async fn running_turns_warn_only_for_status_lines() -> Result<()> {
+    for (last, warnings) in [
+        (message("r1", STATUS_LINE), vec![STATUS_ONLY.to_string()]),
+        (message("r1", "Fixed an off-by-one."), Vec::new()),
+        (commentary("r1", STATUS_LINE), Vec::new()),
     ] {
         let mut harness = harness().await?;
-        harness.start_run(StatefulWorkflowMode::Autonomous).await?;
-        let mock = responses::mount_sse_sequence(
-            &harness.responses_server,
-            vec![last.clone(), message("r2", ANSWER)],
-        )
-        .await;
-
-        let turn = harness.collected_turn().await?;
-        let continuation = harness
-            .collect(&turn.completed.turn.id, /*next*/ true)
-            .await?;
+        let started = harness.start_run(StatefulWorkflowMode::Autonomous).await?;
+        let script = vec![last.clone(), message("r2", ANSWER)];
+        let release = mount_gated(&harness.responses_server, script, /*gate*/ 1).await;
+        let turn_id = harness.start_turn().await?;
+        let turn = harness.outcome(&turn_id, /*next*/ false).await?;
+        let read = harness.read(&started.id).await?;
+        let run = read.run.expect("run");
+        release.send(())?;
+        let continuation = harness.outcome(&turn_id, /*next*/ true).await?;
 
         assert_eq!(
             (
-                turn.completed.turn.status.clone(),
-                turn.warnings(),
-                continuation.warnings(),
-                mock.requests().len(),
+                turn,
+                (run.status, run.revision, run.continuations_used, run.result),
+                read.host_answer,
+                continuation,
             ),
             (
-                TurnStatus::Completed,
-                Vec::<String>::new(),
-                Vec::<String>::new(),
-                2
+                (TurnStatus::Completed, warnings, 1),
+                (StatefulRunStatus::Running, started.revision + 1, 1, None),
+                None,
+                (TurnStatus::Completed, Vec::new(), 2),
             ),
             "{last}"
         );
@@ -904,27 +600,76 @@ async fn running_substantive_and_commentary_do_not_warn() -> Result<()> {
     Ok(())
 }
 
-/// A real answer with a valid outcome block ends the run answered and never warns.
+/// W3/C3: an accepted block ends the run answered with its exact answer; only "Done." warns.
 #[tokio::test]
-async fn answered_substantive_body_does_not_warn() -> Result<()> {
+async fn answered_bodies_warn_only_when_status_only() -> Result<()> {
+    for (body, warnings) in [
+        ("Done.", vec![STATUS_ONLY.to_string()]),
+        (ANSWER, Vec::new()),
+    ] {
+        let mut harness = harness().await?;
+        let run = harness.start_run(StatefulWorkflowMode::Autonomous).await?;
+        let answer = format!("{body}\n\n{BLOCK}");
+        responses::mount_sse_once(&harness.responses_server, message("r1", &answer)).await;
+        let turn_id = harness.start_turn().await?;
+
+        let turn = harness.outcome(&turn_id, /*next*/ false).await?;
+
+        let read = harness.read(&run.id).await?;
+        let durable = read.run.expect("run");
+        let host_answer = read.host_answer.expect("answer recorded");
+        let expected_answer = codex_app_server_protocol::StatefulHostAnswer {
+            turn_id,
+            answer,
+            basis: ANSWERED_UNVERIFIED_BASIS.to_string(),
+            committed_at: host_answer.committed_at,
+        };
+        assert_eq!(
+            (turn, durable.status, durable.result, host_answer),
+            (
+                (TurnStatus::Completed, warnings, 1),
+                StatefulRunStatus::Answered,
+                Some(body.to_string()),
+                expected_answer,
+            ),
+            "{body}"
+        );
+    }
+    Ok(())
+}
+
+/// W5: a write after this turn's commit hides its result; W4: an inherited block quotes none.
+#[tokio::test]
+async fn changed_or_inherited_commits_quote_no_result() -> Result<()> {
     let mut harness = harness().await?;
-    let run = harness.start_run(StatefulWorkflowMode::Autonomous).await?;
-    let mock = responses::mount_sse_once(&harness.responses_server, message("r1", &ready())).await;
+    let run = harness.start_run(COLLABORATIVE).await?;
+    let script = vec![
+        run_update("block", "blocked", &[]),
+        message("final", STATUS_LINE),
+        message("next", "Done."),
+    ];
+    let release = mount_gated(&harness.responses_server, script, /*gate*/ 1).await;
+    let turn_id = harness.start_turn().await?;
+    let committed = harness
+        .committed(&run.id, StatefulRunStatus::Blocked)
+        .await?;
+    harness.block_elsewhere(&run.id).await?;
+    let changed = harness.run(&run.id).await?;
+    release.send(())?;
+    let changed_turn = harness.outcome(&turn_id, /*next*/ false).await?;
+    let next_id = harness.start_turn().await?;
+    let next_turn = harness.outcome(&next_id, /*next*/ false).await?;
 
-    let turn = harness.collected_turn().await?;
-
+    let not_quoted = format!(
+        "This final reply may omit the deliverable: it contains only a status line. This turn recorded the run as blocked at revision {}; it has changed since, so its result is not quoted.",
+        committed.revision
+    );
     assert_eq!(
+        (changed_turn, next_turn, harness.run(&run.id).await?),
         (
-            turn.completed.turn.status.clone(),
-            harness.status(&run.id).await?,
-            turn.warnings(),
-            mock.requests().len(),
-        ),
-        (
-            TurnStatus::Completed,
-            StatefulRunStatus::Answered,
-            Vec::<String>::new(),
-            1,
+            (TurnStatus::Completed, vec![not_quoted], 2),
+            (TurnStatus::Completed, vec![STATUS_ONLY.to_string()], 3),
+            changed,
         )
     );
     Ok(())
