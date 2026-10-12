@@ -341,6 +341,16 @@ fn validate_issues(issues: &[String]) -> Result<(), StatefulRunStoreError> {
             "each open issue must be non-empty, trimmed, at most {MAX_ISSUE_BYTES} bytes, and contain no NUL"
         )));
     }
+    // A prefix-shaped raw issue would be stored double-prefixed and make its resolution
+    // ambiguous with the issue it quotes, so it is refused.
+    if issues
+        .iter()
+        .any(|issue| issue.starts_with(RETAINED_ISSUE_PREFIX))
+    {
+        return Err(refused(&format!(
+            "an open issue may not start with \"{RETAINED_ISSUE_PREFIX}\""
+        )));
+    }
     Ok(())
 }
 

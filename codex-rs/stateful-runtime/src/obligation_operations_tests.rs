@@ -237,7 +237,7 @@ async fn a_resolution_replay_never_resurrects_the_issue() {
 }
 
 /// B6: bounds hold on the final packet, after carry-forward and resolution history; an
-/// overflow refuses the whole call and the latest packet stays unchanged.
+/// overflow refuses the whole call and no obligation row of the run changes.
 #[tokio::test]
 async fn an_augmented_overflow_refuses_the_whole_call() {
     let home = TempDir::new().expect("tempdir");
@@ -251,14 +251,14 @@ async fn an_augmented_overflow_refuses_the_whole_call() {
     update(&store, &full, "thirty", thirty, &[])
         .await
         .expect("30 blockers");
-    let before = latest_packet(&store, &full).await;
+    let rows = all_obligations(&store, &full).await;
     assert_eq!(
         retain(&store, &full, "call-3", &["a", "b", "c"])
             .await
             .map_err(|error| error.to_string()),
         Err(format!("nothing changed: {OVERFLOW}"))
     );
-    assert_eq!(latest_packet(&store, &full).await, before);
+    assert_eq!(all_obligations(&store, &full).await, rows);
     // Exactly at the bound is accepted.
     assert_eq!(
         retain(&store, &full, "call-2", &["a", "b"])
@@ -272,9 +272,10 @@ async fn an_augmented_overflow_refuses_the_whole_call() {
     );
 
     let history = new_run(&store, "full-changed").await;
-    let retain_row = retain(&store, &history, "call-pq", &["p", "q"])
+    retain(&store, &history, "call-pq", &["p", "q"])
         .await
         .expect("retain p q");
+    let rows = all_obligations(&store, &history).await;
     let crowded = ObligationPacket {
         changed: (0..31).map(|index| format!("change {index}")).collect(),
         ..learning("both fixed")
@@ -285,40 +286,127 @@ async fn an_augmented_overflow_refuses_the_whole_call() {
             .map_err(|error| error.to_string()),
         Err(format!("nothing changed: {OVERFLOW}"))
     );
-    assert_eq!(
-        latest_packet(&store, &history).await,
-        retain_row.value.packet
-    );
+    assert_eq!(all_obligations(&store, &history).await, rows);
 }
 
-/// B7: a Retain and a resolving Update racing on one run from two pools both commit,
-/// serialized; the final packet keeps y and drops x in either order.
+fn resolved_with_y() -> ObligationPacket {
+    ObligationPacket {
+        changed: strings(&["Resolved: x"]),
+        blockers: vec![retained("y")],
+        ..learning("x fixed")
+    }
+}
+
+/// B7 (orders): a Retain of y and an Update resolving x give the same complete packet in
+/// either order.
 #[tokio::test]
-async fn retention_and_resolution_on_two_pools_serialize() {
+async fn retention_and_resolution_commute() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    for retain_first in [true, false] {
+        let run_id = new_run(&store, &format!("run-{retain_first}")).await;
+        retain(&store, &run_id, "call-x", &["x"]).await.expect("x");
+        if retain_first {
+            retain(&store, &run_id, "call-y", &["y"]).await.expect("y");
+        }
+        update(&store, &run_id, "resolve-x", learning("x fixed"), &["x"])
+            .await
+            .expect("x resolved");
+        if !retain_first {
+            retain(&store, &run_id, "call-y", &["y"]).await.expect("y");
+        }
+        assert_eq!(latest_packet(&store, &run_id).await, resolved_with_y());
+        assert_eq!(all_obligations(&store, &run_id).await.len(), 3);
+    }
+}
+
+/// B7 (contention): while a third pool holds the write lock, a Retain and a resolving
+/// Update are both started on two other pools, so both wait on the lock; once it is
+/// released they commit serialized, each reading the packet the other wrote, and neither
+/// write is lost.
+#[tokio::test]
+async fn contended_retention_and_resolution_serialize_on_one_connection() {
     let home = TempDir::new().expect("tempdir");
     let first = open_store(&home).await;
     let second = open_store(&home).await;
-    for (index, retain_first) in [(0, true), (1, false), (2, true)] {
-        let run_id = new_run(&first, &format!("run-{index}")).await;
-        retain(&first, &run_id, "call-x", &["x"]).await.expect("x");
-        let retain_y = retain(&first, &run_id, "call-y", &["y"]);
-        let resolve_x = update(&second, &run_id, "resolve-x", learning("x fixed"), &["x"]);
-        let (retained_y, resolved_x) = if index == 2 {
-            tokio::join!(retain_y, resolve_x)
-        } else if retain_first {
-            let retained_y = retain_y.await;
-            (retained_y, resolve_x.await)
-        } else {
-            let resolved_x = resolve_x.await;
-            (retain_y.await, resolved_x)
-        };
-        let (retained_y, resolved_x) = (retained_y.expect("y"), resolved_x.expect("x resolved"));
-        assert_ne!(retained_y.sequence, resolved_x.sequence);
-        let latest = latest_packet(&second, &run_id).await;
-        assert_eq!(latest.blockers, vec![retained("y")], "order {index}");
-        assert_eq!(latest.changed, strings(&["Resolved: x"]), "order {index}");
-        assert_eq!(all_obligations(&first, &run_id).await.len(), 3);
-    }
+    let holder = open_store(&home).await;
+    let run_id = new_run(&first, "run-1").await;
+    retain(&first, &run_id, "call-x", &["x"]).await.expect("x");
+
+    let lock = holder
+        .pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .expect("write lock held");
+    let retain_y = tokio::spawn({
+        let (store, run_id) = (first.clone(), run_id.clone());
+        async move { retain(&store, &run_id, "call-y", &["y"]).await }
+    });
+    let resolve_x = tokio::spawn({
+        let (store, run_id) = (second.clone(), run_id.clone());
+        async move { update(&store, &run_id, "resolve-x", learning("x fixed"), &["x"]).await }
+    });
+    // Both operations reach the lock and wait (busy timeout 5 s) before it is released.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!retain_y.is_finished() && !resolve_x.is_finished());
+    lock.rollback().await.expect("lock released");
+
+    let retained_y = retain_y.await.expect("task").expect("y");
+    let resolved_x = resolve_x.await.expect("task").expect("x resolved");
+    assert_ne!(retained_y.sequence, resolved_x.sequence);
+    assert_eq!(latest_packet(&first, &run_id).await, resolved_with_y());
+    assert_eq!(all_obligations(&first, &run_id).await.len(), 3);
+}
+
+/// A raw issue shaped like a retained entry is refused whole, so each retained issue has
+/// one identity and both supported resolution spellings (raw and prefixed) name it.
+#[tokio::test]
+async fn a_prefix_shaped_issue_is_refused_and_both_spellings_resolve() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    let run_id = new_run(&store, "run-1").await;
+    let prefixed_x = retained("x");
+    let refused = retain(&store, &run_id, "call-ambiguous", &["x", &prefixed_x]).await;
+    assert!(
+        matches!(
+            refused,
+            Err(StatefulRunStoreError::ObligationOperationRefused(_))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(all_obligations(&store, &run_id).await, Vec::new());
+
+    retain(&store, &run_id, "call-xy", &["x", "y"])
+        .await
+        .expect("x y");
+    let raw = update(&store, &run_id, "resolve-raw", learning("x fixed"), &["x"])
+        .await
+        .expect("raw spelling");
+    assert_eq!(
+        raw.value.packet,
+        ObligationPacket {
+            changed: strings(&["Resolved: x"]),
+            blockers: vec![retained("y")],
+            ..learning("x fixed")
+        }
+    );
+    let prefixed_y = retained("y");
+    let prefixed = update(
+        &store,
+        &run_id,
+        "resolve-prefixed",
+        learning("y fixed"),
+        &[&prefixed_y],
+    )
+    .await
+    .expect("prefixed spelling");
+    assert_eq!(
+        prefixed.value.packet,
+        ObligationPacket {
+            changed: strings(&["Resolved: y"]),
+            ..learning("y fixed")
+        }
+    );
 }
 
 /// B8: narrative "Resolved:" text never erases a retained issue, and only the host may write
