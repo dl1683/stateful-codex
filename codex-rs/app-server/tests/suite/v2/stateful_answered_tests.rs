@@ -653,9 +653,10 @@ async fn answered_bodies_warn_only_when_status_only() -> Result<()> {
     Ok(())
 }
 
-/// W5: a write after this turn's commit hides its result; W4: an inherited block quotes none.
+/// W5: a write after this turn's commit hides its result. The run's next status-only final
+/// gets no second diagnostic: each run warns at most once.
 #[tokio::test]
-async fn changed_or_inherited_commits_quote_no_result() -> Result<()> {
+async fn changed_commit_quotes_no_result_and_the_run_warns_once() -> Result<()> {
     let mut harness = harness().await?;
     let run = harness.start_run(COLLABORATIVE).await?;
     let script = vec![
@@ -683,8 +684,31 @@ async fn changed_or_inherited_commits_quote_no_result() -> Result<()> {
         (changed_turn, next_turn, harness.run(&run.id).await?),
         (
             (TurnStatus::Completed, vec![not_quoted], 2),
-            (TurnStatus::Completed, vec![STATUS_ONLY.to_string()], 3),
+            (TurnStatus::Completed, Vec::new(), 3),
             changed,
+        )
+    );
+    Ok(())
+}
+
+/// W4: a run already blocked when the turn starts, with no commit in the turn, gets the base
+/// sentence and never its earlier result.
+#[tokio::test]
+async fn inherited_block_quotes_no_result() -> Result<()> {
+    let mut harness = harness().await?;
+    let run = harness.start_run(COLLABORATIVE).await?;
+    harness.block_elsewhere(&run.id).await?;
+    let blocked = harness.run(&run.id).await?;
+    responses::mount_sse_once(&harness.responses_server, message("r1", "Done.")).await;
+    let turn_id = harness.start_turn().await?;
+
+    let turn = harness.outcome(&turn_id, /*next*/ false).await?;
+
+    assert_eq!(
+        (turn, harness.run(&run.id).await?),
+        (
+            (TurnStatus::Completed, vec![STATUS_ONLY.to_string()], 1),
+            blocked
         )
     );
     Ok(())

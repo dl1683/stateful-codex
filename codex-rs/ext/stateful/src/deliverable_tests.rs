@@ -47,6 +47,29 @@ fn real_answers_are_never_status_only() {
     assert_eq!(replies.map(is_status_only), [false; 11], "{replies:?}");
 }
 
+/// A run warns once; a different run warns again; the oldest of 65 runs is forgotten.
+#[test]
+fn each_run_warns_once() {
+    let warned = WarnedRuns::default();
+    let run = |id: &str| StatefulRunId::parse(id).expect("run id");
+    let first = [
+        warned.first(&run("run-a")),
+        warned.first(&run("run-a")),
+        warned.first(&run("run-b")),
+    ];
+    for index in 0..64 {
+        warned.first(&run(&format!("run-{index}")));
+    }
+    assert_eq!(
+        (
+            first,
+            warned.first(&run("run-a")),
+            warned.first(&run("run-63"))
+        ),
+        ([true, false, true], true, false)
+    );
+}
+
 /// 20-digit revision; reply cut in `é`; 5 KiB result cut before `😀`; 2 KiB prior warning.
 #[test]
 fn warning_never_exceeds_1200_bytes() {

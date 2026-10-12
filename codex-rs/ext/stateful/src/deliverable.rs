@@ -65,6 +65,25 @@ impl TurnRunCommits {
     }
 }
 
+/// Run ids that already received the diagnostic on this thread; the oldest is evicted first.
+#[derive(Default)]
+pub(crate) struct WarnedRuns(Mutex<VecDeque<StatefulRunId>>);
+
+impl WarnedRuns {
+    /// Whether this is the run's first diagnostic, recording it if so.
+    pub(crate) fn first(&self, run_id: &StatefulRunId) -> bool {
+        let mut runs = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if runs.contains(run_id) {
+            return false;
+        }
+        runs.push_back(run_id.clone());
+        while runs.len() > MAX_TURN_RECEIPTS {
+            runs.pop_front();
+        }
+        true
+    }
+}
+
 /// Whether `text` is only status lines such as "Task completed." or "**Done!** All done.":
 /// every nonempty sentence or line must be a status phrase.
 pub(crate) fn is_status_only(text: &str) -> bool {

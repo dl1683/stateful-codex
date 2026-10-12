@@ -33,6 +33,7 @@ use crate::StatefulExtension;
 use crate::attribution::begin_turn_attribution;
 use crate::attribution::fail_turn_attribution;
 use crate::attribution::finish_turn_attribution;
+use crate::deliverable::WarnedRuns;
 
 /// One host request to continue a claimed Autonomous run on its thread.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -422,10 +423,12 @@ impl TurnLifecycleContributor for StatefulExtension {
                 &input,
             )
             .await;
-            let Some(reply) = status_only else {
+            // At most one diagnostic per run on this thread.
+            let bound_run = &active_turn.run_id;
+            let warned = || input.thread_store.get_or_init(WarnedRuns::default);
+            let Some(reply) = status_only.filter(|_| warned().first(bound_run)) else {
                 return outcome;
             };
-            let bound_run = &active_turn.run_id;
             let check = crate::deliverable::ReceiptCheck::read(store, receipt, bound_run).await;
             crate::deliverable::warn(outcome, reply, &check)
         })
