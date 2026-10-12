@@ -1,11 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-// Report schema 2 renamed the schema-1 metrics `semanticRecall` and
-// `supportedEntryPrecision`. Neither is a semantic or independent precision
-// measure: probe matching is case-insensitive substring matching, and entry
-// support only reads the stored state, verification, freshness and evidence
-// fields of each returned entry.
+// Report schema 2 renamed the schema-1 metrics `semanticRecall`,
+// `supportedConceptRecall` and `supportedEntryPrecision` to
+// `lexicalProbeRecall`, `storedSupportLexicalProbeRecall` and
+// `storedSupportEntryRatio`. None is a semantic or independent precision
+// measure: probe matching is case-insensitive substring matching, and support
+// only reads each returned entry's stored state (active), effective
+// verification (sourceVerified), evidence freshness (current) and nonempty
+// evidence fields.
 const REPORT_SCHEMA_VERSION = 2;
 
 export function scoreProjectState(hits, manifest, { truncated = false } = {}) {
@@ -29,7 +32,7 @@ export function scoreProjectState(hits, manifest, { truncated = false } = {}) {
     concepts.filter((concept) => concept.matched).length,
     concepts.length,
   );
-  const supportedConceptRecall = ratio(
+  const storedSupportLexicalProbeRecall = ratio(
     concepts.filter((concept) => concept.supported).length,
     concepts.length,
   );
@@ -49,14 +52,14 @@ export function scoreProjectState(hits, manifest, { truncated = false } = {}) {
       matched: concepts.filter((concept) => concept.matched).length,
       currentlySupported: concepts.filter((concept) => concept.supported).length,
       lexicalProbeRecall,
-      supportedConceptRecall,
+      storedSupportLexicalProbeRecall,
       probes: concepts,
     },
     forbiddenClaims,
     passed:
       !truncated &&
       lexicalProbeRecall === 1 &&
-      supportedConceptRecall === 1 &&
+      storedSupportLexicalProbeRecall === 1 &&
       storedSupportEntryRatio === 1 &&
       forbiddenClaims.length === 0,
   };

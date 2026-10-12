@@ -345,8 +345,8 @@ continued thread, which is why the longitudinal evaluator above exists.
 
 ### Project-state regression probes
 
-Evaluate a mature project's structured blackboard against a versioned semantic
-manifest through the live gateway:
+Evaluate a mature project's structured blackboard against a versioned lexical
+probe manifest through the live gateway:
 
 ```powershell
 npm run eval:state -- --project <project-id> --gateway http://127.0.0.1:4173 [--manifest PATH]
@@ -355,9 +355,16 @@ npm run eval:state -- --project <project-id> --gateway http://127.0.0.1:4173 [--
 The script's default gateway uses `STATEFUL_CODEX_PORT` or `http://127.0.0.1:4173`,
 matching `npm start`; pass `--gateway` to use a different address.
 The default procurement manifest checks expected decisions, decisive facts,
-contradictions, and open questions. It reports semantic probe recall separately
-from supported-entry precision. A supported entry must be active,
-source-verified, linked to evidence, and current against the indexed source.
+contradictions, and open questions. Report schema 2 (`schemaVersion: 2`)
+reports `lexicalProbeRecall` (probes whose term groups all appear, by
+case-insensitive substring match, in one returned entry of an allowed kind),
+`storedSupportLexicalProbeRecall` (matched probes whose entry also passes the
+stored support predicate), and `storedSupportEntryRatio` (returned entries that
+pass it). The stored support predicate reads each entry's stored fields only:
+state `active`, effective verification `sourceVerified`, evidence freshness
+`current`, and at least one evidence link. Schema-1 reports used the names
+`semanticRecall`, `supportedConceptRecall` and `supportedEntryPrecision` for the
+same quantities.
 The command fails if the 50-entry snapshot is truncated, a probe is missing or
 unsupported, an entry lacks current support, or a prohibited affirmative claim
 appears. These deterministic probes are regression evidence, not a substitute

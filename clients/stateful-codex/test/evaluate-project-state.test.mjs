@@ -37,7 +37,7 @@ test("scores lexical probe recall separately from current evidence support", () 
       matched: 1,
       currentlySupported: 1,
       lexicalProbeRecall: 1,
-      supportedConceptRecall: 1,
+      storedSupportLexicalProbeRecall: 1,
       probes: [
         { name: "decision", matched: true, entryId: "entry-1", supported: true },
       ],
