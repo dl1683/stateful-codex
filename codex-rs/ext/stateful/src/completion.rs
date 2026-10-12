@@ -25,6 +25,10 @@ pub(crate) const MAX_MATERIAL_ROOT_FINDINGS: usize = 8;
 /// and the run world-state packet so the model never sees divergent guidance.
 pub(crate) const REUSABLE_LEARNING_RULE: &str = "Choose the completion disposition by what the run learned, not by whether files changed or the answer is short. Use noReusableLearning for an answer drawn from adequate existing project knowledge, a narrow source citation that adds no reusable understanding, or a trivial answer or cheap-to-recompute inventory. Reading sources can produce reusable learning even when no source files change: when an orientation establishes project purpose, module responsibilities and relationships (not a directory listing), or how to run the tests (stating whether that procedure is documented, executed successfully, or blocked), record the findings worth reusing and complete with durableLearning. Do not create duplicate entries or persist routine inventories merely to qualify for completion.";
 
+/// Shared final-message rule, rendered verbatim by the run world-state packet and the run
+/// update tool's final-answer instructions.
+pub(crate) const DELIVERABLE_RULE: &str = "Your final message to the user must itself contain the deliverable (the answer, the result, or a summary of what changed and where), never only a status line such as \"Task completed\" or \"Run completed\".";
+
 pub(crate) struct CompletionRecord {
     pub(crate) result: String,
     pub(crate) checklist: Vec<Value>,

@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::acceptance_render::AcceptanceView;
 use crate::checkpoint::CHECKPOINT_TOOL_CALLS;
+use crate::completion::DELIVERABLE_RULE;
 use crate::completion::REUSABLE_LEARNING_RULE;
 use crate::limits::MAX_MODEL_ITEM_BYTES;
 use serde_json::json;
@@ -78,6 +79,7 @@ impl RunWorldStateStatus {
         hasher.update(b"codex-stateful-run-v1\0");
         // A changed mode policy must reach runs whose earlier packet is retained in history.
         hash(&mut hasher, COLLABORATIVE_COMPLETION);
+        hash(&mut hasher, DELIVERABLE_RULE);
         hash(&mut hasher, self.project_id());
         match self {
             Self::Available {
@@ -251,6 +253,9 @@ impl RunWorldStateStatus {
                         }
                     },
                 );
+                // Once for every bound run, after the binding obligation, steering and
+                // acceptance segments so it can never crowd them out.
+                line(&mut output, DELIVERABLE_RULE);
                 // Descriptive text comes last so a long goal or strategy can never crowd
                 // out the binding obligation and steering above.
                 let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);

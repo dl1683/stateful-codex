@@ -19,6 +19,7 @@ use serde_json::json;
 use crate::StatefulEvent;
 use crate::StatefulEventSink;
 use crate::completion::CompletionRequest;
+use crate::completion::DELIVERABLE_RULE;
 use crate::completion::MAX_MATERIAL_ROOT_FINDINGS;
 use crate::completion::prepare_completion;
 use crate::services::ProjectIntelligenceServices;
@@ -435,7 +436,7 @@ impl StatefulRunUpdateTool {
             "omittedChecklistItems": omitted_checklist_items,
             "submittedResult": submitted_result,
             "finalAnswerInstruction": (run.status == StatefulRunStatus::Completed).then_some(
-                "Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null."
+                format!("Return submittedResult as the final answer without dropping, weakening, or changing any conclusion, caveat, uncertainty, or blocker. You may improve formatting and exact-source links. Copy opaque evidence identifiers only from finalAnswerChecklist; never reconstruct or abbreviate them from memory. For a Windows drive path, use the exact C:/... Markdown target form and never rewrite it as /C:/.... Use finalAnswerChecklist to confirm that the visible answer preserves the durable completion basis; if omittedChecklistItems is nonzero, read the complete final obligation with stateful_run_read using section \"obligation\" and cursor finalObligationCursor, following nextCursor until it is null. {DELIVERABLE_RULE}")
             ),
         });
         if !acceptance_basis.is_empty() {
@@ -471,7 +472,8 @@ impl StatefulRunUpdateTool {
                 result_paged = true;
                 output["submittedResult"] = Value::Null;
                 output["submittedResultCursor"] = json!(cursor);
-                output["finalAnswerInstruction"] = json!(PAGED_RESULT_INSTRUCTION);
+                output["finalAnswerInstruction"] =
+                    json!(format!("{PAGED_RESULT_INSTRUCTION} {DELIVERABLE_RULE}"));
                 continue;
             }
             if output["finalAnswerChecklist"]
