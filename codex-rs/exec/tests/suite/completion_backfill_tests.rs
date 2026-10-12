@@ -138,7 +138,7 @@ async fn ignores_unrelated_turn_completion_before_backfilling_primary_turn() -> 
             .filter(|line| line.contains("app-server typed request"))
             .count(),
         0,
-        "the unrelated completion must not issue thread/read: {stderr}"
+        "the unrelated completion must not issue thread/items/list: {stderr}"
     );
     assert_eq!(
         lines[*primary_completion + 1..]
@@ -146,7 +146,7 @@ async fn ignores_unrelated_turn_completion_before_backfilling_primary_turn() -> 
             .filter(|line| line.contains("app-server typed request"))
             .count(),
         2,
-        "the primary completion should issue thread/read and thread/unsubscribe: {stderr}"
+        "the primary completion should issue thread/items/list and thread/unsubscribe: {stderr}"
     );
 
     assert_eq!(

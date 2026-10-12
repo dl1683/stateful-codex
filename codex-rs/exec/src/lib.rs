@@ -10,6 +10,7 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
+mod history_backfill;
 mod memory_command;
 mod startup_warning_deduper;
 mod stateful_attribution;
@@ -50,6 +51,7 @@ use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadItem as AppServerThreadItem;
+use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadReadParams;
@@ -61,6 +63,7 @@ use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadSourceKind;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::TurnInterruptParams;
@@ -1727,26 +1730,21 @@ async fn reconcile_autonomous_wait(
     current_turn_id: &str,
     run_id: &str,
 ) -> Result<AutonomousWaitState, String> {
-    let response = send_request_with_response::<ThreadReadResponse>(
-        client,
-        ClientRequest::ThreadRead {
-            request_id: request_ids.next(),
-            params: ThreadReadParams {
-                thread_id: thread_id.to_string(),
-                include_turns: true,
-            },
-        },
-        "thread/read",
-    )
-    .await?;
-    if let Some(turn) = response.thread.turns.iter().rev().find(|turn| {
-        turn.id != current_turn_id
-            && turn.status == codex_app_server_protocol::TurnStatus::InProgress
-    }) {
+    let request_id = request_ids.next();
+    let turn =
+        history_backfill::newest_other_in_progress_turn(thread_id, current_turn_id, |params| {
+            send_request_with_response::<ThreadTurnsListResponse>(
+                client,
+                ClientRequest::ThreadTurnsList { request_id, params },
+                "thread/turns/list",
+            )
+        })
+        .await?;
+    if let Some(turn) = turn {
         return Ok(AutonomousWaitState::TurnStarted(Box::new(
             TurnStartedNotification {
                 thread_id: thread_id.to_string(),
-                turn: turn.clone(),
+                turn,
             },
         )));
     }
@@ -2167,8 +2165,9 @@ async fn maybe_backfill_turn_completed_items(
 ) {
     // In-process delivery may drop non-terminal item notifications under backpressure while still
     // guaranteeing `turn/completed`. Because app-server currently emits that completion with an
-    // empty `turn.items`, exec does one last `thread/read` here so human/json output can recover
-    // the final message and reconcile any still-running items before shutdown.
+    // empty `turn.items`, exec reads the turn's newest items here so human/json output can recover
+    // the final message and reconcile any still-running items before shutdown. The final message
+    // is recovered only when it is among those newest items.
     if !should_backfill_turn_completed_items(thread_ephemeral, notification) {
         return;
     }
@@ -2177,27 +2176,31 @@ async fn maybe_backfill_turn_completed_items(
         return;
     };
 
-    let response = send_request_with_response::<ThreadReadResponse>(
-        client,
-        ClientRequest::ThreadRead {
-            request_id: request_ids.next(),
-            params: ThreadReadParams {
-                thread_id: payload.thread_id.clone(),
-                include_turns: true,
+    let turn_id = payload.turn.id.as_str();
+    let items = history_backfill::newest_turn_items(&payload.thread_id, turn_id, |params| {
+        send_request_with_response::<ThreadItemsListResponse>(
+            client,
+            ClientRequest::ThreadItemsList {
+                request_id: request_ids.next(),
+                params,
             },
-        },
-        "thread/read",
-    )
+            "thread/items/list",
+        )
+    })
     .await;
 
-    match response {
-        Ok(response) => {
-            if let Some(items) = turn_items_for_thread(&response.thread, &payload.turn.id) {
-                payload.turn.items = items;
+    match items {
+        Ok(items) => {
+            if !items
+                .iter()
+                .any(|item| matches!(item, AppServerThreadItem::AgentMessage { .. }))
+            {
+                warn!(%turn_id, "no final agent message among the newest backfilled turn items");
             }
+            payload.turn.items = items;
         }
         Err(err) => {
-            warn!("thread/read failed while backfilling turn items for turn completion: {err}");
+            warn!(%turn_id, "failed to backfill turn items for turn completion: {err}");
         }
     }
 }
@@ -2213,17 +2216,6 @@ fn should_backfill_turn_completed_items(
     };
 
     !thread_ephemeral && payload.turn.items_view != codex_app_server_protocol::TurnItemsView::Full
-}
-
-fn turn_items_for_thread(
-    thread: &AppServerThread,
-    turn_id: &str,
-) -> Option<Vec<AppServerThreadItem>> {
-    thread
-        .turns
-        .iter()
-        .find(|turn| turn.id == turn_id)
-        .map(|turn| turn.items.clone())
 }
 
 fn all_thread_source_kinds() -> Vec<ThreadSourceKind> {

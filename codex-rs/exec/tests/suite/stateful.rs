@@ -461,3 +461,73 @@ async fn exec_resume_joins_an_open_collaborative_run_only_without_the_flag() -> 
     );
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_emits_no_hydration_notice() -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("response-1"),
+            responses::ev_assistant_message("message-1", "done"),
+            responses::ev_completed("response-1"),
+        ]),
+    )
+    .await;
+
+    // A single-turn run shuts down before the notice would reach its output, so observe what the
+    // app-server sends instead.
+    let output = test
+        .cmd_with_server(&server)
+        .env("RUST_LOG", "codex_app_server::outgoing_message=trace")
+        .arg("--json")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("Finish in one turn")
+        .output()?;
+
+    assert!(output.status.success(), "exec failed: {output:?}");
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.contains("app-server event: turn/completed"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("app-server event: deprecationNotice"),
+        "{stderr}"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn backfill_recovers_exact_final_message() -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let final_message = "The final answer, recovered verbatim.";
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("response-1"),
+            responses::ev_assistant_message("message-1", "An earlier progress note."),
+            responses::ev_assistant_message("message-2", final_message),
+            responses::ev_completed("response-1"),
+        ]),
+    )
+    .await;
+    let last_message_path = test.cwd_path().join("last-message.txt");
+
+    test.cmd_with_server(&server)
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("--output-last-message")
+        .arg(&last_message_path)
+        .arg("Answer in two messages")
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(&last_message_path)?, final_message);
+    Ok(())
+}
