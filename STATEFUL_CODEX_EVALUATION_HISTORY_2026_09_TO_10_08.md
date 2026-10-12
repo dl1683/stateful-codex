@@ -1129,12 +1129,14 @@ and memory-benchmark-harness (reserved replication, agent-memory evaluation
 software). The first five are the longitudinal cohort if the screen is valid;
 the sixth is never substituted for an unfavorable result; procurement is
 excluded as the frozen development case. Source selections and one question
-per project are frozen in `eval/manifests/breadth-projects.json`. Each arm gets
-an isolated copy of the `rg --files`-visible corpus without caches, build
-outputs, credentials, prior `.blackboard` or `.codex` state; the AGI corpus is
+per project are frozen in `eval/archive/2026-09/manifests/breadth-projects.json`.
+Each arm gets an isolated copy of the `rg --files`-visible corpus without
+caches, build outputs, credentials, prior `.blackboard` or `.codex` state; the
+AGI corpus is
 bounded to the root thesis controls plus `publication` and `reviews` (its
 multi-gigabyte raw experiment store is outside the screen). The six pre-run
-corpus hashes and file counts are in `breadth-snapshot-hashes.json`; preparation
+corpus hashes and file counts are in
+`eval/archive/2026-09/manifests/breadth-snapshot-hashes.json`; preparation
 verifies byte identity between arms and the runner rehashes before and after
 every turn. Both arms: branch debug binary, cached login with API keys removed,
 Luna at high effort, read-only permissions, one continuous thread per project;
@@ -1422,7 +1424,7 @@ Every trial receives a new task container and isolated Stateful database; no
 project intelligence crosses trial boundaries. Trials may execute concurrently
 because concurrency changes scheduling rather than task semantics. The pinned
 job configuration is
-`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-full.json`.
+`clients/stateful-codex/eval/archive/2026-09/manifests/terminal-bench-2-1-stateful-full.json`.
 The public Codex result remains a descriptive comparator because its released
 Codex binary differs from this branch build.
 
@@ -1644,7 +1646,7 @@ is 183,477,835 input tokens, 175,474,816 cached input tokens, 1,693,991 output
 tokens, and $7.14288932. The final round-one manifest contains the exact 19
 remaining task names derived by subtracting the 70 valid distinct tasks from
 the pinned 89-task lock:
-`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-19.json`.
+`clients/stateful-codex/eval/archive/2026-09/manifests/terminal-bench-2-1-stateful-r1b3-19.json`.
 It retains one attempt, eight independent workers, fresh per-trial state, and
 zero automatic retries.
 
@@ -1735,7 +1737,7 @@ must not be represented as an untouched official submission.
 The pinned replacement job is retained at
 `%LOCALAPPDATA%/Temp/stateful-harbor-full-20260923/sc-tb21-stateful-r1b3-qemu-repaired-2-pinned-ef3a1ff`.
 It used the committed replacement manifest at
-`clients/stateful-codex/eval/manifests/terminal-bench-2-1-stateful-r1b3-qemu-replacement-2.json`,
+`clients/stateful-codex/eval/archive/2026-09/manifests/terminal-bench-2-1-stateful-r1b3-qemu-replacement-2.json`,
 ran both official verifiers substantively, and produced one pass and one
 failure. `qemu-startup` completed in 431 seconds and passed the official kernel
 and telnet assertion. `qemu-alpine-ssh` reached the 900-second agent limit; the
