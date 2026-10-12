@@ -76,12 +76,12 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("pass expectedRevision: 2 to stateful_run_update")
+            .contains("pass expectedRevision: 2 (the run revision")
     );
     assert!(
         rendered
             .body()
-            .contains("never substitute the separate project intelligence revision")
+            .contains("never the project intelligence revision) to stateful_run_update.")
     );
     assert!(rendered.body().contains("Strategy revision: 1"));
     assert!(rendered.body().contains("Do not invoke execution tools"));
@@ -94,12 +94,12 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     assert!(
         rendered
             .body()
-            .contains("passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result")
+            .contains("plus exactly completionDisposition noReusableLearning and result if the run learned nothing reusable")
     );
     assert!(
         rendered
             .body()
-            .contains("Completion must be the final Stateful mutation.")
+            .contains("Completion, the final Stateful mutation, is one stateful_run_update")
     );
     assert!(
         rendered

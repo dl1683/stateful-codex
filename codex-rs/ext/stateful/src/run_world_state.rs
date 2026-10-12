@@ -40,7 +40,10 @@ const MAX_RENDERED_STEERING: usize = 5;
 const MAX_RENDERED_GOAL_BYTES: usize = 2 * 1024;
 const MAX_RENDERED_STEERING_INPUT_BYTES: usize = 1024;
 const WRITE_TOOLS_ARE_DIRECT: &str = "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec.";
-const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so do not complete it at the end of a turn. Complete it only when the user says the overall goal is done or asks to close it; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed, completionDisposition noReusableLearning and result when nothing reusable was learned; otherwise durableLearning with expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings. Both pass openIssues; any entry ends the run blocked.";
+const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across the user's turns and the host records every final answer, so complete it only when the user says the overall goal is done or asks to close it, never at a turn's end; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed and openIssues (any entry ends the run blocked), plus completionDisposition noReusableLearning and result when nothing reusable was learned, otherwise durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
+/// Autonomous and Socratic completion, hashed with the packet so a wording change reaches
+/// runs whose earlier packet is retained in history.
+const RUN_COMPLETION: &str = "Completion, the final Stateful mutation, is one stateful_run_update with expectedRevision, status completed and openIssues (any entry or recorded blocker ends the run blocked), plus exactly completionDisposition noReusableLearning and result if the run learned nothing reusable, otherwise, after recording the reusable findings and all other warranted durable writes, durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
@@ -79,6 +82,7 @@ impl RunWorldStateStatus {
         hasher.update(b"codex-stateful-run-v1\0");
         // A changed mode policy must reach runs whose earlier packet is retained in history.
         hash(&mut hasher, COLLABORATIVE_COMPLETION);
+        hash(&mut hasher, RUN_COMPLETION);
         hash(&mut hasher, DELIVERABLE_RULE);
         hash(&mut hasher, self.project_id());
         match self {
@@ -144,7 +148,7 @@ impl RunWorldStateStatus {
                 line(
                     &mut output,
                     &format!(
-                        "Run-update precondition: pass expectedRevision: {} to stateful_run_update. This is the run revision; never substitute the separate project intelligence revision.",
+                        "Run-update precondition: pass expectedRevision: {} (the run revision, never the project intelligence revision) to stateful_run_update.",
                         run.revision
                     ),
                 );
@@ -219,7 +223,7 @@ impl RunWorldStateStatus {
                     WorkflowMode::Autonomous | WorkflowMode::Socratic => line(
                         &mut output,
                         &format!(
-                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} Completion: if the run learned nothing reusable, finish once with stateful_run_update passing exactly expectedRevision, status completed, completionDisposition noReusableLearning, and result. Otherwise, after recording the reusable findings and all other warranted durable writes, finish once with durableLearning: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, and materialRootFindings. Both pass openIssues; any entry or recorded blocker ends the run blocked. Completion must be the final Stateful mutation."
+                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} {RUN_COMPLETION}"
                         ),
                     ),
                 }
