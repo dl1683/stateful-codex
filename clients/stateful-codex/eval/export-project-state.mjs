@@ -1,3 +1,12 @@
+// v1 Work snapshot exporter. It exports one Work run (selected by thread or run
+// ID) with that run's project hierarchy, context map, blackboard history,
+// evidence links, relationships, obligations, and steering. It is NOT a
+// complete current-state export: it omits knowledge context, capture
+// groups/sources/exclusions, the memory journal, and acceptance state, and
+// because project identity comes from a run it cannot export a run-less Ask
+// project. It is kept for reproducing the September longitudinal artifacts; a
+// current-state exporter needs a new format version and explicit project
+// selection.
 import { createHash } from "node:crypto";
 import { rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -5,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 const FORMAT_VERSION = "stateful-project-state-v1";
+const EXPORT_SCOPE = "v1-work-run-snapshot";
 
 export function readProjectState({ sqliteHome, threadId, runId = null }) {
   const runtime = new DatabaseSync(path.join(sqliteHome, "stateful_runtime_1.sqlite"), {
@@ -146,6 +156,7 @@ export function readProjectState({ sqliteHome, threadId, runId = null }) {
     }));
     return {
       formatVersion: FORMAT_VERSION,
+      exportScope: EXPORT_SCOPE,
       projectId,
       intelligenceRevision,
       run,

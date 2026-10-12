@@ -125,8 +125,13 @@ attributes records by turn ID. It reports:
   root entries, evidence routes, and rendered freshness; and
 - durable Stateful completion observed in the same turn.
 
-After every successful Stateful turn, the runner also exports a canonical
-`turn-NN-state.json` artifact from the same SQLite home. It contains the exact
+After every successful Stateful turn, the runner also exports a
+`turn-NN-state.json` artifact from the same SQLite home. This is a v1 Work
+snapshot (`exportScope: "v1-work-run-snapshot"`) of the listed tables for the
+selected run, not a complete current-state export: it omits knowledge context,
+capture groups/sources/exclusions, the memory journal, and acceptance state, and
+it cannot export a run-less Ask project because it derives project identity from
+a run. It contains the exact
 stored run result, obligation history, steering, hierarchy, context map,
 blackboard revision history, evidence links, and relationships. The run-state
 record pins its corpus revision, intelligence revision, run revision, and
@@ -284,8 +289,8 @@ Repeat `--pair` and `--observations` for each project in the frozen manifest.
 The comparison exits nonzero when the comparison contract or required
 measurements are incomplete; performance losses do not make a valid experiment
 invalid. `eval:export-state -- --sqlite-home PATH (--thread ID | --run ID)
---output PATH [--corpus-revision HASH]` exports the canonical state artifact
-that the runner captures after every Stateful turn.
+--output PATH [--corpus-revision HASH]` exports the v1 Work snapshot that the
+runner captures after every Stateful turn.
 
 Prepare answer and state grading through separate commands and directories:
 
