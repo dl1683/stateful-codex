@@ -227,7 +227,7 @@ fn diagnostic(reply: &str, check: &ReceiptCheck, budget: usize) -> String {
 }
 
 /// The longest prefix of `text` within `max_bytes` that ends on a character boundary.
-fn utf8_prefix(text: &str, max_bytes: usize) -> &str {
+pub(crate) fn utf8_prefix(text: &str, max_bytes: usize) -> &str {
     &text[..text.floor_char_boundary(max_bytes)]
 }
 

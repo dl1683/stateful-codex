@@ -8,6 +8,10 @@
 //! (migration 0013, whose table is reused unchanged); the run result is the answer text
 //! without its outcome block.
 //!
+//! When the commit lists unverified items, the run ends Partial instead: the same stored
+//! status, the [`PARTIAL_UNVERIFIED_BASIS`], and a result that lists the items before the
+//! answer text (see [`compose_partial`]).
+//!
 //! The transaction rechecks the run inside `BEGIN IMMEDIATE`. The caller's `authorize`
 //! callback runs after every check, immediately before COMMIT; a refusal (an abort of the
 //! answering turn won) rolls everything back.
@@ -16,18 +20,51 @@ use serde::Serialize;
 use sqlx::FromRow;
 use sqlx::SqliteConnection;
 
+use crate::AcceptanceOrigin;
+use crate::AcceptanceState;
 use crate::StatefulRun;
 use crate::StatefulRunId;
 use crate::StatefulRunStatus;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
 use crate::WorkflowMode;
+use crate::acceptance_storage::load_ledger;
+use crate::obligation_operations::latest_obligation_packet;
 use crate::run::MAX_RESULT_BYTES;
 use crate::storage::load_run;
 use crate::storage::unix_timestamp_millis;
 
 /// The basis recorded with every answered run.
 pub const ANSWERED_UNVERIFIED_BASIS: &str = "Answered, unverified: the run ended with the agent's final answer. The host verified neither the answer nor any work the run did, and no acceptance criterion was checked.";
+
+/// The basis recorded with every partial run. Its bytes are storage semantics: the published
+/// outcome is derived from them, so changing them needs a migration.
+pub const PARTIAL_UNVERIFIED_BASIS: &str = "Partial, not certified: the run ended with the agent's final answer while the listed items were open or not certified by this terminal answer path. Earlier host evidence stays in the acceptance ledger; this answer path checked none of it.";
+
+/// The first line of a partial run's result; the listed items follow, one `- ` line each.
+pub const PARTIAL_RESULT_HEADER: &str = "Partial result (not certified). Open or not certified:\n";
+/// Longest criterion statement quoted in an unverified item.
+const MAX_ITEM_STATEMENT_BYTES: usize = 120;
+
+/// How an answered run ended, as published with its answer record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HostAnswerOutcome {
+    /// Nothing was listed as open or not certified.
+    Answered,
+    /// The result lists open or not-certified items before the answer.
+    Partial,
+}
+
+impl HostAnswerOutcome {
+    /// The basis recorded for this outcome.
+    pub fn basis(self) -> &'static str {
+        match self {
+            Self::Answered => ANSWERED_UNVERIFIED_BASIS,
+            Self::Partial => PARTIAL_UNVERIFIED_BASIS,
+        }
+    }
+}
 
 /// A request to end a run with a turn's final answer.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,15 +74,19 @@ pub struct AnsweredRunCommit {
     pub turn_id: String,
     /// The final assistant message exactly as the user received it, outcome block included.
     pub answer: String,
-    /// The answer text without its outcome block; becomes the run result.
+    /// The answer text without its outcome block; becomes the run result (after the listed
+    /// items, when the run ends Partial).
     pub result: String,
+    /// Open issues the answer's outcome block declared, in order; any makes the run Partial.
+    pub trailer_issues: Vec<String>,
 }
 
 /// What ending a run with an answer did.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AnsweredRunOutcome {
-    /// The run is Answered with this turn's answer (now, or already by the same turn).
-    Answered(Box<StatefulRun>),
+    /// The run is Answered with this turn's answer (now, or already by the same turn), with
+    /// the answer record: the one just inserted, or the existing one on a same-turn retry.
+    Answered(Box<StatefulRun>, Box<HostAnswerRecord>),
     /// The run is not a running Autonomous run bound to the thread; nothing changed.
     NotEligible,
     /// The answer cannot end the run, for the stated reason; nothing changed.
@@ -63,6 +104,17 @@ pub struct HostAnswerRecord {
     pub answer: String,
     pub basis: String,
     pub committed_at_ms: i64,
+}
+
+impl HostAnswerRecord {
+    /// Partial exactly when the record carries the partial basis.
+    pub fn outcome(&self) -> HostAnswerOutcome {
+        if self.basis == PARTIAL_UNVERIFIED_BASIS {
+            HostAnswerOutcome::Partial
+        } else {
+            HostAnswerOutcome::Answered
+        }
+    }
 }
 
 #[derive(FromRow)]
@@ -83,29 +135,37 @@ struct PublishedAnswer<'a> {
     answer: &'a str,
     basis: &'a str,
     committed_at: i64,
+    outcome: HostAnswerOutcome,
 }
 
-/// The bytes the answer record of `answer` takes once serialized, escapes and envelope
-/// included (with the widest possible timestamp).
-pub fn serialized_answer_bytes(turn_id: &str, answer: &str) -> usize {
+/// The bytes the answer record of `answer` takes once serialized with `outcome` and its basis,
+/// escapes and envelope included (with the widest possible timestamp).
+pub fn serialized_answer_bytes(turn_id: &str, answer: &str, outcome: HostAnswerOutcome) -> usize {
     serde_json::to_vec(&PublishedAnswer {
         turn_id,
         answer,
-        basis: ANSWERED_UNVERIFIED_BASIS,
+        basis: outcome.basis(),
         committed_at: i64::MIN,
+        outcome,
     })
     .map_or(usize::MAX, |encoded| encoded.len())
 }
 
 impl StatefulRunStore {
-    /// Ends `commit.run_id` as answered, unverified, if it is still a running Autonomous run
-    /// bound to the answering thread and `authorize` permits the commit.
+    /// Ends `commit.run_id` as answered, unverified (or partial, when items are listed), if it
+    /// is still a running Autonomous run bound to the answering thread and `authorize` permits
+    /// the commit.
     pub async fn end_run_answered(
         &self,
         commit: &AnsweredRunCommit,
         authorize: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<AnsweredRunOutcome, StatefulRunStoreError> {
-        if let Some(reason) = answer_violation(commit) {
+        let requested = if commit.trailer_issues.is_empty() {
+            HostAnswerOutcome::Answered
+        } else {
+            HostAnswerOutcome::Partial
+        };
+        if let Some(reason) = answer_violation(commit, requested) {
             return Ok(AnsweredRunOutcome::Refused(reason));
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -116,7 +176,7 @@ impl StatefulRunStore {
             transaction.commit().await?;
             return Ok(
                 if existing.turn_id == commit.turn_id && run.status == StatefulRunStatus::Answered {
-                    AnsweredRunOutcome::Answered(Box::new(run))
+                    AnsweredRunOutcome::Answered(Box::new(run), Box::new(existing))
                 } else {
                     AnsweredRunOutcome::NotEligible
                 },
@@ -143,6 +203,16 @@ impl StatefulRunStore {
                 "steering for this run is still waiting to be applied".to_string(),
             ));
         }
+        let (outcome, result) = if commit.trailer_issues.is_empty() {
+            (HostAnswerOutcome::Answered, commit.result.clone())
+        } else {
+            let Some(result) = compose_partial(&commit.trailer_issues, &commit.result) else {
+                return Ok(AnsweredRunOutcome::Refused(format!(
+                    "the answer and its list of open or not-certified items do not fit the {MAX_RESULT_BYTES}-byte result limit"
+                )));
+            };
+            (HostAnswerOutcome::Partial, result)
+        };
         let now = unix_timestamp_millis()?;
         sqlx::query(
             "INSERT INTO stateful_host_answers (
@@ -153,7 +223,7 @@ impl StatefulRunStore {
         .bind(&commit.thread_id)
         .bind(&commit.turn_id)
         .bind(&commit.answer)
-        .bind(ANSWERED_UNVERIFIED_BASIS)
+        .bind(outcome.basis())
         .bind(now)
         .execute(&mut *transaction)
         .await?;
@@ -163,7 +233,7 @@ impl StatefulRunStore {
              SET status = 'completed', result = ?, revision = revision + 1, updated_at_ms = ?
              WHERE id = ? AND status = 'running'",
         )
-        .bind(&commit.result)
+        .bind(&result)
         .bind(now)
         .bind(commit.run_id.as_str())
         .execute(&mut *transaction)
@@ -180,7 +250,18 @@ impl StatefulRunStore {
             return Ok(AnsweredRunOutcome::NotAuthorized);
         }
         transaction.commit().await?;
-        Ok(AnsweredRunOutcome::Answered(Box::new(run)))
+        let record = HostAnswerRecord {
+            run_id: commit.run_id.clone(),
+            thread_id: commit.thread_id.clone(),
+            turn_id: commit.turn_id.clone(),
+            answer: commit.answer.clone(),
+            basis: outcome.basis().to_string(),
+            committed_at_ms: now,
+        };
+        Ok(AnsweredRunOutcome::Answered(
+            Box::new(run),
+            Box::new(record),
+        ))
     }
 
     /// The answer record of the run, if it has one.
@@ -193,20 +274,86 @@ impl StatefulRunStore {
     }
 }
 
-/// Why `commit` cannot be stored whole, if it cannot.
-fn answer_violation(commit: &AnsweredRunCommit) -> Option<String> {
+/// Why `commit` cannot be stored whole with `outcome`, if it cannot.
+fn answer_violation(commit: &AnsweredRunCommit, outcome: HostAnswerOutcome) -> Option<String> {
     if commit.result.trim().is_empty()
         || !commit.answer.contains(&commit.result)
         || commit.answer.contains('\0')
     {
         return Some("the answer is empty or malformed".to_string());
     }
-    let bytes = serialized_answer_bytes(&commit.turn_id, &commit.answer);
+    let bytes = serialized_answer_bytes(&commit.turn_id, &commit.answer, outcome);
     (bytes > MAX_RESULT_BYTES).then(|| {
         format!(
             "the answer takes {bytes} bytes once recorded, over the {MAX_RESULT_BYTES}-byte limit"
         )
     })
+}
+
+/// The result of a partial run: [`PARTIAL_RESULT_HEADER`], one `- item` line per item, the
+/// omission marker when some did not fit, a blank line, then `body`. Room for the marker of
+/// every item is reserved before any item is added; items are added in order while they fit.
+/// `None` when even the header, the reserved marker and the body exceed the result limit.
+pub(crate) fn compose_partial(items: &[String], body: &str) -> Option<String> {
+    let reserved = PARTIAL_RESULT_HEADER.len() + partial_marker(items.len()).len() + 2 + body.len();
+    if reserved > MAX_RESULT_BYTES {
+        return None;
+    }
+    let mut lines = String::new();
+    let mut kept = 0;
+    for item in items {
+        // One line per item, so the list stays parseable; the byte length is unchanged.
+        let line = format!("- {}\n", item.replace(['\n', '\r'], " "));
+        if reserved + lines.len() + line.len() > MAX_RESULT_BYTES {
+            break;
+        }
+        lines.push_str(&line);
+        kept += 1;
+    }
+    let marker = if kept < items.len() {
+        partial_marker(items.len() - kept)
+    } else {
+        String::new()
+    };
+    Some(format!("{PARTIAL_RESULT_HEADER}{lines}{marker}\n{body}"))
+}
+
+/// The line that ends the listed items of a partial result when `omitted` of them did not fit.
+pub fn partial_marker(omitted: usize) -> String {
+    format!("- +{omitted} more (read the acceptance ledger and obligation)\n")
+}
+
+/// The items a terminal answer leaves open or not certified, read on the transaction's
+/// connection: each Active, required criterion (User, Derived, or an accepted Omission), then
+/// every blocker of the latest obligation. Untouched omission proposals are not listed.
+// The activation step wires this into `end_run_answered`; until then only tests call it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn unverified_items(
+    connection: &mut SqliteConnection,
+    run_id: &StatefulRunId,
+) -> Result<Vec<String>, StatefulRunStoreError> {
+    let ledger = load_ledger(connection, run_id).await?;
+    let mut items = Vec::new();
+    for criterion in &ledger.criteria {
+        let declared = match criterion.origin {
+            // An Omission criterion is Active only once accepted.
+            AcceptanceOrigin::User | AcceptanceOrigin::Derived | AcceptanceOrigin::Omission => {
+                criterion.state == AcceptanceState::Active && criterion.required
+            }
+        };
+        if declared {
+            let statement = &criterion.statement;
+            let statement = &statement[..statement.floor_char_boundary(MAX_ITEM_STATEMENT_BYTES)];
+            items.push(format!(
+                "{} ({statement}): not certified by this terminal answer path",
+                criterion.alias()
+            ));
+        }
+    }
+    if let Some((_, packet)) = latest_obligation_packet(connection, run_id).await? {
+        items.extend(packet.blockers);
+    }
+    Ok(items)
 }
 
 async fn load_host_answer(

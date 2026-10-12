@@ -91,6 +91,7 @@ fn commit_for(run: &StatefulRun) -> AnsweredRunCommit {
         turn_id: "turn-1".to_string(),
         answer: format!("It returns a Result.\n{BLOCK}"),
         result: "It returns a Result.".to_string(),
+        trailer_issues: Vec::new(),
     }
 }
 
@@ -110,7 +111,7 @@ async fn an_unknown_commit_outcome_is_re_read() {
     let allow = || true;
     assert!(matches!(
         landed.end_run_answered(&commit, &allow).await,
-        Ok(AnsweredRunOutcome::Answered(_))
+        Ok(AnsweredRunOutcome::Answered(..))
     ));
     assert_eq!(
         resolve(
@@ -161,5 +162,75 @@ async fn an_unknown_commit_outcome_is_re_read() {
     assert_eq!(
         unknown,
         "Ending the Stateful run with this answer may or may not have been saved (run changed during a guarded update), and its state could not be re-read (run not found: run-1). Read the run before relying on how it ended."
+    );
+}
+
+/// A partial ending is disclosed the same way on the normal, the idempotent and the recovered
+/// success path, from the durable result; an answered ending stays `Recorded`.
+#[tokio::test]
+async fn every_success_path_discloses_a_partial_ending() {
+    let home = TempDir::new().expect("tempdir");
+    let store = store(&home).await;
+    let run = running_run(&store).await;
+    let commit = AnsweredRunCommit {
+        trailer_issues: vec!["tests remain".to_string(), "docs are stale".to_string()],
+        ..commit_for(&run)
+    };
+    let allow = || true;
+    let disclosure = TurnFinalizeOutcome::Warning(
+        "Stateful: this run ended partial; it is not certified by this terminal answer path. Open or not certified: tests remain; docs are stale".to_string(),
+    );
+    let normal = store.end_run_answered(&commit, &allow).await;
+    assert_eq!(
+        resolve(&store, None, &commit, /*authorized*/ true, normal).await,
+        disclosure
+    );
+    let idempotent = store.end_run_answered(&commit, &allow).await;
+    assert_eq!(
+        resolve(&store, None, &commit, /*authorized*/ true, idempotent).await,
+        disclosure
+    );
+    assert_eq!(
+        resolve(
+            &store,
+            None,
+            &commit,
+            /*authorized*/ true,
+            commit_error()
+        )
+        .await,
+        disclosure
+    );
+}
+
+/// The disclosure stays within its cap on a character boundary and keeps the omission count.
+#[test]
+fn the_partial_disclosure_is_bounded() {
+    let items = format!("- {}\n- second\n", "é".repeat(700));
+    let marked = format!(
+        "{PARTIAL_RESULT_HEADER}{items}{}\nThe answer.",
+        partial_marker(3)
+    );
+    let disclosure = partial_disclosure(&marked);
+    assert!(
+        disclosure.len() <= MAX_DISCLOSURE_BYTES,
+        "{}",
+        disclosure.len()
+    );
+    assert!(
+        disclosure.ends_with("é [+3 more; see the run result]"),
+        "{disclosure}"
+    );
+
+    let unmarked = format!("{PARTIAL_RESULT_HEADER}{items}\nThe answer.");
+    let disclosure = partial_disclosure(&unmarked);
+    assert!(
+        disclosure.len() <= MAX_DISCLOSURE_BYTES,
+        "{}",
+        disclosure.len()
+    );
+    assert!(
+        disclosure.ends_with("é [shortened; see the run result]"),
+        "{disclosure}"
     );
 }

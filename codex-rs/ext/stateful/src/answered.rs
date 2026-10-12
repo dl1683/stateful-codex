@@ -22,10 +22,14 @@ use codex_protocol::items::AgentMessageItem;
 use codex_protocol::models::MessagePhase;
 use codex_stateful_runtime::AnsweredRunCommit;
 use codex_stateful_runtime::AnsweredRunOutcome;
+use codex_stateful_runtime::HostAnswerOutcome;
 use codex_stateful_runtime::HostAnswerRecord;
+use codex_stateful_runtime::PARTIAL_RESULT_HEADER;
+use codex_stateful_runtime::StatefulRun;
 use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStore;
 use codex_stateful_runtime::StatefulRunStoreError;
+use codex_stateful_runtime::partial_marker;
 
 use crate::StatefulEventSink;
 
@@ -33,6 +37,10 @@ const OUTCOME_START: &str = "[stateful-outcome]";
 const OUTCOME_END: &str = "[/stateful-outcome]";
 const MAX_OUTCOME_BLOCK_BYTES: usize = 4 * 1024;
 const MAX_OPEN_ISSUES: usize = 16;
+/// Cap of the partial-outcome disclosure (the status-only diagnostic's cap).
+const MAX_DISCLOSURE_BYTES: usize = 1_200;
+const PARTIAL_DISCLOSURE: &str = "Stateful: this run ended partial; it is not certified by this terminal answer path. Open or not certified: ";
+const UNREAD_ENDING: &str = "The Stateful run ended with this answer; how it ended could not be re-read. Read the run before relying on it.";
 
 /// Model guidance for the outcome block, part of the Autonomous mode obligation.
 pub(crate) const ANSWER_OUTCOME_GUIDANCE: &str = "A complete answer needing no further work may instead end the final message with four lines: [stateful-outcome], disposition: answer, open-issues: none, [/stateful-outcome]; the run then ends answered, not verified.";
@@ -172,6 +180,7 @@ pub(crate) async fn finalize(
         turn_id: input.turn_id.to_string(),
         answer: input.last_agent_message.to_string(),
         result: result.to_string(),
+        trailer_issues: Vec::new(),
     };
     let authorized = AtomicBool::new(false);
     let authorize = || {
@@ -201,9 +210,9 @@ pub(crate) async fn resolve(
     outcome: Result<AnsweredRunOutcome, StatefulRunStoreError>,
 ) -> TurnFinalizeOutcome {
     let error = match outcome {
-        Ok(AnsweredRunOutcome::Answered(run)) => {
+        Ok(AnsweredRunOutcome::Answered(run, record)) => {
             crate::autonomy::emit_run_updated(event_sink, &run);
-            return TurnFinalizeOutcome::Recorded;
+            return outcome_disclosure(&run, &record);
         }
         Ok(AnsweredRunOutcome::NotEligible | AnsweredRunOutcome::NotAuthorized) => {
             return TurnFinalizeOutcome::NotHandled;
@@ -225,25 +234,32 @@ pub(crate) async fn resolve(
         &error,
         store.host_answer(&commit.run_id).await,
     ) {
-        Ok(()) => {
-            if let Ok(Some(run)) = store.get_run(&commit.run_id).await {
+        Ok(record) => match store.get_run(&commit.run_id).await {
+            Ok(Some(run)) => {
                 crate::autonomy::emit_run_updated(event_sink, &run);
+                outcome_disclosure(&run, &record)
             }
-            TurnFinalizeOutcome::Recorded
-        }
+            // The record alone establishes an answered ending; a partial one needs its items.
+            Ok(None) | Err(_) => match record.outcome() {
+                HostAnswerOutcome::Answered => TurnFinalizeOutcome::Recorded,
+                HostAnswerOutcome::Partial => {
+                    TurnFinalizeOutcome::Warning(UNREAD_ENDING.to_string())
+                }
+            },
+        },
         Err(message) => TurnFinalizeOutcome::Warning(message),
     }
 }
 
-/// What a re-read says about a commit whose result was `error`: `Ok` when this turn's answer
-/// is durable, otherwise the truthful message (not saved, or unknown).
+/// What a re-read says about a commit whose result was `error`: this turn's durable answer
+/// record, otherwise the truthful message (not saved, or unknown).
 fn after_unknown_commit(
     turn_id: &str,
     error: &StatefulRunStoreError,
     reread: Result<Option<HostAnswerRecord>, StatefulRunStoreError>,
-) -> Result<(), String> {
+) -> Result<HostAnswerRecord, String> {
     match reread {
-        Ok(Some(record)) if record.turn_id == turn_id => Ok(()),
+        Ok(Some(record)) if record.turn_id == turn_id => Ok(record),
         Ok(_) => Err(format!(
             "Ending the Stateful run with this answer was not saved ({error}), so it continues as usual."
         )),
@@ -251,6 +267,58 @@ fn after_unknown_commit(
             "Ending the Stateful run with this answer may or may not have been saved ({error}), and its state could not be re-read ({reread}). Read the run before relying on how it ended."
         )),
     }
+}
+
+/// The finalization outcome of a durable answered ending: `Recorded` for an answered run, a
+/// bounded warning listing the open or not-certified items for a partial one. The items are
+/// read from the run's durable result, so every success path discloses the same text.
+pub(crate) fn outcome_disclosure(
+    run: &StatefulRun,
+    record: &HostAnswerRecord,
+) -> TurnFinalizeOutcome {
+    match record.outcome() {
+        HostAnswerOutcome::Answered => TurnFinalizeOutcome::Recorded,
+        HostAnswerOutcome::Partial => TurnFinalizeOutcome::Warning(partial_disclosure(
+            run.result.as_deref().unwrap_or_default(),
+        )),
+    }
+}
+
+/// The disclosure of a partial result, at most [`MAX_DISCLOSURE_BYTES`].
+fn partial_disclosure(result: &str) -> String {
+    let mut items = Vec::new();
+    let mut omitted = None;
+    for line in result
+        .strip_prefix(PARTIAL_RESULT_HEADER)
+        .unwrap_or_default()
+        .lines()
+        .take_while(|line| !line.is_empty())
+    {
+        let marker = line
+            .strip_prefix("- +")
+            .and_then(|rest| rest.split_once(' '))
+            .and_then(|(count, _)| count.parse::<usize>().ok())
+            .filter(|count| partial_marker(*count).strip_suffix('\n') == Some(line));
+        match marker {
+            Some(count) => omitted = Some(count),
+            None => items.push(line.strip_prefix("- ").unwrap_or(line)),
+        }
+    }
+    let listed = items.join("; ");
+    let more = omitted.map(|count| format!(" [+{count} more; see the run result]"));
+    let text = format!(
+        "{PARTIAL_DISCLOSURE}{listed}{}",
+        more.as_deref().unwrap_or_default()
+    );
+    if text.len() <= MAX_DISCLOSURE_BYTES {
+        return text;
+    }
+    let suffix = more.unwrap_or_else(|| " [shortened; see the run result]".to_string());
+    let excerpt = crate::deliverable::utf8_prefix(
+        &listed,
+        MAX_DISCLOSURE_BYTES - PARTIAL_DISCLOSURE.len() - suffix.len(),
+    );
+    format!("{PARTIAL_DISCLOSURE}{excerpt}{suffix}")
 }
 
 #[cfg(test)]

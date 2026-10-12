@@ -9,8 +9,13 @@ use sqlx::migrate::Migrator;
 use tempfile::TempDir;
 
 use super::*;
+use crate::AcceptanceChange;
+use crate::AcceptanceKind;
+use crate::CriterionTerms;
+use crate::NewObligation;
 use crate::NewStatefulRun;
 use crate::NewSteeringInstruction;
+use crate::ObligationPacket;
 use crate::RunBudget;
 use crate::StatefulRunModeUpdate;
 use crate::StatefulRunUpdate;
@@ -53,6 +58,7 @@ fn commit_for(run: &StatefulRun, result: &str) -> AnsweredRunCommit {
         turn_id: TURN.to_string(),
         answer: format!("{result}{BLOCK}"),
         result: result.to_string(),
+        trailer_issues: Vec::new(),
     }
 }
 
@@ -76,7 +82,7 @@ async fn answered_run_keeps_its_exact_answer_and_survives_restart() {
     let run = new_run(&store, "run-1", WorkflowMode::Autonomous).await;
     let commit = commit_for(&run, "parse_config returns Result<Config, Error>.");
 
-    let AnsweredRunOutcome::Answered(answered) = end(&store, &commit).await else {
+    let AnsweredRunOutcome::Answered(answered, committed) = end(&store, &commit).await else {
         panic!("expected an answered run");
     };
     assert_eq!(answered.status, StatefulRunStatus::Answered);
@@ -88,7 +94,7 @@ async fn answered_run_keeps_its_exact_answer_and_survives_restart() {
     // A retry of the same turn reports the same run; another turn cannot end it again.
     assert_eq!(
         end(&store, &commit).await,
-        AnsweredRunOutcome::Answered(answered.clone())
+        AnsweredRunOutcome::Answered(answered.clone(), committed.clone())
     );
     let other = AnsweredRunCommit {
         turn_id: "turn-2".to_string(),
@@ -144,6 +150,7 @@ async fn answered_run_keeps_its_exact_answer_and_survives_restart() {
             committed_at_ms: record.committed_at_ms,
         }
     );
+    assert_eq!(record, *committed);
     assert_eq!(
         reopened.get_run(&run.id).await.expect("run"),
         Some(*answered)
@@ -258,10 +265,13 @@ async fn only_a_running_autonomous_run_of_the_thread_ends_answered() {
 async fn the_answer_bound_is_measured_on_the_serialized_record() {
     let home = TempDir::new().expect("tempdir");
     let store = open_store(&home).await;
-    let block_bytes = serialized_answer_bytes(TURN, BLOCK) - serialized_answer_bytes(TURN, "");
+    let block_bytes = serialized_answer_bytes(TURN, BLOCK, HostAnswerOutcome::Answered)
+        - serialized_answer_bytes(TURN, "", HostAnswerOutcome::Answered);
 
     for (name, unit, encoded) in [("quotes", "\"", 2), ("multibyte", "é", 2)] {
-        let room = MAX_RESULT_BYTES - serialized_answer_bytes(TURN, "") - block_bytes;
+        let room = MAX_RESULT_BYTES
+            - serialized_answer_bytes(TURN, "", HostAnswerOutcome::Answered)
+            - block_bytes;
         let fitting = format!(
             "{}{}",
             "a".repeat(room % encoded),
@@ -270,13 +280,13 @@ async fn the_answer_bound_is_measured_on_the_serialized_record() {
         let run = new_run(&store, &format!("fit-{name}"), WorkflowMode::Autonomous).await;
         let commit = commit_for(&run, &fitting);
         assert_eq!(
-            serialized_answer_bytes(TURN, &commit.answer),
+            serialized_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered),
             MAX_RESULT_BYTES,
             "{name}"
         );
         assert!(matches!(
             end(&store, &commit).await,
-            AnsweredRunOutcome::Answered(_)
+            AnsweredRunOutcome::Answered(..)
         ));
         assert_eq!(
             store
@@ -291,7 +301,7 @@ async fn the_answer_bound_is_measured_on_the_serialized_record() {
         let over = new_run(&store, &format!("over-{name}"), WorkflowMode::Autonomous).await;
         let commit = commit_for(&over, &format!("{fitting}{unit}"));
         assert!(commit.answer.len() < MAX_RESULT_BYTES || name == "multibyte");
-        let bytes = serialized_answer_bytes(TURN, &commit.answer);
+        let bytes = serialized_answer_bytes(TURN, &commit.answer, HostAnswerOutcome::Answered);
         assert_eq!(
             end(&store, &commit).await,
             AnsweredRunOutcome::Refused(format!(
@@ -354,4 +364,198 @@ async fn an_applied_host_answer_reads_as_answered() {
         .expect("legacy run kept");
     assert_eq!(legacy.status, StatefulRunStatus::Answered);
     assert_eq!(legacy.result.as_deref(), Some("X is Y."));
+}
+
+fn partial_commit(run: &StatefulRun, result: &str, issues: Vec<String>) -> AnsweredRunCommit {
+    AnsweredRunCommit {
+        trailer_issues: issues,
+        ..commit_for(run, result)
+    }
+}
+
+/// A11 (i): sixteen 1,024-byte items before a 20,480-byte body keep exactly the items that fit
+/// beside the reserved marker; the rest are counted by the marker, and the run reads back
+/// partial with the frozen basis.
+#[tokio::test]
+async fn a_partial_result_keeps_the_items_that_fit_and_counts_the_rest() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    let run = new_run(&store, "run-1", WorkflowMode::Autonomous).await;
+    let items: Vec<String> = (0..16)
+        .map(|index| format!("{index:02}{}", "i".repeat(1_022)))
+        .collect();
+    let body = "b".repeat(20_480);
+
+    let kept = (MAX_RESULT_BYTES
+        - PARTIAL_RESULT_HEADER.len()
+        - partial_marker(16).len()
+        - 2
+        - body.len())
+        / 1_027;
+    assert_eq!((kept, 16 - kept), (11, 5));
+    let expected = format!(
+        "{PARTIAL_RESULT_HEADER}{}{}\n{body}",
+        items[..kept]
+            .iter()
+            .map(|item| format!("- {item}\n"))
+            .collect::<String>(),
+        partial_marker(16 - kept)
+    );
+
+    let commit = partial_commit(&run, &body, items);
+    let AnsweredRunOutcome::Answered(answered, record) = end(&store, &commit).await else {
+        panic!("expected a partial run");
+    };
+    assert_eq!(answered.status, StatefulRunStatus::Answered);
+    assert_eq!(answered.result.as_deref(), Some(expected.as_str()));
+    assert_eq!(record.basis, PARTIAL_UNVERIFIED_BASIS);
+    assert_eq!(record.outcome(), HostAnswerOutcome::Partial);
+    assert_eq!(
+        store.host_answer(&run.id).await.expect("read"),
+        Some(*record)
+    );
+}
+
+/// A11 (ii)-(iii): with at least one item, a body that fits beside the header but not beside
+/// the reserved marker is refused; when nothing is omitted no marker is written.
+#[test]
+fn the_marker_is_reserved_and_written_only_on_omission() {
+    let items = vec!["x".to_string()];
+    let body = "b"
+        .repeat(MAX_RESULT_BYTES - PARTIAL_RESULT_HEADER.len() - 2 - partial_marker(1).len() + 1);
+    assert!(PARTIAL_RESULT_HEADER.len() + body.len() <= MAX_RESULT_BYTES);
+    assert_eq!(compose_partial(&items, &body), None);
+    assert!(compose_partial(&items, &body[1..]).is_some());
+
+    assert_eq!(
+        compose_partial(&["a".to_string(), "b".to_string()], "The answer."),
+        Some(format!("{PARTIAL_RESULT_HEADER}- a\n- b\n\nThe answer."))
+    );
+}
+
+/// A12: a partial commit whose authorization is refused leaves the run Running with no
+/// answer record.
+#[tokio::test]
+async fn a_refused_partial_commit_writes_nothing() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    let run = new_run(&store, "run-1", WorkflowMode::Autonomous).await;
+    let deny = || false;
+    assert_eq!(
+        store
+            .end_run_answered(
+                &partial_commit(&run, "An answer.", vec!["tests remain".to_string()]),
+                &deny
+            )
+            .await
+            .expect("evaluated"),
+        AnsweredRunOutcome::NotAuthorized
+    );
+    assert_eq!(
+        store.get_run(&run.id).await.expect("run"),
+        Some(run.clone())
+    );
+    assert_eq!(store.host_answer(&run.id).await.expect("read"), None);
+}
+
+/// C2 (L5): Active required criteria and latest blockers are listed; a Derived criterion
+/// retired before the final, an optional one and an untouched omission proposal are not, so
+/// a run whose only criterion was retired has nothing to list and ends answered.
+#[tokio::test]
+async fn retired_optional_and_proposed_criteria_are_not_listed() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    let derived = |statement: &str, required: bool| AcceptanceChange::Add {
+        origin: AcceptanceOrigin::Derived,
+        kind: AcceptanceKind::Manual,
+        statement: statement.to_string(),
+        request_span: None,
+        terms: CriterionTerms {
+            required,
+            ..CriterionTerms::default()
+        },
+    };
+    let retire = |ordinal: u32| AcceptanceChange::Retire {
+        ordinal,
+        reason: "Not needed.".to_string(),
+    };
+
+    let listed = new_run(&store, "listed", WorkflowMode::Autonomous).await;
+    let long = "é".repeat(70);
+    let ledger = store
+        .revise_acceptance(
+            &listed.id,
+            /*expected_revision*/ 0,
+            vec![
+                derived("The parser handles tabs.", true),
+                derived("Retire me.", true),
+                derived("Nice to have.", false),
+                derived(&long, true),
+            ],
+            "call-add",
+        )
+        .await
+        .expect("criteria added");
+    store
+        .revise_acceptance(&listed.id, ledger.revision, vec![retire(2)], "call-retire")
+        .await
+        .expect("retired");
+    store.propose_uncovered(&listed.id).await.expect("proposed");
+    store
+        .append_obligation(
+            "obligation-1".to_string(),
+            NewObligation {
+                project_id: "project".to_string(),
+                run_id: listed.id.clone(),
+                packet: ObligationPacket {
+                    blockers: vec!["CI is red.".to_string()],
+                    ..ObligationPacket::default()
+                },
+                provenance_source_id: "call-1".to_string(),
+            },
+        )
+        .await
+        .expect("obligation");
+    let mut connection = store.pool.acquire().await.expect("connection");
+    assert_eq!(
+        unverified_items(&mut connection, &listed.id)
+            .await
+            .expect("items"),
+        vec![
+            "C1 (The parser handles tabs.): not certified by this terminal answer path".to_string(),
+            format!(
+                "C4 ({}): not certified by this terminal answer path",
+                "é".repeat(60)
+            ),
+            "CI is red.".to_string(),
+        ]
+    );
+
+    let retired = new_run(&store, "retired", WorkflowMode::Autonomous).await;
+    let ledger = store
+        .revise_acceptance(
+            &retired.id,
+            /*expected_revision*/ 0,
+            vec![derived("Retire me.", true)],
+            "call-add",
+        )
+        .await
+        .expect("criterion added");
+    store
+        .revise_acceptance(&retired.id, ledger.revision, vec![retire(1)], "call-retire")
+        .await
+        .expect("retired");
+    assert_eq!(
+        unverified_items(&mut connection, &retired.id)
+            .await
+            .expect("items"),
+        Vec::<String>::new()
+    );
+    drop(connection);
+    let AnsweredRunOutcome::Answered(_, record) =
+        end(&store, &commit_for(&retired, "An answer.")).await
+    else {
+        panic!("expected an answered run");
+    };
+    assert_eq!(record.outcome(), HostAnswerOutcome::Answered);
 }
