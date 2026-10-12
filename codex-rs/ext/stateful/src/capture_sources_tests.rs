@@ -82,7 +82,7 @@ async fn c3r1_source_handle_redelivery_preserves_honest_bounded_lower_bound() {
         assert_eq!(next.snapshot(), ninth.snapshot());
         assert_eq!(turn_store.get::<SourceHandles>().unwrap().handles.len(), 8);
     }
-    // The ninth part has no handle, yet its sealed original stays exactly readable.
+    // An unhandled original has no handle, yet its sealed bytes stay exactly readable.
     let store = extension
         .services
         .as_ref()
