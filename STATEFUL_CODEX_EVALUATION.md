@@ -558,3 +558,7 @@ Backlog: STATEFUL_CODEX_CURRENT_STATE.md section 7, "Acceptance-mediated failure
 sc_dogfood/dsg/ladder/measure_3b.py, measure_3b.md, handchecks_3b.json, r3_w8.md, manifests/ (including
 manifests/raw/q36a3_gb/), runs/{ms4_ctl,ms4_3b,q36a3_ctl,q36a3_3b,q36a3_gb}/logs/ and snap/, gb/gb_report.py;
 sc_dogfood/integrate/reviews/threeway_hunt.md, adj_hunt.md, gb_hunt.md; sc_dogfood/dsg/reviews/3b_w8_errorhunt.md.
+
+## Landing record: slice 1 step F1 (2026-10-12)
+
+Step F1 of the answer-safety slice (inert runtime foundations) landed on `stateful/main` as `f256e307e`: four commits, +1582/−56 across 13 files. It is inert: nothing calls the new obligation operation, and live answer admission is unchanged, pinned by a base-limit fixture. The Linux gate on the pre-merge head (job `20261012T204900Z-79accdb67`) had 0 new failures, 0 known failures and 0 flaky tests across the runtime, extension, exec and protocol crates. The confirmation verdict was LANDABLE WITH NAMED LIMITATIONS; the full record is in the campaign ledger (FINDINGS). The TUI and app-server downstream checks used earlier base logs, not a fresh base rebuild, and are not covered by this gate.
