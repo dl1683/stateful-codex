@@ -423,13 +423,17 @@ impl TurnLifecycleContributor for StatefulExtension {
                 &input,
             )
             .await;
-            // At most one diagnostic per run on this thread.
-            let bound_run = &active_turn.run_id;
-            let warned = || input.thread_store.get_or_init(WarnedRuns::default);
-            let Some(reply) = status_only.filter(|_| warned().first(bound_run)) else {
+            let Some(reply) = status_only else {
                 return outcome;
             };
+            let bound_run = &active_turn.run_id;
             let check = crate::deliverable::ReceiptCheck::read(store, receipt, bound_run).await;
+            // At most one diagnostic per run on this thread. The slot is taken only once the
+            // commit gate makes emission uninterruptible; if an abort won, it stays unused.
+            let warned = input.thread_store.get_or_init(WarnedRuns::default);
+            if !(input.authorize_commit)() || !warned.first(bound_run) {
+                return outcome;
+            }
             crate::deliverable::warn(outcome, reply, &check)
         })
     }
