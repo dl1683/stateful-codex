@@ -82,7 +82,7 @@ async fn c2r2_symbol_identity_excludes_existing_and_unlinked_native_sources() {
 }
 
 #[tokio::test]
-async fn c2r2_source_budget_excludes_sixteen_long_parts_and_advances_continuation() {
+async fn c2r2_source_budget_excludes_sixteen_long_parts() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let forgotten = store
@@ -134,59 +134,11 @@ async fn c2r2_source_budget_excludes_sixteen_long_parts_and_advances_continuatio
     }
     assert_eq!(budget.examined, 0);
     tx.commit().await.unwrap();
-    let page = store
-        .search_source_ranges(PROJECT, "needle", /*after*/ None)
-        .await
-        .unwrap();
-    assert_eq!(
-        (page.ranges, page.examined, page.complete, page.after),
-        (Vec::<SourceRangeRead>::new(), 16, true, None)
-    );
     assert_eq!(snapshot(&store).await, before);
-    // More than one candidate page also proves excluded scans make forward progress.
-    for index in 16..60 {
-        store
-            .observe_source(observation(&format!("long-{index}"), &text), &text)
-            .await
-            .unwrap();
-    }
-    let control = "needle independent Cedar source.";
-    let independent = store
-        .observe_source(observation("independent-budget", control), control)
-        .await
-        .unwrap();
-    store.pool.close().await;
-    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
-        .await
-        .unwrap();
-    reopened.begin_source_index_rebuild(PROJECT).await.unwrap();
-    while !reopened.maintain_source_index(PROJECT).await.unwrap() {}
-    let mut cursor = None;
-    let mut found = Vec::new();
-    let mut total = 0;
-    loop {
-        let page = reopened
-            .search_source_ranges(PROJECT, "needle", cursor.as_ref())
-            .await
-            .unwrap();
-        assert!(page.examined <= 256);
-        total += page.examined;
-        found.extend(page.ranges);
-        if page.complete {
-            assert!(page.after.is_none());
-            break;
-        }
-        assert_ne!(page.after, cursor);
-        cursor = page.after;
-    }
-    assert_eq!(total, 63); // 61 candidates, one short retirement chunk and one exact chunk.
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].seal, independent);
-    assert!(found[0].exact_text.contains("Cedar"));
 }
 
 #[tokio::test]
-async fn c2r1_unlinked_retired_words_cross_chunks_reopen_and_rebuild() {
+async fn c2r1_unlinked_retired_words_cross_chunks_and_reopen() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let words = format!("{} private receipt QX704", vec!["meridian"; 95].join(" "));
@@ -218,14 +170,10 @@ async fn c2r1_unlinked_retired_words_cross_chunks_reopen_and_rebuild() {
         .await
         .unwrap();
     store.pool.close().await;
-    for phase in 0..3 {
+    for _ in 0..3 {
         let reader = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
             .await
             .unwrap();
-        if phase == 1 {
-            reader.begin_source_index_rebuild(PROJECT).await.unwrap();
-            while !reader.maintain_source_index(PROJECT).await.unwrap() {}
-        }
         let before = snapshot(&reader).await;
         for (start, end) in [(3500, 4376), (0, 4096), (3840, 4401), (3400, 4401)] {
             assert!(matches!(
@@ -243,14 +191,6 @@ async fn c2r1_unlinked_retired_words_cross_chunks_reopen_and_rebuild() {
         }
         assert_eq!(
             reader
-                .search_source_ranges(PROJECT, "meridian QX704", /*after*/ None)
-                .await
-                .unwrap()
-                .ranges,
-            Vec::<SourceRangeRead>::new()
-        );
-        assert_eq!(
-            reader
                 .read_source_range(
                     PROJECT,
                     &control.exact_source_locator,
@@ -262,15 +202,6 @@ async fn c2r1_unlinked_retired_words_cross_chunks_reopen_and_rebuild() {
                 .unwrap()
                 .exact_text,
             independent
-        );
-        assert_eq!(
-            reader
-                .search_source_ranges(PROJECT, "Cedar", /*after*/ None)
-                .await
-                .unwrap()
-                .ranges
-                .len(),
-            1
         );
         assert_eq!(snapshot(&reader).await, before);
         reader.pool.close().await;
@@ -374,10 +305,9 @@ async fn c2_exact_source_survives_fault_reopen_redelivery_and_revision_tamper() 
 }
 
 #[tokio::test]
-async fn c2_long_source_index_rebuild_is_bounded_and_progresses_across_cold_pages() {
+async fn c2_long_source_chunks_are_bounded_and_read_exact_ranges() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
-    let mut locators = Vec::new();
     for ordinal in 0..5 {
         let text = format!(
             "{}deepneedle QX-704 {}",
@@ -404,7 +334,6 @@ async fn c2_long_source_index_rebuild_is_bounded_and_progresses_across_cold_page
                 .exact_text,
             "deepneedle QX-704 "
         );
-        locators.push(seal.exact_source_locator);
     }
     let largest: i64 =
         sqlx::query_scalar("SELECT MAX(octet_length(exact_bytes)) FROM capture_source_chunks")
@@ -412,46 +341,10 @@ async fn c2_long_source_index_rebuild_is_bounded_and_progresses_across_cold_page
             .await
             .unwrap();
     assert!(largest <= 4096);
-    let before = store
-        .search_source_ranges(PROJECT, "deepneedle", /*after*/ None)
-        .await
-        .unwrap();
-    assert_eq!(
-        before
-            .ranges
-            .iter()
-            .map(|range| range.seal.exact_source_locator.clone())
-            .collect::<std::collections::BTreeSet<_>>(),
-        locators.into_iter().collect()
-    );
-    store.begin_source_index_rebuild(PROJECT).await.unwrap();
-    assert!(matches!(
-        store
-            .search_source_ranges(PROJECT, "deepneedle", /*after*/ None)
-            .await,
-        Err(BlackboardStoreError::SourceIndexIncomplete)
-    ));
-    store.maintain_source_index(PROJECT).await.unwrap();
-    store.pool.close().await;
-    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
-        .await
-        .unwrap();
-    for _ in 0..10 {
-        if reopened.maintain_source_index(PROJECT).await.unwrap() {
-            break;
-        }
-    }
-    assert_eq!(
-        reopened
-            .search_source_ranges(PROJECT, "deepneedle", /*after*/ None)
-            .await
-            .unwrap(),
-        before
-    );
 }
 
 #[tokio::test]
-async fn c2_forget_fences_linked_copies_overlap_rebuild_and_native_fallbacks() {
+async fn c2_forget_fences_linked_copies_overlap_and_native_fallbacks() {
     let home = TempDir::new().unwrap();
     let store = store(&home).await;
     let text = format!(
@@ -489,14 +382,6 @@ async fn c2_forget_fences_linked_copies_overlap_rebuild_and_native_fallbacks() {
         .link_entry_source(&admission, &id, entry.revision, &seal, &spans)
         .await
         .unwrap();
-    assert!(
-        !store
-            .search_source_ranges(PROJECT, "QX-704", /*after*/ None)
-            .await
-            .unwrap()
-            .ranges
-            .is_empty()
-    );
     store
         .update_entry(PROJECT, &id, retire(&entry))
         .await
@@ -522,26 +407,6 @@ async fn c2_forget_fences_linked_copies_overlap_rebuild_and_native_fallbacks() {
             .await
             .unwrap()
     );
-    store.begin_source_index_rebuild(PROJECT).await.unwrap();
-    while !store.maintain_source_index(PROJECT).await.unwrap() {}
-    assert_eq!(
-        store
-            .search_source_ranges(PROJECT, "QX-704", /*after*/ None)
-            .await
-            .unwrap()
-            .ranges,
-        Vec::<SourceRangeRead>::new()
-    );
-    // Repair 2 excludes long-part expansion in retirement domains. Separate,
-    // independently eligible short sources remain available (covered above).
-    assert!(
-        store
-            .search_source_ranges(PROJECT, "Cedar", /*after*/ None)
-            .await
-            .unwrap()
-            .ranges
-            .is_empty()
-    );
     let before = snapshot(&store).await;
     assert_eq!(
         store
@@ -551,18 +416,6 @@ async fn c2_forget_fences_linked_copies_overlap_rebuild_and_native_fallbacks() {
         seal
     );
     assert_eq!(snapshot(&store).await, before);
-    store.pool.close().await;
-    let reopened = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
-        .await
-        .unwrap();
-    assert!(
-        reopened
-            .search_source_ranges(PROJECT, "prototype", /*after*/ None)
-            .await
-            .unwrap()
-            .ranges
-            .is_empty()
-    );
 }
 
 #[tokio::test]
@@ -673,78 +526,6 @@ async fn c2_unknown_temporal_context_and_interval_round_trip_preserve_record_clo
         serde_json::from_str::<TemporalContext>(&serde_json::to_string(&unknown).unwrap()).unwrap(),
         unknown
     );
-}
-
-#[tokio::test]
-async fn c2_source_pages_bound_escaped_metadata_progress_and_reject_cursor_drift() {
-    let home = TempDir::new().unwrap();
-    let store = store(&home).await;
-    let text = format!(
-        "{}needle exact Unicode é 👩‍🔬 {}",
-        "padding ".repeat(/*n*/ 300),
-        "\"\t\n".repeat(/*n*/ 500)
-    );
-    for index in 0..12 {
-        let mut obs = observation(&format!("{index}-{}", "event".repeat(/*n*/ 95)), &text);
-        obs.turn_id = "turn".repeat(/*n*/ 128);
-        store.observe_source(obs, &text).await.unwrap();
-    }
-    let mut cursor = None;
-    let mut seen = std::collections::BTreeSet::new();
-    let mut first_cursor = None;
-    loop {
-        let page = store
-            .search_source_ranges(PROJECT, "needle", cursor.as_ref())
-            .await
-            .unwrap();
-        assert!(serde_json::to_string(&page).unwrap().len() <= 9000);
-        assert!(!page.ranges.is_empty());
-        for range in &page.ranges {
-            assert!(range.exact_text.contains("needle"));
-            assert!(seen.insert(range.seal.exact_source_locator.clone()));
-            let exact = store
-                .read_source_range(
-                    PROJECT,
-                    &range.seal.exact_source_locator,
-                    &range.seal.digest,
-                    range.start_byte,
-                    range.end_byte,
-                )
-                .await
-                .unwrap();
-            assert_eq!(exact.exact_text, range.exact_text);
-        }
-        if first_cursor.is_none() {
-            first_cursor = page.after.clone();
-        }
-        if page.complete {
-            assert!(page.after.is_none());
-            break;
-        }
-        assert_ne!(page.after, cursor);
-        cursor = page.after;
-    }
-    assert_eq!(seen.len(), 12);
-    let cursor = first_cursor.unwrap();
-    assert!(matches!(
-        store
-            .search_source_ranges(PROJECT, "different", Some(&cursor))
-            .await,
-        Err(BlackboardStoreError::SourceCursorDrift)
-    ));
-    store
-        .observe_source(
-            observation("later", "needle later event"),
-            "needle later event",
-        )
-        .await
-        .unwrap();
-    assert!(matches!(
-        store
-            .search_source_ranges(PROJECT, "needle", Some(&cursor))
-            .await,
-        Err(BlackboardStoreError::SourceCursorDrift)
-    ));
 }
 
 #[tokio::test]

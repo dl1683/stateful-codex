@@ -53,7 +53,6 @@ mod source_group;
 mod source_group_read;
 mod source_observation;
 mod source_order;
-mod source_projection;
 mod source_retirement;
 mod succession;
 mod temporal;
@@ -591,8 +590,6 @@ enum_codec!(provenance_name, parse_provenance, BlackboardProvenanceKind, {
 
 #[derive(Debug, Error)]
 pub enum BlackboardStoreError {
-    #[error("budget_insufficient: increase the response budget; no continuation issued")]
-    SourceBudgetInsufficient,
     #[error("invalid, unavailable or changed original source; nothing was admitted")]
     InvalidSource,
     #[error("source is excluded from automatic recall; archival history remains preserved")]
@@ -605,12 +602,6 @@ pub enum BlackboardStoreError {
         "identity coverage is unavailable; legacy upgrade replay and automatic access are excluded"
     )]
     IdentityCoverageIncomplete,
-    #[error("source index rebuild is incomplete; resume bounded maintenance")]
-    SourceIndexIncomplete,
-    #[error(
-        "source cursor no longer matches query, project or eligibility; restart from the first page"
-    )]
-    SourceCursorDrift,
     #[error(transparent)]
     InvalidEntry(#[from] BlackboardError),
     #[error(transparent)]

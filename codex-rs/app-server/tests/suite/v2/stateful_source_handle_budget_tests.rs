@@ -130,17 +130,5 @@ async fn c3r1_public_eight_parts_then_ninth_steering_discloses_unknown_omissions
             text
         );
     }
-    assert!(
-        reopened
-            .search_source_ranges(
-                &project.project.id,
-                "ninth-source-independent",
-                /*after*/ None
-            )
-            .await?
-            .ranges
-            .iter()
-            .any(|range| range.exact_text.contains("ninth-source-independent"))
-    );
     Ok(())
 }

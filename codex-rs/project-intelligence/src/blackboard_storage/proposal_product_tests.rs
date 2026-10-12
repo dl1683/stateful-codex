@@ -172,20 +172,6 @@ async fn c3_product_m1_m7_verbatim_qualifiers_status_time_and_reverse_ingestion(
                 Some(context)
             );
         }
-        let purchase = reopened
-            .search_source_ranges("project-1", "QX-704", /*after*/ None)
-            .await
-            .unwrap();
-        assert!(purchase.complete);
-        let range = purchase
-            .ranges
-            .iter()
-            .find(|range| range.exact_text.contains("QX-704"))
-            .unwrap();
-        assert_eq!(
-            range.exact_text,
-            &NOTES[0][range.start_byte as usize..range.end_byte as usize]
-        );
     }
 }
 
@@ -216,15 +202,5 @@ async fn c3_product_imported_rules_and_long_qualifier_source_are_never_promoted(
             .unwrap()
             .data
             .is_empty()
-    );
-    let source = store
-        .search_source_ranges("project-1", "motor", /*after*/ None)
-        .await
-        .unwrap();
-    assert!(
-        source
-            .ranges
-            .iter()
-            .any(|range| range.exact_text.contains("motor was not damaged"))
     );
 }

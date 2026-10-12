@@ -66,17 +66,10 @@ impl BlackboardStore {
                 end -= 1;
             }
             let text = &exact_text[start..end];
-            sqlx::query("INSERT INTO capture_source_chunks(source_id, start_byte, end_byte, exact_bytes, chunk_digest, search_text) VALUES (?, ?, ?, ?, ?, ?)")
+            // Migration 0020 still requires search_text; no lexical projection reads it.
+            sqlx::query("INSERT INTO capture_source_chunks(source_id, start_byte, end_byte, exact_bytes, chunk_digest, search_text) VALUES (?, ?, ?, ?, ?, '')")
                 .bind(&source_id).bind(start as i64).bind(end as i64).bind(text).bind(digest(text))
-                .bind(crate::retirement_capture_words(text)).execute(&mut *tx).await?;
-            super::source_projection::index_chunk(
-                &mut tx,
-                &seal.observation.project_id,
-                &source_id,
-                start as u32,
-                text,
-            )
-            .await?;
+                .execute(&mut *tx).await?;
             if end == exact_text.len() {
                 break;
             }

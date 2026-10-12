@@ -155,8 +155,6 @@ pub use capture_proposal::SourceProposal;
 pub use capture_source::SourceObservation;
 pub use capture_source::SourceRangeRead;
 pub use capture_source::SourceSeal;
-pub use capture_source::SourceSearchCursor;
-pub use capture_source::SourceSearchPage;
 pub use capture_source::SourceSpan;
 pub use capture_source::SourceSpanRole;
 pub use temporal_context::EventStatus;

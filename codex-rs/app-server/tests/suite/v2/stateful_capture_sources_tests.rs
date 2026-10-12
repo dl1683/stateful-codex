@@ -402,7 +402,7 @@ async fn snapshot(pool: &sqlx::SqlitePool) -> Result<Vec<String>> {
 }
 
 #[tokio::test]
-async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebuild() -> Result<()> {
+async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_reopen() -> Result<()> {
     let (home, mut server, project, thread, responses_server) = setup().await?;
     let text = "Notes from 12 June 2024: Mara bought teal M-17 from Sol, receipt QX-704. No telephone number was supplied.";
     let mock = responses::mount_sse_once(
@@ -507,13 +507,6 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
             i64::from(span.end_byte)
         )]
     );
-    assert!(
-        !store
-            .search_source_ranges(&project, "Mara Sol receipt", /*after*/ None)
-            .await?
-            .ranges
-            .is_empty()
-    );
     let id = server.send_request("statefulMemory/forget", Some(json!({"threadId":thread,"expectedProjectId":project,"entryId":added.item.entry_id,"expectedRevision":added.item.revision}))).await?;
     let forgotten: StatefulMemoryForgetResponse = server.read_response(id).await?;
     assert_eq!(forgotten.revision, added.item.revision + 1);
@@ -580,16 +573,6 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
     pool.close().await;
     drop(store);
     let cold = BlackboardStore::open(&sqlite).await?;
-    cold.begin_source_index_rebuild(&project).await?;
-    while !cold.maintain_source_index(&project).await? {}
-    for query in ["Mara", "Sol", "receipt", "teal purchase"] {
-        assert!(
-            cold.search_source_ranges(&project, query, /*after*/ None)
-                .await?
-                .ranges
-                .is_empty()
-        );
-    }
     assert!(
         cold.read_source_range(
             &project,
@@ -614,13 +597,6 @@ async fn c2_public_forget_excludes_exact_source_and_linked_copy_after_cold_rebui
         !cold
             .source_turn_eligible(&project, &seal.observation.turn_id)
             .await?
-    );
-    assert!(
-        !cold
-            .search_source_ranges(&project, "Independent", /*after*/ None)
-            .await?
-            .ranges
-            .is_empty()
     );
     assert!(cold.get_entry(&project, &entry_id).await?.is_some());
     assert!(

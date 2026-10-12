@@ -204,27 +204,6 @@ async fn c3_public_proposals_recall_cut_source_routes_forget_and_cold_retry() ->
     );
     assert!(server.shutdown_gracefully().await?.success());
     let reopened = BlackboardStore::open(&sqlite).await?;
-    reopened.begin_source_index_rebuild(&project).await?;
-    while !reopened.maintain_source_index(&project).await? {}
-    assert!(
-        reopened
-            .search_source_ranges(&project, "QX-704", /*after*/ None)
-            .await?
-            .ranges
-            .is_empty()
-    );
-    assert!(
-        reopened
-            .search_source_ranges(
-                &project,
-                "independent unrelated control",
-                /*after*/ None
-            )
-            .await?
-            .ranges
-            .iter()
-            .any(|range| range.exact_text.contains("independent unrelated control"))
-    );
     let admission = codex_state::ThreadProjectAdmission::acquire(
         &sqlite,
         codex_protocol::ThreadId::from_string(&thread)?,
@@ -330,14 +309,6 @@ async fn c3_public_all_factual_parts_retained_without_model_writes_or_extra_call
             text
         );
     }
-    assert!(
-        store
-            .search_source_ranges(&project, "QX-704", /*after*/ None)
-            .await?
-            .ranges
-            .iter()
-            .any(|range| range.exact_text.contains("QX-704"))
-    );
     assert!(
         store
             .root_projection(RootBlackboardQuery {

@@ -69,28 +69,6 @@ pub struct SourceRangeRead {
     pub next_offset: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceSearchPage {
-    pub ranges: Vec<SourceRangeRead>,
-    pub after: Option<SourceSearchCursor>,
-    pub examined: u32,
-    pub complete: bool,
-}
-
-/// Pins query, project, source/index generation and eligibility revision across pages.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SourceSearchCursor {
-    pub project_id: String,
-    pub query_digest: String,
-    pub source_watermark: i64,
-    pub eligibility_revision: i64,
-    pub index_generation: i64,
-    pub after_source: String,
-    pub after_byte: u32,
-}
-
 impl SourceObservation {
     pub(crate) fn validate(&self, text: &str) -> Result<(), crate::BlackboardStoreError> {
         let bounded_id = |id: &str| !id.is_empty() && id.len() <= 512;
