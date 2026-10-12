@@ -564,6 +564,12 @@ fn maximal_run_state_keeps_the_obligation_ahead_of_steering_within_bounds() {
     assert!(body.contains("section=\"obligation\""));
     assert!(body.contains("This bounded view omitted or shortened unresolved steering."));
     assert!(body.contains("Semantic checkpoint: overdue (process-local checkpoint 3)"));
+    assert_eq!(
+        body.lines()
+            .filter(|line| *line == crate::completion::DELIVERABLE_RULE)
+            .count(),
+        1
+    );
 }
 
 #[test]

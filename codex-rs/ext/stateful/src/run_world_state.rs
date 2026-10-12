@@ -227,6 +227,9 @@ impl RunWorldStateStatus {
                         ),
                     ),
                 }
+                // Once for every bound run, ahead of the variable segments so it is never
+                // truncated; steering gives up its bytes so both binding markers still fit.
+                line(&mut output, DELIVERABLE_RULE);
                 append_segment(
                     &mut output,
                     MAX_OBLIGATION_BYTES,
@@ -241,7 +244,7 @@ impl RunWorldStateStatus {
                 );
                 append_segment(
                     &mut output,
-                    MAX_STEERING_BYTES,
+                    MAX_STEERING_BYTES - DELIVERABLE_RULE.len() - 1,
                     STEERING_SHORTENED,
                     |segment| {
                         render_steering(segment, steering, *steering_complete);
@@ -257,9 +260,6 @@ impl RunWorldStateStatus {
                         }
                     },
                 );
-                // Once for every bound run, after the binding obligation, steering and
-                // acceptance segments so it can never crowd them out.
-                line(&mut output, DELIVERABLE_RULE);
                 // Descriptive text comes last so a long goal or strategy can never crowd
                 // out the binding obligation and steering above.
                 let (goal, goal_shortened) = bounded_text(&run.value.goal, MAX_RENDERED_GOAL_BYTES);

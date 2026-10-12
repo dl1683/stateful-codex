@@ -61,16 +61,15 @@ use crate::world_state::project_world_state_section;
 /// background entry and the guidance on relayed words (tui8) to 14,129 (project 7,756). The
 /// Autonomous pure-answer outcome guidance took it to 14,333 (project 7,684, run 3,944).
 /// Head-and-tail excerpts fill the record's unchanged 3 KiB floor (2,705 to 3,068 bytes):
-/// 14,696. The final-message deliverable rule, rendered once for every bound run, took it to
-/// 14,900 (run 4,147).
-const MAX_FIXTURE_PACKET_BYTES: usize = 14_950;
+/// 14,696.
+const MAX_FIXTURE_PACKET_BYTES: usize = 14_700;
 /// A self-contained request defers the record and adds the scope note instead (about 600
 /// bytes): Collaborative measured 9,648 bytes at a window start against 12,010. The recall,
 /// truncated-rule, strategy and root-relative path guidance (field evidence from horizon2,
 /// prop2 and learn2) took it to 10,560 against 12,702. A background entry in the fixture
 /// and the guidance on relayed words and claims about the user (tui8) took it to 10,823
-/// against 12,965. The final-message deliverable rule took it to 11,074 against 13,491.
-const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 11_100;
+/// against 12,965.
+const MAX_SELF_CONTAINED_PACKET_BYTES: usize = 10_950;
 
 const PROJECT_ID: &str = "project-1";
 

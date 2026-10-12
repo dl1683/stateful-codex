@@ -27,7 +27,8 @@ pub(crate) const REUSABLE_LEARNING_RULE: &str = "Choose the completion dispositi
 
 /// Shared final-message rule, rendered verbatim by the run world-state packet and the run
 /// update tool's final-answer instructions.
-pub(crate) const DELIVERABLE_RULE: &str = "Your final message to the user must itself contain the deliverable (the answer, the result, or a summary of what changed and where), never only a status line such as \"Task completed\" or \"Run completed\".";
+pub(crate) const DELIVERABLE_RULE: &str =
+    "Your final message must contain the deliverable itself, not only a status line.";
 
 pub(crate) struct CompletionRecord {
     pub(crate) result: String,
