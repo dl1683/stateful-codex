@@ -13,7 +13,7 @@ use crate::config::ModelsManagerConfig;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
 use tracing::warn;
 
-pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+pub const BASE_INSTRUCTIONS: &str = codex_protocol::models::BASE_INSTRUCTIONS_DEFAULT;
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
