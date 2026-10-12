@@ -70,6 +70,8 @@ checkpoints are in the plan history, part 3.
 | Capture slice C4-C6, capture-to-use | `11a08f976`..`92efdff9f` | Landed with a cut (record below) |
 | Checkpoint E1d, plain answers in Autonomous runs | `ec7910a06`..`e009fa83f` | Landed as the fallback (record below) |
 | Stack pushed 2026-10-11 | from `ebac34e91`; pushed head `f097a8008` | Pushed on local evidence; the later cloud gate found 0 new failures caused by the stack (record below) |
+| Step 3b, deliverable guidance and warning-only diagnostic | head `64e6176ed`; follow-on `9eddc1af4` | Closed: R1-R4 not triggered; R1 only after post-outcome adjudication (record below) |
+| P1, exec bounded history reads | `862d3115d`..`b8dcee46f` | Landed with named limitations L-R1..L-R5 and L3-3 (record below) |
 
 ### Open items and cuts carried from the earlier landings
 
@@ -200,6 +202,36 @@ part 3.
     zero rejected-working routes over 104 capsules." Its tuned-set row
     (`c96429fa1`, 512 tok) scored 5/5 plain and 5/5 Stateful; on within3, now
     a regression set, 2/5 and 2/5.
+
+- **Step 3b, deliverable guidance and warning-only diagnostic: CLOSED, stays**
+  (`64e6176ed`, with the follow-on `9eddc1af4`: warn once per run;
+  status-phrase sequences). None of the predeclared revert criteria triggers
+  (SC-EVAL-044): R2 B=14 vs C=19; R3 ms4 ctl−3b +0.258, q36a3 −0.204; R4 0/22;
+  R1 0/317 after adjudication. **Disclosure:** the file-deliverable
+  interpretation used for R1 was adopted after outcomes were visible; the
+  first checker's 39/317 (12.303%) is retained (FINDINGS "3b R1 ADJUDICATED
+  and 3b CLOSED"; `sc_dogfood/integrate/reviews/adj_hunt.md`). Usefulness is
+  not established by these criteria. **OPEN:** q36a3 critical errors 3.7% to
+  9.3%, to be checked in the slice-5 matched release rerun.
+
+- **P1, exec bounded history reads: LANDED WITH NAMED LIMITATIONS**
+  (`862d3115d`..`b8dcee46f`, pushed 2026-10-12). Exec's completion backfill
+  and Autonomous reconciliation no longer call `thread/read` with
+  `include_turns: true`; an experimental app-server opt-in that only exec sets
+  retries the history projection before listing turns. Named limitations
+  (`sc_dogfood/integrate/reviews/p1_impl_report.md`):
+  - **L-R1:** no witness drives the follow-deadline and `Lagged` recovery
+    branches around both `reconcile_autonomous_wait` call sites.
+  - **L-R2:** the turn-list request-error case of reconciliation is
+    unwitnessed.
+  - **L-R3:** the autonomous end-to-end test neither forces a recovery branch
+    nor checks hydration notices, so it does not close L-R1.
+  - **L-R4:** with nothing delivered, a stale page holding an earlier
+    AgentMessage fills the turn; the backfill read has no projection barrier.
+  - **L-R5 (deferred):** a final answer delivered only by stream, followed by
+    a stale successful backfill holding an earlier AgentMessage, can still
+    overwrite it in both `-o` files.
+  - **L3-3:** payload bytes are unbounded; there is no byte cap.
 
 ## 3. Architecture and source reading path
 
@@ -391,8 +423,8 @@ The ledger is the authority; this is a pointer.
 **Newest evidence** is SC-EVAL-038 to 044 (2026-10-09 to 10-12): the capture,
 Ask and restored-read journeys, the restricted-read within1 baseline, the
 capsule offline tests, the open-model ladder (measured on bundle 83eee86b6,
-before the acceptance-ledger completion gate) and the pre-grading three-way
-harness regression check.
+before the acceptance-ledger completion gate) and the three-way
+harness regression check with its gate-bypass causal check.
 
 **Cross-session campaign** (SC-EVAL-035, 2026-10-02/03, unmerged candidate
 builds, every test n=1 per arm):
@@ -446,7 +478,7 @@ freeze; neither is an official score.
 
 - Benchmark reruns are suspended.
 - The positioning is one general harness competitive with the best model- or benchmark-specific harnesses, not a plain-Codex parity study.
-- Real-task comparisons (the open-model ladder, SC-EVAL-043, measured on bundle 83eee86b6, before the acceptance-ledger completion gate; the later three-way check is SC-EVAL-044, pre-grading) are the current evidence.
+- Real-task comparisons (the open-model ladder, SC-EVAL-043, measured on bundle 83eee86b6, before the acceptance-ledger completion gate; the later three-way check and gate-bypass causal check are SC-EVAL-044, final) are the current evidence.
 - Selection rules and earlier benchmark results: "External benchmark program" in [`STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md`](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md).
 
 ### Harness robustness backlog (from the open-model ladder)
@@ -459,28 +491,40 @@ user gets an answer. Paths are under `sc_dogfood/dsg/ladder/` unless stated.
 Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
 
 > **Label: the ladder evidence in items 2-8 was measured on bundle 83eee86b6, before the acceptance-ledger
-> completion gate.** Item 1 comes from the later three-way check (SC-EVAL-044, pre-grading).
+> completion gate.** Item 1 comes from the later three-way check and gate-bypass check (SC-EVAL-044).
 
-1. **Acceptance-mediated failures in Qwen control; harness-wide verification with gpt-6-luna pending.**
-   In SC-EVAL-044 (pre-grading), Qwen3.6-35B-A3B rc0 fell from 98 (original, 83eee86b6) to 3 (control,
+1. **Acceptance-mediated failures in Qwen control.**
+   In SC-EVAL-044, Qwen3.6-35B-A3B rc0 fell from 98 (original, 83eee86b6) to 3 (control,
    7c4707230) and 2 (3b, 64e6176ed) of 108. The regression contains directly evidenced acceptance-mediated
    blocked runs and acceptance-repair loops, alongside timeout failures; the gate's individual aggregate effect is
-   not identified and environmental contributions are not excluded. A causal gate-bypass check is planned.
+   not identified and environmental contributions are not excluded.
+   **Gate-bypass check (SC-EVAL-044; `sc_dogfood/integrate/reviews/gb_hunt.md`):** "The bypass result strongly
+   supports the acceptance completion gate decision as the main cause of the q36a3 exit-status regression on these
+   20 t1/s1 keys. It does not isolate the effect from load and time, establish recovery across the full ladder, or
+   establish usefulness recovery." (rc0 original 16, ctl 0, gb 19 of 20.)
    - (a) **Non-git workspaces record passing checks as "unavailable"** (`777fac767` removed non-Git workspace
      enumeration). Qwen control `csv__t1/s1` runs checks returning exit code zero and `OK`; the ledger records
      `outcome:"unavailable"` ("the check changed files no criterion pins, or the workspace could not be
      identified, so its effects are unknown"). The snapshot contains no Git repository. This does not prove that
-     every unavailable receipt has that cause. **Harness-wide: verification with gpt-6-luna pending.**
+     every unavailable receipt has that cause. **Harness-wide for the host-command evidence path, verified with
+     gpt-6-luna (n=1):** "the git-only workspace identity failure is real shared host-command evidence behaviour
+     (acceptance_workspace.rs:214/160/93 -> acceptance_observation.rs:384), i.e. harness-wide for that evidence
+     path" (`sc_dogfood/campaign2/handson_gate/RESULTS.md`, Corrections).
    - (b) **Plain questions end Blocked after acceptance refusals.** Qwen control `qaconcept__t2/s1` exits rc1
      after 211 seconds ("completion refused; the run stays running (refusal 1 of 3 without acceptance progress
      before the host blocks it as partial). Unmet acceptance gates: C1 ... omission proposal awaiting review"),
-     with `status:"blocked", revision:20`; its final explains that the answer was already supplied. **Harness-wide: verification
-     with gpt-6-luna pending.**
+     with `status:"blocked", revision:20`; its final explains that the answer was already supplied. **With
+     gpt-6-luna (n=1):** the plain question incurred one malformed completion rejection and one omission-gate
+     refusal because Luna attempted `stateful_run_update`, then the answer footer ended it answered after one
+     refusal; repeated completion attempts without acceptance progress can instead cause host blocking. n=1 does
+     not isolate instruction-following as the cause of the Luna/Qwen difference (same Corrections, items 5-6).
    - (c) **Acceptance repair produces schema and revision loops.** Control errors include
      "nothing changed: changes[0] needs text for this action" (189 times across control), "nothing changed:
      changes[0] does not take statement for this action" and "openIssues is only valid when status is
      completed", plus failures over missing criteria, checker files, pinned artifacts and incompatible manual
-     observations. **Harness-wide: verification with gpt-6-luna pending.**
+     observations. **With gpt-6-luna (n=1):** the work trial's stderr has 18 "nothing changed" lines, and its
+     initial checker admission failed because the stored criterion had an absolute checkCwd (same Corrections,
+     item 7). n=1; obedience is not isolated.
 2. **Status-only finals.** ms4 (Mistral-Small-4): 40 of 108 session-final
    answers are only a status line, across 25 tasks (30 are `Task completed.`).
    Two more ms4 finals are the raw completion-tool JSON. Other arms: q36a3 1,
@@ -490,7 +534,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    deck t2/s2, postmortem t2/s2), and memdecide t2/s1 says the Slack summary is
    above without reproducing it.
    Fix: step 3b (guidance plus a warning-only diagnostic; frozen
-   `sc_dogfood/integrate/briefs/step3b_freeze.md`), **in progress**. 3b never
+   `sc_dogfood/integrate/briefs/step3b_freeze.md`), landed and closed with no R1-R4 revert (SC-EVAL-044); surviving real-model omissions stay OPEN. 3b never
    re-prompts. A bounded harness re-prompt for the deliverable stays a candidate
    if the predeclared 3b rerun leaves omissions.
 3. **Tool-argument type mismatches.** step37f (Step-3.7-Flash): 1,743

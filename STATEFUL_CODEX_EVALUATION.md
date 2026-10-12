@@ -63,7 +63,7 @@ records between them, were moved verbatim to
 | SC-EVAL-041 | 10-11 | Working-set capsule offline tests, piggyback cut | Tuned gains did not generalise; structural floor 0 wrong-active and 0 rejected-working; piggyback cut | [entry](#sc-eval-041-working-set-capsule-offline-tests-and-the-piggyback-cut-2026-10-11) |
 | SC-EVAL-042 | 10-11 | Hands-on restored reads and Ask (73d97824a; f097a8008 control) | Cold recall and rule application pass after manual admission; spoken correction not saved as supersession | [entry](#sc-eval-042-hands-on-restored-reads-and-ask-build-73d97824a-with-a-control-repeat-on-f097a8008-2026-10-11) |
 | SC-EVAL-043 | 10-11/12 | Open-model ladder, one harness across open models (Stateful only) | Measured on bundle 83eee86b6, before the acceptance-ledger completion gate; 11 arms, quality 4.74-9.71; harness failure classes recorded; no Stateful-off arm | [entry](#sc-eval-043-open-model-ladder-one-harness-across-open-models-2026-10-11-runs-ended-2026-10-12-0149z) |
-| SC-EVAL-044 | 10-12 | Harness regression check: original 83eee86b6 vs control 7c4707230 vs 3b 64e6176ed (pre-grading) | Counts reproduce; Qwen rc0 98 / 3 / 2; R2 not triggered (B=14, C=19); R1, R3, R4 pending; grading in progress | [entry](#sc-eval-044-harness-regression-check-original-83eee86b6-vs-control-7c4707230-vs-3b-64e6176ed-pre-grading-2026-10-12) |
+| SC-EVAL-044 | 10-12 | Harness regression check: original 83eee86b6 vs control 7c4707230 vs 3b 64e6176ed; gate-bypass check | Qwen rc0 98 / 3 / 2; 3b closed, R1-R4 not triggered (R1 0/317 after post-outcome adjudication, first checker 39/317); gate bypass rc0 16 / 0 / 19 on 20 q36a3 keys strongly supports the gate as main cause there (load/time not isolated; usefulness not established); OPEN q36a3 critical errors 3.7% to 9.3% | [entry](#sc-eval-044-harness-regression-check-original-83eee86b6-vs-control-7c4707230-vs-3b-64e6176ed-2026-10-12) |
 
 Unnumbered records, all archived in the [history file](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md): live
 interface validation (09-21/22), open release evidence, project-state
@@ -319,15 +319,21 @@ robustness backlog"):
   of the quality gap each class causes has not been isolated.
 - q35d9h has only 4 nonzero exits but a 25.0% critical rate.
 - No Stateful-off arm was run, so the ladder says nothing about Stateful's contribution.
-- The predeclared 3b rerun of ms4 and q36a3 has run, with a control matched on evaluated keys, external prompts and chain order (full operational matching remains incompletely evidenced); see SC-EVAL-044 (pre-grading).
+- The predeclared 3b rerun of ms4 and q36a3 has run, with a control matched on evaluated keys, external prompts and chain order (full operational matching remains incompletely evidenced); see SC-EVAL-044 (final; 3b closed).
 
 Evidence: sc_dogfood/dsg/ladder/results.json, costs.json, excluded.json, LOG.md, finish.log, keys/ and
 grading_scores/, runs/<arm>/sessions.jsonl; sc_dogfood/dsg/RUN_LOG.md (2026-10-11 17:15Z onward).
 
-## SC-EVAL-044: harness regression check: original 83eee86b6 vs control 7c4707230 vs 3b 64e6176ed (pre-grading, 2026-10-12)
+<a id="sc-eval-044-harness-regression-check-original-83eee86b6-vs-control-7c4707230-vs-3b-64e6176ed-pre-grading-2026-10-12"></a>
 
-**Status: pre-grading.** Grading is in progress. R1, R3 and R4 are pending. A causal gate-bypass check is planned.
-No overall shipping verdict is established.
+## SC-EVAL-044: harness regression check: original 83eee86b6 vs control 7c4707230 vs 3b 64e6176ed (2026-10-12)
+
+**Status: final; 3b closed.** None of R1-R4 triggers a revert, so 3b (`64e6176ed`) stays, with the follow-on
+`9eddc1af4` (warn once per run; status-phrase sequences). R1 is 0/317 only under a post-outcome adjudication
+interpretation; see the disclosure below. Usefulness is not established by these criteria. The gate-bypass causal
+check has run and strongly supports the acceptance completion gate decision as the main cause of the q36a3
+exit-status regression on 20 t1/s1 keys, within the scope limits below. One item is OPEN (q36a3 critical errors).
+The pre-grading text that follows is kept as recorded; the final sections at the end supersede its pending items.
 
 This is the predeclared 3b rerun (FINDINGS 2026-10-11, "3b ladder rerun: revert criteria", Amendment 2). ms4
 (Mistral-Small-4) and q36a3 (Qwen3.6-35B-A3B) ran the frozen r2+r3 tasks, 108 sessions per arm, on a control
@@ -452,5 +458,103 @@ hydration notices are abundant in successful original sessions; neither is a new
   configurations. Full operational equivalence is not established by the retained manifests. Neither improved answer
   quality nor diagnostic-caused failures may be concluded from this table alone."
 
-Backlog: STATEFUL_CODEX_CURRENT_STATE.md section 7, "Acceptance-mediated failures in Qwen control; harness-wide verification with gpt-6-luna pending." Evidence: sc_dogfood/dsg/ladder/measure_3b.py, measure_3b.md, manifests/,
-runs/{ms4_ctl,ms4_3b,q36a3_ctl,q36a3_3b}/logs/ and snap/; sc_dogfood/integrate/reviews/threeway_hunt.md.
+### 3b revert criteria R1-R4 (final)
+
+Sources: operator `sc_dogfood/dsg/ladder/measure_3b.md`, Codex hunt `sc_dogfood/dsg/reviews/3b_w8_errorhunt.md`,
+adjudication hunt `sc_dogfood/integrate/reviews/adj_hunt.md`; FINDINGS "3b R1 ADJUDICATED and 3b CLOSED"
+(2026-10-12).
+
+- **R2: not triggered.** Body-aware B=14 vs C=19 (the raw `-o` count B=13 is kept separately).
+- **R3: not triggered.** ms4 ctl 5.435 vs 3b 5.177, ctl−3b +0.258; the paired 3b−ctl mean is −0.258 (per-task bootstrap 95% [-0.889, 0.367]);
+  q36a3 ctl 7.762 vs 3b 7.966, −0.204.
+- **R4: not triggered.** 0 of 22 reviewed sessions were caused by the diagnostic (22/22 no; 0 failed turns).
+- **R1: not triggered under the adopted interpretation.** "R1 adjudication is complete under the coordinator's
+  post-outcome file-deliverable interpretation: 0/317 false positives (0%), zero warned correct-short-answer
+  sessions, and zero unknown R1 dispositions. All 39 initially positive diagnostic items and the one initially
+  positive short-answer item received 'no'. R1's revert condition is not triggered under that interpretation."
+  The first checker's result is retained: 39/317 (12.303%), all from three file-deliverable sessions ending in a
+  bare "Task completed", with one warned correct-short-answer session. The second checker rejected all 16
+  re-checked positives.
+- **Adjudication disclosure (verbatim):** "The coordinator adopted this file-deliverable interpretation after
+  seeing the first checker’s 39 positive classifications and the second checker’s rejection of all 16 positives
+  rechecked. The third checker applied that interpretation with arm identities withheld. This introduces potential
+  outcome-informed adjudication bias; it does not establish intentional bias. Under the adopted interpretation, R1
+  is 0/317 false positives and zero warned correct-short-answer sessions. The first-checker result remains 39/317
+  (12.303%), with one warned correct-short-answer session. The numerical thresholds were unchanged; the operational
+  interpretation was specified after outcomes were visible."
+- **Limitations:** the 3b warning was visible in 23 ms4_3b grading transcripts (imperfect blinding); graders
+  treated answers given only in earlier turns inconsistently (28 cases, both arms); ctl-vs-3b binary identity rests
+  on tarball sha256 only (the recorded hash was the bin/codex wrapper; codex.real was not hashed; ctl runners
+  deleted).
+
+**3b verdict:** 3b (`64e6176ed`) stays, with the follow-on `9eddc1af4`. Usefulness is not established by these
+criteria.
+
+**OPEN:** q36a3 critical-error rate rose from 3.7% (ctl, 4/108) to 9.3% (3b, 10/108). No registered trigger; it may
+be noise. It is to be checked explicitly in the slice-5 matched release rerun.
+
+### Gate-bypass causal check (q36a3, 20 t1/s1 keys)
+
+Codex hunt: `sc_dogfood/integrate/reviews/gb_hunt.md`. The bypass build is commit
+`35847f16902fed2a9f0e0978386e59b2d4a6d07d`, parent `7c470723062e42f1f279f8bcb80403bbbbba782a` (the control). Its
+complete diff changes two files, +15/−4, covering the extension's Proceed decision and runtime acceptance-policy
+rejection checks. Guidance and ledger tools are unchanged; verification leases, revision checks and preceding
+evaluation machinery remain. The recorded `codex.real` sha256 is
+`14c51de6788137961f8d87f52eae181b5798c2db0af161d3d64a502006bb7499`; this is consistent recorded provenance, not an
+independently reproduced build. Ctl's real executable was not separately hashed. The predeclared threshold (≥10/20)
+was recorded in `sc_dogfood/integrate/EXEC_LOG.md` before the run. The hunt independently selected the first 20
+alphabetic task keys and reproduced every per-key field and aggregate.
+
+| Metric | Original | ctl | gb |
+|---|---:|---:|---:|
+| Sessions | 20 | 20 | 20 |
+| rc0 | 16 | 0 | 19 |
+| rc1 | 4 | 13 | 1 |
+| rc124 | 0 | 7 | 0 |
+| `turn.started` events | 166 | 101 | 45 |
+| Sessions with acceptance stderr lines | 0 | 19 | 0 |
+| Acceptance stderr lines | 0 | 277 | 0 |
+| Sessions with literal “completion refused” lines | 0 | 19 | 0 |
+| Literal “completion refused” lines | 0 | 32 | 0 |
+| Nonempty answer files | 20 | 13 | 20 |
+| Summed session seconds | 7,329 | 52,069 | 2,889 |
+
+“Acceptance lines” means stderr lines containing that substring. Zero such lines does not mean no acceptance
+ledger: gb’s completed snapshot results still disclose unmet omission proposals.
+
+Corrected wording (verbatim from the hunt):
+1. “The bypass result strongly supports the acceptance completion gate decision as the main cause of the q36a3
+   exit-status regression on these 20 t1/s1 keys. It does not isolate the effect from load and time, establish
+   recovery across the full ladder, or establish usefulness recovery.”
+2. “Summed session durations were 7,329 / 52,069 / 2,889 seconds; these are not arm elapsed wall-clock times.”
+   Gb’s actual launch-to-last-session interval was 270 seconds, 17:07:52–17:12:22 UTC.
+3. “The gate-bypass report was generated by gb/gb_report.py and independently reproduced from sessions.txt, parsed
+   JSONL events, stderr, and answer files.”
+4. “Gb produced 19 successful process exits and 20 nonempty answer files. Sampled snapshots contain substantial
+   deliverables, but some final answer files omit the deliverable or its location. Usefulness has not been
+   established by these counts.” Examples: the gb `dbmemo` answer is only an outcome block, though its snapshot
+   contains a 670-word `memo.md`; the gb `qaconcept` answer omits the explanation and `math.isclose()` example that
+   appear earlier in the JSONL; the gb `memdecide` answer contains the requested substantive summary.
+
+**Load.** The bypass arm ran later, after a GPU restart, at different concurrency. Lower load plausibly reduces
+latency and timeout risk, especially for ctl’s seven rc124 sessions (`code`, `csv`, `decisions`, `deck`, `finance`,
+`memcontinue`, `postmortem`), and it cannot be dismissed. However, reconstructed snapshot state shows ctl ended
+15 Blocked / 5 Running: all 13 rc1 sessions were Blocked, and two rc124 sessions, `decisions` and `memcontinue`,
+were already Blocked. Logs show deterministic acceptance problems involving workspace identification, checker
+admission, omission proposals and repair contracts, which more throughput does not directly repair. Gb ended
+19 Completed / 1 Blocked, with `migration` remaining Blocked. Load alone is therefore a weak explanation for the
+entire 0→19 recovery, though this experiment cannot quantify its contribution.
+
+**Fewer turns.** All 45 gb turn starts have matching `turn.completed` events. Sampled snapshots contain `lesson.md`
+and `quiz.md`, the database memo, a PowerPoint deck and CSV analysis artifacts; there is no evidence of wholesale
+truncation. 89 of the 121 fewer turns come from four original failures that each consumed 25 turns (`math`,
+`memcontinue`, `memdecide`, `qaconcept`); their gb total is 11 turns. The reduction therefore substantially
+reflects avoided continuation exhaustion, alongside shorter successful runs.
+
+Supported conclusion (hunt): strong evidence for gate-mediated termination failure on this subset, with unresolved
+load/time attribution and no demonstrated usefulness recovery.
+
+Backlog: STATEFUL_CODEX_CURRENT_STATE.md section 7, "Acceptance-mediated failures in Qwen control". Evidence:
+sc_dogfood/dsg/ladder/measure_3b.py, measure_3b.md, handchecks_3b.json, r3_w8.md, manifests/ (including
+manifests/raw/q36a3_gb/), runs/{ms4_ctl,ms4_3b,q36a3_ctl,q36a3_3b,q36a3_gb}/logs/ and snap/, gb/gb_report.py;
+sc_dogfood/integrate/reviews/threeway_hunt.md, adj_hunt.md, gb_hunt.md; sc_dogfood/dsg/reviews/3b_w8_errorhunt.md.
