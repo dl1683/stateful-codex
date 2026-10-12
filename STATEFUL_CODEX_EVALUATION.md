@@ -2999,3 +2999,159 @@ Its recall losses came from four places:
 
 These are the targets of the turn-boundary Forget work with restored reads, and of slices A and B. The
 baseline is repeated after reads return. Evidence: sc_dogfood/campaign2/baseline_rr1/NOTES.md.
+
+## SC-EVAL-041: working-set capsule offline tests and the piggyback cut (2026-10-11)
+
+Offline reducer tests on recorded rollouts. Each set has n=1 trajectory per arm. o200k_base tokens stand in for Luna
+tokens. A needle counts only when it is exact at its probe turn.
+
+| Test | Reducer | Plain | Stateful |
+| --- | --- | --- | --- |
+| Tuned set (baseline_rr1), first run | stage (b) 8cfb6c70a | 2/5 at both caps | 3/5 at 2,048 B, 2/5 at 512 tok |
+| Tuned set after 14 generic rules (the set they were tuned on) | 01a0e96d1, 512 tok | 4/5 | 5/5 |
+| Held-out within3 (spec frozen before any output) | 01a0e96d1 | 2/5 at both caps | 2/5 at both caps |
+| Structural floor, tuned set (grammar iterated on it) | c96429fa1, 512 tok | 5/5 | 5/5 |
+| Structural floor, within3 (now a regression set) | c96429fa1 | 2/5 | 2/5 |
+
+- The tuned gains did not generalise. On within3 the 01a0e96d1 capsule carried a superseded user rule as active, and
+  listed a rejected tool as a working route.
+- The floor holds both hard gates on within3: zero wrong-active rules and zero rejected-working routes over 104
+  capsules. The checker fires on the old outputs, so the zeros mean something. Route lines had empty command text in
+  82 of 104 capsules; this was fixed in be0135d0f.
+- **Three-way** (53 compaction boundaries, gpt-6-luna high, isolated local reconstruction): the piggyback arm equals
+  structural-only (tuned 4/7 and 4/7; within3 2/5 and 2/5). The model returned explicit empty records at 46 of 53
+  boundaries and no trailer at 4; 2 records validated. A hand upper bound reached 5/7 and 4/5, so the content was
+  available. Piggyback cost +33% units and +89% compaction latency.
+- **How the three-way was run.** It was an offline LOCAL counterfactual with experimental overrides for Lite
+  withholding and for provenance (`capsule_3way/harness_patch.diff`). Luna's product path had piggyback disabled.
+  The native-only calls shared the piggyback chain's reconstructed inputs; they were not chained independently.
+- **Rubric change.** The earlier five-needle totals accepted an unlabelled exact N1 literal. The three-way's
+  seven-needle rubric requires baseline attribution, so its scores are not directly comparable with those totals.
+- Piggyback stage (1) drew three consecutive STOP/CUT reviews, each finding a new in-band leak path.
+- **Decision:** the stop condition was met and piggyback was cut (reverted in 717fc9d61). The program moved to
+  Forget plus restored reads. Stage (a) and the floor were pushed inactive in the f097a8008 stack.
+
+Evidence: sc_dogfood/campaign2/capsule_offline/NOTES.md, capsule_heldout/NOTES.md and NOTES_floor.md,
+capsule_3way/NOTES.md; integrate/reviews/capsule_b_report.md, piggyback_s1_review.md (and review2, review3),
+piggyback_s2_report.md; integrate/EXEC_LOG.md; campaign2/FINDINGS.md (2026-10-11 capsule entries).
+
+## SC-EVAL-042: hands-on restored reads and Ask, build 73d97824a, with a control repeat on f097a8008 (2026-10-11)
+
+This was a real TUI and exec journey: gpt-6-luna high, a fresh home and store, a 5-file Python project, n=1 per check.
+
+Two confounds apply to the PASS rows:
+- Recall and application passed **after manual memory admission and correction**. On 73d9 the long spoken decision
+  was not admitted, so the tester used `/memory add`, `/memory apply` and `/memory correct`. The f097 control inserted
+  the decision and the rule by CLI. Natural-speech admission was not uniformly successful.
+- Session A ran without the code-mode host; later sessions had it.
+
+| Check | 73d97824a (unpushed) | f097a8008 control (pushed; condensed exec journey) |
+| --- | --- | --- |
+| Cold recall of decision and current rule in a fresh thread | PASS (10 s, 0 tools) | PASS |
+| Rule applied in follow-up work | PASS: zero product interventions; one test-side intervention to restore the intended sandbox setting | PASS (Ruff on src/ only) |
+| Ask journey recalled next "day" | PASS (17 s), but Ask proposed nothing to memory | not run |
+| Spoken correction saved as supersession | FAIL: proposed as a separate rule rather than a supersession, and not applied. A manual `/memory correct` then superseded the old rule. | not run |
+| Forget | PASS for receipt wording and removal from fresh memory reads. Continuity withholding was not tested (the turn had aged out of the 10-turn window). | receipt carries the final contract; a fresh thread still gave the forgotten rule as **current**, quoting the user's earlier message from continuity (a permitted derivative, but mislabelled) |
+| "History could not be read" banner | present (defect) | absent (fix holds) |
+
+New defects on 73d97824a:
+- a stale agent finding labelled `sourceVerified` and current;
+- unapplied proposals listed as knowledge;
+- a slash-command typo persisted in continuity.
+
+On f097a8008, exec Work did not admit "For this project, run Ruff on src/ only before commits.", yet the model said
+"I've recorded the project rule". This is an overstated receipt.
+
+Cost on 73d97824a: 1.57M input (88% cached) and 16k output across 5 threads. The 73d9 results were not rescored.
+
+Evidence: sc_dogfood/campaign2/handson_73d9/JOURNEY.md, campaign2/handson_f097/CONTROL.md, campaign2/FINDINGS.md
+(2026-10-11 hands-on and control-repeat entries).
+
+## SC-EVAL-043: open-model ladder, one harness across open models (2026-10-11; runs ended 2026-10-12 01:49Z)
+
+This was a Stateful-only run: bundle 83eee86b6, Autonomous, effort high unless noted. It used the frozen r2+r3 real
+tasks: 32 tasks, 2 trials, 108 sessions per model, isolated chains. Grading was blind Claude grading, 0-10, against
+rubrics frozen before any output.
+
+Quality is session grades averaged to trial means, then equal-weight task means. Cost is GPU node lifecycle (boot,
+smoke and idle tail included) x Spot list $/h x the model's share of the node. Runner CPU is excluded.
+
+Across 186 re-graded sessions, the mean within-session grading range was 0.50. No uncertainty interval for
+between-model quality differences was computed.
+
+| Arm (model) | Serving | Tasks | Quality all / r2 / r3 | Critical % | rc!=0 of 108 | Recorded input | Actual $ | Quality pts per $ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ds41fl (DeepSeek V4.1 Flash, anchor) | B200 node TP8 | 29 | 9.71 / 9.61 / 9.81 | 0.0 | 12 | 58.3M | 24.29 | 11.59 |
+| q38d27x (Qwen3.8-27B) | 4xH100, effort **xhigh** | 32 | 9.63 / 9.70 / 9.55 | 0.0 | 0 | 79.0M | 24.04 | 12.82 |
+| qfn38b (Qwen3.8-Flash-Next) | 4xH100, effort **xhigh** | 32 | 9.54 / 9.47 / 9.63 | 0.0 | 14 | 128.3M | 39.54 | 7.72 |
+| mimo26f (MiMo-V2.6-Flash) | half B200 | 32 | 9.30 / 9.17 / 9.46 | 2.8 | 1 | 90.2M | 20.26 | 14.69 |
+| glm53f (GLM-5.3-Flash) | half B200 | 32 | 9.13 / 9.24 / 9.01 | 0.9 | 1 | 57.4M | 20.26 | 14.42 |
+| mmm3m (MiniMax-M3), infra-affected | 8xH100 | 29 | 8.79 / 9.05 / 8.47 | 0.0 | 23 | 98.7M | 158.31 | 1.61 (not comparable) |
+| q36a3 (Qwen3.6-35B-A3B) | 1xH100 | 32 | 8.02 / 8.11 / 7.91 | 11.1 | 10 | 72.2M | 5.64 | 45.48 |
+| step37f (Step-3.7-Flash) | 4xH100 | 32 | 7.32 / 7.41 / 7.22 | 10.3 | 100 | 297.5M | 54.72 | 4.28 |
+| gr42d8x (Granite-4.2-8B) | 4xH100 | 32 | 6.54 / 6.47 / 6.61 | 5.6 | 69 | 180.0M | 43.81 | 4.77 |
+| q35d9h (Qwen3.5-9B) | 1xH100 | 32 | 6.04 / 6.08 / 5.99 | 25.0 | 4 | 230.1M | 7.66 | 25.22 |
+| ms4 (Mistral-Small-4) | 2xH100, role hook | 32 | 4.74 / 5.17 / 4.26 | 24.1 | 54 | 118.9M | 30.20 | 5.02 |
+
+**Rows:** rows use the corrected results.json snapshot dated 2026-10-12 02:29Z and LOG.md's "Corrected results"
+section. The ladder operator was still updating files when this was written, so this cites snapshot 02:29Z.
+
+**Column notes:**
+- **Critical %** counts eligible sessions once, applying majority voting over each session's grades with ties
+  counted critical.
+  - Critical rates are q36a3 11.1%, mimo26f 2.8% and glm53f 0.9%. The other displayed rates are unchanged from
+    the earlier observation-rate table.
+  - Eligible-session denominators are 94 for ds41fl and mmm3m, 107 for step37f, and 108 for the other arms.
+- **Recorded input** uses the final cumulative usage counters once per session. Unknown-usage sessions remain
+  excluded; all of them are nonzero exits (ds41fl 12, qfn38b 14, mmm3m 7, step37f 4, gr42d8x 13, ms4 4).
+  - The earlier figures in this entry summed cumulative counters across turns, and were inflated.
+- **step37f cost:** actual GPU lifecycle cost $54.72; quality points per dollar 4.28. Billing ends at the
+  20:51:45Z Spot preemption.
+
+**mmm3m** is a merged, infrastructure-affected row: mmm3c chains plus an mmm3d rerun of 40 chains. 14 of its sessions
+are excluded as infra-invalid after bridge outages. It remains unsuitable for a clean cost comparison, because its
+lifecycle cost includes the outages and reruns (a clean run would be about $85).
+
+**Named deviations** (`LOG.md`):
+- q38d27x and qfn38b ran at effort xhigh, because the server rejects "high". They are not directly comparable with the
+  effort-high rows.
+- ms4 ran through the `devrole.py` role rewrite and a chat-completions bridge.
+- ds41fl excludes 7 chains (14 sessions): the harness attached images that its vision-off serving rejected
+  (`excluded.json`).
+- step37f, qfn38b, gr42d8x and q38d27x ran on substitute or larger shapes.
+- 1 step37f session is excluded for a Spot preemption.
+
+**Discarded or superseded attempts** are not in the table but are counted in `costs.json`:
+- q38d27 (1xH100, 30 of 108 timeouts), $19.26;
+- qfn38 (preempted): its recorded preempted GPU lifecycle cost was $54.73. The separate $85.16 note is inconsistent
+  with that lifecycle record and remains unreconciled;
+- the mmm3 attempts, $106.54;
+- the gr42d8 2xL4 and 1xH100 attempts, $9.26;
+- the q35d9 2xL4 attempt, $1.64.
+
+Wave-1 numbers in FINDINGS (q36a3 8.04, mimo26f 9.32, glm53f 9.16) moved by at most 0.03 as more calibration grades
+were added.
+
+**Failure classes** (harness signals; detail and fixes in STATEFUL_CODEX_CURRENT_STATE.md section 7, "Harness
+robustness backlog"):
+- ms4: 40 status-only finals.
+- step37f: 1,279 unsigned decimal digit strings supplied to integer fields; 92 rc=1.
+- rc=1 sessions that ran exactly 25 turns: q36a3 9 of 10, ms4 48 of 48, step37f 84 of 92 (7 more ran 26 turns),
+  gr42d8x 36 of 38, q35d9h 3 of 4 (1 more ran 26).
+- A hydration "error" item on every continuation turn.
+- Timeouts and capacity saturation on small GPUs. Saturation was observed directly only on gr42d8h; other timeout
+  causes are not isolated.
+
+**Reading:**
+- On the 29 tasks shared with the eligible ds41fl anchor, quality gaps below the anchor are approximately 0.09 for
+  q38d27x, 0.18 for qfn38b, 0.45 for mimo26f and 0.62 for glm53f. The full-table means use different task sets.
+  q38d27x and qfn38b also ran at xhigh. No between-model uncertainty interval was computed.
+- ms4, step37f and gr42d8x have most of their sessions ending nonzero. Those sessions hold 84.1%, 95.0% and
+  74.1% of their recorded input; for q36a3 the share is 13.5%. Those exits include status-only and completion-loop patterns, rejected tool arguments and timeouts. How much
+  of the quality gap each class causes has not been isolated.
+- q35d9h has only 4 nonzero exits but a 25.0% critical rate.
+- No Stateful-off arm was run, so the ladder says nothing about Stateful's contribution.
+- The 3b rerun of ms4 and q36a3 is predeclared and pending.
+
+Evidence: sc_dogfood/dsg/ladder/results.json, costs.json, excluded.json, LOG.md, finish.log, keys/ and
+grading_scores/, runs/<arm>/sessions.jsonl; sc_dogfood/dsg/RUN_LOG.md (2026-10-11 17:15Z onward).

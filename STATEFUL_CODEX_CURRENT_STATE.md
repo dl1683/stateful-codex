@@ -479,6 +479,133 @@ freeze; neither is an official score.
 - Whether the full root stays loaded after an in-thread compaction is the
   master plan's open decision.
 
+### Harness robustness backlog (from the open-model ladder)
+
+Added 2026-10-11. The open-model ladder (SC-EVAL-043) ran one Stateful Codex
+bundle (83eee86b6, Autonomous, 108 sessions per model) across open models.
+Failures on small and mid-size models are read here as **harness signals**:
+each one is a place where the harness, not only the model, decides whether the
+user gets an answer. Paths are under `sc_dogfood/dsg/ladder/` unless stated.
+Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
+
+1. **Status-only finals.** ms4 (Mistral-Small-4): 40 of 108 session-final
+   answers are only a status line, across 25 tasks (30 are `Task completed.`).
+   Two more ms4 finals are the raw completion-tool JSON. Other arms: q36a3 1,
+   mmm3m 2, every other row 0. This mirrors baseline Codex finishing without
+   the output and needing a re-prompt. Pointer-only omissions are counted
+   separately: q36a3 has three finals that say "see ... above" (deck t1/s2,
+   deck t2/s2, postmortem t2/s2), and memdecide t2/s1 says the Slack summary is
+   above without reproducing it.
+   Fix: step 3b (guidance plus a warning-only diagnostic; frozen
+   `sc_dogfood/integrate/briefs/step3b_freeze.md`), **in progress**. 3b never
+   re-prompts. A bounded harness re-prompt for the deliverable stays a candidate
+   if the predeclared 3b rerun leaves omissions.
+2. **Tool-argument type mismatches.** step37f (Step-3.7-Flash): 1,743
+   argument-type rejections in 104 of 108 sessions (`codex_core::tools::router`
+   in `s*.err`). 1,279 rejections supplied unsigned decimal digit strings to
+   integer fields (`"1"` for a u64). Twenty supplied other strings, including
+   numeric representations invalid for the expected integer type, empty
+   strings, placeholders and markup. 431 contain valid JSON
+   objects or arrays encoded as strings. Four more struct or sequence
+   rejections contain malformed JSON, XML or a JSON scalar. 9 are boolean
+   strings. 92 of its 108 sessions exit rc=1.
+   Among the other ladder arms, numeric-string integer rejections appear only
+   in mmm3m (6 lines across 3 sessions). Other arms also have nonnumeric
+   string-ID/integer mismatches, for example q35d9h `"7af948"`.
+   Fix: lenient schema coercion at the tool boundary (a lossless numeric string
+   becomes an integer; a JSON-encoded string becomes the expected object or
+   array), with a logged warning and a counter. Anything else stays rejected.
+3. **Loops on the completion step.** q36a3 (Qwen3.6-35B-A3B): 10 of 108
+   sessions exit rc=1. 9 of the 10 ran to exactly 25 turns without completing
+   the run. All 10 carry completion-contract rejections (46 lines, for example
+   "completionDisposition noReusableLearning completes with the result only;
+   omit rootRevision, ..." and "run revision conflict").
+   The tenth exit, memcontinue t2/s1, ended after 4 turns. It followed a
+   successful Blocked update at revision 5, and Autonomous exec returns rc=1
+   for that status (archived rollout in `runs/q36a3/snap/`).
+   Exactly 25 turns (maximum cumulative `stateful_attribution.turns`) is also
+   the pattern for ms4 48 of 48 rc=1 sessions, step37f 84 of 92, gr42d8x 36 of
+   38 and q35d9h 3 of 4. Another 7 step37f sessions and 1 q35d9h session ran
+   26 turns. Rejections are common even in sessions that end rc=0 (q36a3 89 of
+   98).
+   **Correction:** the 3b freeze (§§7/9) and the predeclared FINDINGS entry
+   originally classified these ten exits as hydration failures. Both have now
+   been amended: nine sessions ran 25 turns with rejected completion updates;
+   memcontinue t2/s1 ended after four turns following a successful Blocked
+   update. The hydration message is in 107 of q36a3's 108 sessions, including
+   97 of its 98 rc=0 sessions, and is counted separately, not as an exit cause.
+   Fix: the completion tool normalises an unambiguous but over-specified call
+   (drops the fields the chosen disposition forbids, with a warning) instead of
+   rejecting it. After repeated completion rejections in one run, it returns a
+   minimal valid example, or ends the turn with the answer and a clear blocked
+   status, rather than continuing to the turn ceiling.
+4. **Hydration error on every continuation (separate harness defect).** In
+   Autonomous exec, `thread/read` is called with `include_turns: true`
+   (`codex-rs/exec/src/lib.rs` 1730-1737 in `reconcile_autonomous_wait`, and
+   2180-2187). The app-server answers with its paginated-thread deprecation
+   notice (`app-server/src/request_processors/thread_processor.rs:42`). Exec
+   JSONL then prints that notice as an `error` item, once per continuation (24
+   in a 25-turn session). It appears in 94-107 of 108 sessions on the arms
+   with long sessions (gr42d8x, mmm3m, ms4, q35d9h, q36a3, step37f), and in
+   2-19 of 108 on the others. It is non-fatal, but it is a false error item and
+   re-reads the full history on every continuation. The call sites are read
+   from source; the per-session link to the reconcile call is inferred from the
+   one-per-continuation count.
+   Fix: page with `thread/turns/list` (or read only the latest turn), and do
+   not surface a deprecation notice as an error.
+5. **Chat template rejects the `developer` role.** ms4 needed a bridge-side
+   hook (`devrole.py`: leading developer/system messages become `system`,
+   mid-thread ones become `user`) and a chat-completions bridge path. Without
+   them it failed "Unexpected role 'system' after role 'assistant'" and
+   "'input_text' is not a valid ChunkTypes" (`LOG.md` rows for ms4;
+   `sc_dogfood/dsg/RUN_LOG.md` 20:15Z). ms4 reports zero cached input tokens
+   out of 118.9M recorded input. Other displayed arms report approximately
+   44-96% cached input; the cause of ms4's zero is not isolated.
+   Fix: a role-fallback adapter in the harness's provider layer, driven by a
+   per-model capability, instead of the bridge hook. Mid-thread developer
+   injections are themselves a portability cost.
+6. **Token use on small models.** Usage counters are cumulative per session,
+   so each session's final counter is used once (results.json snapshot
+   2026-10-12 02:29Z). An earlier version of this item summed the counters
+   across turns and was inflated.
+   - Recorded input per launched session, total/108: q38d27x 0.731M, glm53f
+     0.531M, mimo26f 0.835M, q36a3 0.669M, q35d9h 2.130M, ms4 1.101M,
+     gr42d8x 1.666M and step37f 2.755M. These exclude unknown usage. q36a3 is
+     0.80-1.26 times the three listed comparison rows.
+   - The unknown-usage sessions are all nonzero exits: ds41fl 12, qfn38b 14,
+     mmm3m 7, step37f 4, gr42d8x 13, ms4 4.
+   - Among rc=0 sessions, median recorded input is q36a3 0.506M; q38d27x
+     0.650M, glm53f 0.354M and mimo26f 0.677M; q35d9h 0.838M; gr42d8x 1.192M;
+     ms4 0.302M.
+   - Nonzero-exit sessions account for 13.5% of q36a3's recorded input, 84.1%
+     of ms4's, 74.1% of gr42d8x's and 95.0% of step37f's. These include
+     timeouts, argument failures and completion loops. The input specifically
+     attributable to completion retries has not been isolated.
+   - A fixed prefix or tool-schema cost is **not verified**: the ladder did not
+     record per-request prefix or schema tokens.
+
+   Fix: record prefix and tool-schema tokens per request, and completion-retry
+   tokens, in the trajectory (SC-EVAL-040 measured a prefix of about 2.5k
+   tokens on Luna). End completion loops (item 3).
+7. **Capacity saturation and timeouts on small GPUs.** q35d9 on 2xL4 with 64 concurrent
+   chains: 54 of 70 finished sessions hit the 3,600 s session timeout. gr42d8 on
+   2xL4: 20 of 20 rc=1 at about 47 min each. gr42d8h on 1xH100: KV cache at 92%,
+   8 running against 55-110 waiting requests, aborted at 3 of 108 sessions.
+   gr42d8x on 4xH100 still had 31 of 108 rc=124 at 3,602 s, and q38d27 on
+   1xH100 had 30 of 108. Sources: `LOG.md` rows 18-19 and
+   `sc_dogfood/dsg/RUN_LOG.md` 19:40Z. The L4 logs are in GCS only and were not
+   re-read for this entry.
+   The runner imposed wall-clock timeouts (3,600 s,
+   `sc_dogfood/dsg/realtasks/vm/run_session.sh`). Queue saturation was
+   observed directly on gr42d8h and reported for the L4 attempts. The causes
+   of the other timeout sessions are not isolated: queueing, slow generation,
+   loops or stream trouble. The client retried dropped streams in some logs
+   ("Reconnecting... (stream disconnected before completion: idle timeout
+   waiting for SSE)"), which documents stream problems too.
+   Fix: client-side backoff and retry with jitter on overload responses, plus a
+   concurrency signal (queue time and time to first token in the trajectory)
+   that a runner or user can use to shed load.
+
 ## 8. Operating rules for testing and evaluation
 
 These rules come from incidents recorded in the ledger. Each one cost real
