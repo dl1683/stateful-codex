@@ -15,7 +15,6 @@ const MAX_HUNK_BYTES: usize = 1024;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FileSampleCoverage {
     Complete,
-    Truncated,
     Binary,
     Oversized,
     Unreadable,
@@ -54,7 +53,7 @@ pub(crate) enum WitnessOutcome {
     Changed(FileWitness),
     /// No earlier sample: current content only; before-state and origin unknown.
     NoBaseline,
-    /// A truncated, binary, oversized, unreadable or escaping sample certifies nothing.
+    /// A binary, oversized, unreadable or escaping sample certifies nothing.
     Unknown(FileSampleCoverage),
 }
 
