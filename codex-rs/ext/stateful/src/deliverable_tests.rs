@@ -25,8 +25,14 @@ fn status_only_replies_are_recognized() {
         "Task completed. All done.",
         "Done.\nAll done.",
         "Task complete. Finished.",
+        "Task\ncompleted.",
+        "All\ndone.",
+        "Task\ncompleted successfully.",
+        "**Done!** All done.",
+        "**Done.**\n**All done.**",
+        "`Task completed.` `All done.`",
     ];
-    assert_eq!(replies.map(is_status_only), [true; 7], "{replies:?}");
+    assert_eq!(replies.map(is_status_only), [true; 13], "{replies:?}");
 }
 
 #[test]
@@ -43,30 +49,28 @@ fn real_answers_are_never_status_only() {
         "Done. See src/lib.rs",
         "Renamed parse_config to load_config in src/config.rs.",
         "Task completed. All tests pass in 3 files.",
+        "**`Done`**",
+        "**Done.** All done. The answer is 7.",
+        "done.done",
+        "done.finished",
+        "Done. task.done",
     ];
-    assert_eq!(replies.map(is_status_only), [false; 11], "{replies:?}");
+    assert_eq!(replies.map(is_status_only), [false; 16], "{replies:?}");
 }
 
-/// A run warns once; a different run warns again; the oldest of 65 runs is forgotten.
+/// A run warns once and another run again; 64 runs are retained, the 65th evicts only the
+/// oldest.
 #[test]
 fn each_run_warns_once() {
     let warned = WarnedRuns::default();
-    let run = |id: &str| StatefulRunId::parse(id).expect("run id");
-    let first = [
-        warned.first(&run("run-a")),
-        warned.first(&run("run-a")),
-        warned.first(&run("run-b")),
-    ];
-    for index in 0..64 {
-        warned.first(&run(&format!("run-{index}")));
-    }
+    let run = |index: usize| StatefulRunId::parse(format!("run-{index}")).expect("run id");
+    let first = (0..64).all(|index| warned.first(&run(index)));
+    let retained = [warned.first(&run(0)), warned.first(&run(63))];
+    let added = warned.first(&run(64));
+    let evicted = [warned.first(&run(1)), warned.first(&run(0))];
     assert_eq!(
-        (
-            first,
-            warned.first(&run("run-a")),
-            warned.first(&run("run-63"))
-        ),
-        ([true, false, true], true, false)
+        (first, retained, added, evicted),
+        (true, [false, false], true, [false, true])
     );
 }
 

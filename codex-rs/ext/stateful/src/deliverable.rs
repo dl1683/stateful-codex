@@ -84,26 +84,42 @@ impl WarnedRuns {
     }
 }
 
-/// Whether `text` is only status lines such as "Task completed." or "**Done!** All done.":
-/// every nonempty sentence or line must be a status phrase.
+/// Whether `text` is only status lines such as "Task completed." or "**Done!** All done.".
+/// The whole text is first classified as one phrase; otherwise every sentence must be one.
+/// A sentence ends at a line end or at a word ending in `.`, `!` or `?` (wrapper marks
+/// aside), so periods inside a word (`done.md`) or inside a wrapper never split it.
 pub(crate) fn is_status_only(text: &str) -> bool {
-    let mut phrases = strip_wrapper(text.trim())
-        .split(['.', '!', '?', '\n'])
-        .map(str::trim)
-        .filter(|phrase| !phrase.is_empty())
-        .peekable();
-    phrases.peek().is_some() && phrases.all(is_status_phrase)
+    if is_status_phrase(text) {
+        return true;
+    }
+    let mut sentences = Vec::new();
+    for line in text.lines() {
+        let mut sentence = Vec::new();
+        for word in line.split_whitespace() {
+            sentence.push(word);
+            if word
+                .trim_end_matches(['*', '_', '`'])
+                .ends_with(['.', '!', '?'])
+            {
+                sentences.push(sentence.join(" "));
+                sentence.clear();
+            }
+        }
+        if !sentence.is_empty() {
+            sentences.push(sentence.join(" "));
+        }
+    }
+    sentences.len() > 1 && sentences.iter().all(|sentence| is_status_phrase(sentence))
 }
 
-fn strip_wrapper(text: &str) -> &str {
-    ["**", "*", "_", "`"]
+/// One phrase: trim, strip one wrapper, ASCII-lowercase, collapse whitespace, strip trailing
+/// `.`/`!` and ` successfully`, then match the closed set.
+fn is_status_phrase(text: &str) -> bool {
+    let text = text.trim();
+    let text = ["**", "*", "_", "`"]
         .iter()
         .find_map(|wrapper| text.strip_prefix(wrapper)?.strip_suffix(wrapper))
-        .unwrap_or(text)
-}
-
-fn is_status_phrase(text: &str) -> bool {
-    let text = strip_wrapper(text);
+        .unwrap_or(text);
     let words = text
         .to_ascii_lowercase()
         .split_whitespace()
