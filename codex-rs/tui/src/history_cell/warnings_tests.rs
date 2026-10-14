@@ -3,6 +3,9 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[path = "partial_disclosure_tests.rs"]
+mod partial_disclosure;
+
 #[test]
 fn usage_warnings_render_in_both_transcripts_including_composites() {
     let message = "Only 8% of your 5h limit remains. Run /status for details.";

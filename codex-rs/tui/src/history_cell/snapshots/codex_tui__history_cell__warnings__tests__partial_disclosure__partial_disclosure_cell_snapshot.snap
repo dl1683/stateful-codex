@@ -1,0 +1,6 @@
+---
+source: tui/src/history_cell/partial_disclosure_tests.rs
+expression: "lines.join(\"\\n\")"
+---
+⚠ Stateful: this run ended partial; it is not certified by this terminal answer
+  path. Open or not certified: tests remain

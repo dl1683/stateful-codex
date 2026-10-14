@@ -382,6 +382,88 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
     Ok(())
 }
 
+/// E1-E3, A6: real exit codes and nonfatal JSONL Partial disclosure.
+async fn exec_ending(issues: Option<&str>, blocked: bool, rc: i32) -> anyhow::Result<()> {
+    let test = test_codex_exec();
+    let server = responses::start_mock_server().await;
+    let answer = if let Some(issue) = issues {
+        format!(
+            "The result is 42.\n[stateful-outcome]\ndisposition: answer\nopen-issues:\n- {issue}\n[/stateful-outcome]"
+        )
+    } else {
+        "The result is 42.".to_string()
+    };
+    let mut script = Vec::new();
+    if blocked {
+        script.push(responses::sse(vec![
+            responses::ev_response_created("block"),
+            responses::ev_function_call(
+                "block",
+                "stateful_run_update",
+                r#"{"expectedRevision":1,"status":"blocked","result":"Authorization needed."}"#,
+            ),
+            responses::ev_completed("block"),
+        ]));
+    }
+    script.push(responses::sse(vec![
+        responses::ev_response_created("final"),
+        responses::ev_assistant_message("final", &answer),
+        responses::ev_completed("final"),
+    ]));
+    let mock = responses::mount_sse_sequence(&server, script).await;
+    let output = test
+        .cmd_with_server(&server)
+        .arg("--stateful")
+        .arg("autonomous")
+        .arg("--json")
+        .arg("--skip-git-repo-check")
+        .arg("-C")
+        .arg(test.cwd_path())
+        .arg("What is the result?")
+        .output()?;
+    assert_eq!(
+        output.status.code(),
+        Some(rc),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events: Vec<serde_json::Value> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    let partial_errors = events
+        .iter()
+        .filter(|event| {
+            event
+                .pointer("/item/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("error")
+                && event
+                    .pointer("/item/message")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|message| message.starts_with("Stateful: this run ended partial"))
+        })
+        .count();
+    assert_eq!(partial_errors, usize::from(issues.is_some()), "{events:?}");
+    assert_eq!(mock.requests().len(), if blocked { 2 } else { 1 });
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_answered_exits_zero() -> anyhow::Result<()> {
+    exec_ending(/*issues*/ None, /*blocked*/ false, /*rc*/ 0).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_partial_exits_zero_with_jsonl_disclosure() -> anyhow::Result<()> {
+    exec_ending(Some("tests remain"), /*blocked*/ false, /*rc*/ 0).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_model_blocked_exits_one() -> anyhow::Result<()> {
+    exec_ending(/*issues*/ None, /*blocked*/ true, /*rc*/ 1).await
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_resume_joins_an_open_collaborative_run_only_without_the_flag() -> anyhow::Result<()> {
     let test = test_codex_exec();
