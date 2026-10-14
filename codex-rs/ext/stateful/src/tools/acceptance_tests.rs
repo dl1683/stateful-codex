@@ -39,6 +39,9 @@ use crate::visible_root::VisibleRootRegistry;
 const PROJECT_ID: &str = "project-1";
 const THREAD_ID: &str = "thread-1";
 
+#[path = "acceptance_activation_tests.rs"]
+mod activation;
+
 struct Fixture {
     _state_home: TempDir,
     services: ProjectIntelligenceServices,
