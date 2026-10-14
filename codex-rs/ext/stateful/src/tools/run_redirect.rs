@@ -58,9 +58,9 @@ impl StatefulRunUpdateTool {
             return Ok(None);
         }
         let instruction = if declared {
-            "Open issues are retained. Give your answer as your final message now; the host records it as partial, not verified, listing open or not-certified items."
+            "Open issues or blockers remain; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply."
         } else {
-            "This run declared no acceptance criteria, so it cannot be verified as completed. Give your answer as your final message now; the host records it as answered, not verified, or partial while issues are retained."
+            "This run declared no acceptance criteria; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply."
         };
         // Reserve the fixed receipt before writing. Lists can exceed a model item even
         // within the operation's caps; omitted entries remain in the durable obligation.
@@ -76,7 +76,7 @@ impl StatefulRunUpdateTool {
         if output.to_string().len() > budget {
             return Err(super::super::bounded_respond(
                 call,
-                "the bounded completion redirect receipt cannot fit; nothing changed; give the final answer directly, or read the run first",
+                "the bounded completion redirect receipt cannot fit; nothing changed; read the run. Give a substantive final answer; an eligible final ends Answered or Partial.",
             ));
         }
         let issues: Vec<String> = submitted

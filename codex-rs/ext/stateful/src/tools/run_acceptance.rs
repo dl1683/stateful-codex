@@ -41,9 +41,7 @@ const VERIFICATION_LEASE_MS: u32 = 120_000;
 const PENDING_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 /// Consecutive refused completions without ledger progress before the host blocks the run.
 pub(super) const MAX_STALLED_COMPLETIONS: u32 = 3;
-/// Appended to an Autonomous run's refused completion: a plain question needs no acceptance
-/// work and ends answered through the outcome block, never blocked.
-pub(super) const PLAIN_ANSWER_HINT: &str = "A plain question needs no acceptance work: give the answer as your final message; the run ends answered, not verified.";
+
 /// The runtime's bound on a stored run result.
 const MAX_DURABLE_RESULT_BYTES: usize = 32 * 1024;
 /// Bound on the unmet-gate list in one refusal; the exact ledger is a paged read away.
@@ -220,7 +218,7 @@ impl StatefulRunUpdateTool {
         );
         Ok(AcceptanceDecision::Refused(match current.value.mode {
             WorkflowMode::Autonomous => format!(
-                "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress). Unmet acceptance gates: {gates}. Settle each gate; if it cannot be verified, give your answer as your final message; the run ends partial, listing what is not certified. {PLAIN_ANSWER_HINT}"
+                "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress). Unmet acceptance gates: {gates}. Verification is unavailable while these gates remain unmet. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose each not-certified item; required unmet criteria require Partial. No completion call is required; pending steering and final-answer gates still apply."
             ),
             WorkflowMode::Collaborative | WorkflowMode::Socratic => refusal,
         }))

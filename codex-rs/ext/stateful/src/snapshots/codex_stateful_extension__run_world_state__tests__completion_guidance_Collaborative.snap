@@ -1,0 +1,5 @@
+---
+source: codex-rs/ext/stateful/src/run_world_state_tests.rs
+expression: policy
+---
+Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. This Collaborative run stays open across the user's turns and the host records every final answer, so complete it only when the user says the overall goal is done or asks to close it, never at a turn's end; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed and optional openIssues (unresolved issues or host blockers end the run blocked), plus completionDisposition noReusableLearning and result when nothing reusable was learned, otherwise durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.

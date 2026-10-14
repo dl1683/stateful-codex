@@ -294,7 +294,7 @@ async fn a_collaborative_plain_question_can_still_end_blocked_through_run_update
 }
 
 /// An Autonomous run's refused completion tells the model that a plain question needs no
-/// acceptance work and ends answered, never blocked; other modes get the plain refusal.
+/// acceptance work for an eligible final; other modes get the verification refusal.
 #[tokio::test]
 async fn an_autonomous_refusal_points_a_plain_question_at_the_answered_outcome() {
     const QUESTION: &str = "What is the capital of France?";
@@ -320,7 +320,7 @@ async fn an_autonomous_refusal_points_a_plain_question_at_the_answered_outcome()
     assert_eq!(
         refusals,
         vec![
-            "completion refused; the run stays running (refusal 1 of 3 without acceptance progress). Unmet acceptance gates: C1 (What is the capital of France?): omission proposal awaiting review: accept it as a criterion, or dismiss it only as coveredBy a user criterion. Settle each gate; if it cannot be verified, give your answer as your final message; the run ends partial, listing what is not certified. A plain question needs no acceptance work: give the answer as your final message; the run ends answered, not verified.".to_string(),
+            "completion refused; the run stays running (refusal 1 of 3 without acceptance progress). Unmet acceptance gates: C1 (What is the capital of France?): omission proposal awaiting review: accept it as a criterion, or dismiss it only as coveredBy a user criterion. Verification is unavailable while these gates remain unmet. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose each not-certified item; required unmet criteria require Partial. No completion call is required; pending steering and final-answer gates still apply.".to_string(),
             refusal.to_string(),
         ]
     );

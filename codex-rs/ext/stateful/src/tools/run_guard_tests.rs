@@ -4,6 +4,7 @@ use codex_extension_api::ToolCallSource;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
+use super::RejectionRoute;
 use super::bounded_rejection;
 use crate::tools::MAX_RESPONSE_BYTES;
 use crate::tools::capture_repair_tests::call;
@@ -44,13 +45,27 @@ fn every_rejection_fits_the_call_allowance() {
             (echoed.as_str(), None),
             ("run revision conflict: expected 2, found 3", Some(guide)),
         ] {
-            let size = serialized(bounded_rejection(&call, message, guide));
-            if size > allowance || size > MAX_RESPONSE_BYTES {
-                violations.push((budget, size, allowance));
+            for route in [RejectionRoute::Answer, RejectionRoute::Verification] {
+                let size = serialized(bounded_rejection(&call, message, guide, route));
+                if size > allowance || size > MAX_RESPONSE_BYTES {
+                    violations.push((budget, size, allowance));
+                }
             }
         }
     }
     assert_eq!(violations, Vec::new());
+}
+
+#[test]
+fn eligible_final_guidance_fallback_snapshot() {
+    let message = "x".repeat(/*n*/ 20_000);
+    let error = bounded_rejection(
+        &sized(/*budget*/ 240),
+        &message,
+        Some(super::ANSWER_GUIDANCE),
+        RejectionRoute::Answer,
+    );
+    insta::assert_snapshot!(error.to_string(), @"stateful_run_update was rejected; read the run. Give a substantive final answer; an eligible final ends Answered or Partial. Apply or settle pending steering first.");
 }
 
 #[test]
@@ -59,9 +74,24 @@ fn guidance_is_dropped_before_the_rejection_itself() {
     let guide = "g".repeat(/*n*/ 20_000);
     assert_eq!(
         [
-            bounded_rejection(&sized(/*budget*/ 40_000), message, Some("use revision 3")),
-            bounded_rejection(&sized(/*budget*/ 40_000), message, Some(&guide)),
-            bounded_rejection(&sized(/*budget*/ 40_000), &"x".repeat(/*n*/ 20_000), None),
+            bounded_rejection(
+                &sized(/*budget*/ 40_000),
+                message,
+                Some("use revision 3"),
+                RejectionRoute::Verification
+            ),
+            bounded_rejection(
+                &sized(/*budget*/ 40_000),
+                message,
+                Some(&guide),
+                RejectionRoute::Verification
+            ),
+            bounded_rejection(
+                &sized(/*budget*/ 40_000),
+                &"x".repeat(/*n*/ 20_000),
+                /*guide*/ None,
+                RejectionRoute::Verification
+            ),
         ]
         .map(|error| error.to_string()),
         [

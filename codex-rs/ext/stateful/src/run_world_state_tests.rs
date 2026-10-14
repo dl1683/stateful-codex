@@ -643,3 +643,54 @@ fn changed_collaborative_policy_replaces_a_retained_packet() {
             .contains("stays open across the user's turns")
     );
 }
+
+/// G1/G2: snapshot the emitted mode policy, and ensure changed guidance reaches retained
+/// packets. This renders the contribution rather than testing a static constant.
+#[test]
+fn completion_guidance_world_state_snapshot() {
+    for mode in [
+        WorkflowMode::Autonomous,
+        WorkflowMode::Collaborative,
+        WorkflowMode::Socratic,
+    ] {
+        let mut status = run_with_obligation("obligation-1", vec![]);
+        let RunWorldStateStatus::Available { run, .. } = &mut status else {
+            unreachable!("available fixture");
+        };
+        run.value.mode = mode;
+        let section = run_world_state_section(status);
+        let rendered = section
+            .render_diff(PreviousWorldStateSection::Absent)
+            .expect("policy");
+        assert_fragment_bounded(&rendered);
+        let body = rendered.body();
+        let policy = match mode {
+            WorkflowMode::Autonomous => body
+                .lines()
+                .find(|line| line.starts_with("Mode obligation:")),
+            WorkflowMode::Collaborative => body
+                .lines()
+                .find(|line| line.starts_with("Stateful write tools")),
+            WorkflowMode::Socratic => body
+                .lines()
+                .find(|line| line.starts_with("Semantic progress:")),
+        }
+        .expect("mode guidance");
+        let policy = if mode == WorkflowMode::Autonomous {
+            format!(
+                "{policy}\n{}",
+                body.lines()
+                    .find(|line| line.starts_with("Semantic progress:"))
+                    .expect("completion guidance")
+            )
+        } else {
+            policy.to_string()
+        };
+        insta::assert_snapshot!(format!("completion_guidance_{mode:?}"), policy);
+        assert!(
+            section
+                .render_diff(PreviousWorldStateSection::Known(section.snapshot()))
+                .is_none()
+        );
+    }
+}
