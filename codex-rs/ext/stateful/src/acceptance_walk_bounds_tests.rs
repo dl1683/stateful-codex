@@ -327,6 +327,69 @@ fn retained_bytes_include_simultaneously_pending_directories() {
 }
 
 #[test]
+fn overlapping_roots_have_identical_manifests_under_both_directory_pop_orders() {
+    let project = TempDir::new().unwrap();
+    let outer = project.path().canonicalize().unwrap().join("outer");
+    for relative in ["a", "b"] {
+        std::fs::create_dir_all(outer.join(relative)).unwrap();
+        std::fs::write(outer.join(relative).join("f"), "x").unwrap();
+    }
+    let mut manifests = Vec::new();
+    for reverse in [false, true] {
+        for (bytes, expected) in [(3, Ok(())), (2, Err(IdentityGap::Bound(Bound::Bytes)))] {
+            let limits = Limits {
+                entries: 2,
+                bytes,
+                ..LIMITS
+            };
+            let mut budget = WalkBudget::new(limits, Instant::now() + limits.budget);
+            let mut files = BTreeMap::new();
+            let mut retained = 0;
+            let mut hashed = 0;
+            let mut entered = Vec::new();
+            let result = [outer.join("a"), outer.clone()]
+                .into_iter()
+                .try_for_each(|root| {
+                    walk(
+                        &root,
+                        &mut files,
+                        &mut retained,
+                        &mut hashed,
+                        &mut budget,
+                        |directory| {
+                            entered.push(directory.to_path_buf());
+                            // Force both stack-pop orders without changing production streaming.
+                            let mut entries = std::fs::read_dir(directory)?
+                                .collect::<std::io::Result<Vec<_>>>()?;
+                            entries.sort_by_key(std::fs::DirEntry::file_name);
+                            if reverse {
+                                entries.reverse();
+                            }
+                            Ok(entries.into_iter().map(Ok))
+                        },
+                    )
+                });
+            assert_eq!(result, expected, "reverse enumeration: {reverse}");
+            if result.is_ok() {
+                let order = if reverse {
+                    ["a", "", "a", "b"]
+                } else {
+                    ["a", "", "b", "a"]
+                };
+                assert_eq!(entered, order.map(|relative| outer.join(relative)));
+                assert_eq!(hashed, 3);
+                assert_eq!(
+                    files.keys().cloned().collect::<Vec<_>>(),
+                    ["a/f", "b/f"].map(|relative| outer.join(relative))
+                );
+                manifests.push(files);
+            }
+        }
+    }
+    assert_eq!(manifests[0], manifests[1]);
+}
+
+#[test]
 fn sibling_subtree_eligibility_is_independent_of_enumeration_order() {
     let project = TempDir::new().unwrap();
     let root = project.path().canonicalize().unwrap();

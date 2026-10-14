@@ -110,6 +110,63 @@ fn w14_unreadable_directory_is_refused_after_preflight() {
     );
 }
 
+#[test]
+fn unreadable_root_git_marker_never_discovers_an_ignoring_parent_after_preflight() {
+    let parent = super::super::repository();
+    let project = parent.path().canonicalize().unwrap().join("build");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("input"), "input").unwrap();
+    assert_eq!(
+        super::super::git(parent.path(), &["check-ignore", "build/input"]),
+        "build/input"
+    );
+    super::super::git(&project, &["init", "--quiet"]);
+    assert!(snapshot(&project).is_ok());
+    let marker = project.join(".git");
+    #[cfg(unix)]
+    let permissions = std::fs::metadata(&marker).unwrap().permissions();
+    #[cfg(unix)]
+    let applied = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(/*mode*/ 0o000)).is_ok()
+    };
+    #[cfg(windows)]
+    let applied = Command::new("icacls")
+        .arg(&marker)
+        .args([
+            "/deny",
+            &format!("{}:(R)", std::env::var("USERNAME").unwrap()),
+        ])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !applied {
+        eprintln!("not run (preflight): root .git read denial could not be applied");
+        return;
+    }
+    // Metadata must remain available: denial of reading the owned repository is
+    // a Git gap, rather than an Unreadable gap from the marker metadata probe.
+    let denied = std::fs::symlink_metadata(&marker).is_ok()
+        && std::fs::read_dir(&marker)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+    let identity = denied.then(|| snapshot(&project));
+    #[cfg(unix)]
+    std::fs::set_permissions(&marker, permissions).unwrap();
+    #[cfg(windows)]
+    assert!(
+        Command::new("icacls")
+            .arg(&marker)
+            .args(["/remove:d", &std::env::var("USERNAME").unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    if !denied {
+        eprintln!("not run (preflight): root .git directory read denial does not take effect");
+        return;
+    }
+    assert_eq!(identity, Some(Err(IdentityGap::Git)));
+}
+
 #[cfg(unix)]
 #[test]
 fn walk_preserves_non_utf8_names() {

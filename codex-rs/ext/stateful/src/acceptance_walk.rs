@@ -150,7 +150,7 @@ where
                 retain(&path, retained, limits)?;
                 pending.push(path);
             } else if kind.is_file() || symlink {
-                if files.len() >= limits.entries {
+                if !files.contains_key(&path) && files.len() >= limits.entries {
                     return Err(IdentityGap::Bound(Bound::Entries));
                 }
                 retain(&path, retained, limits)?;
