@@ -789,11 +789,7 @@ async fn omission_preserves_blocker_union() {
                 args["finalObligation"] = json!(packet);
                 redirect(&f, &args).await;
                 let rows = obligations(&f).await;
-                assert!(
-                    !serde_json::to_string(&rows)
-                        .unwrap()
-                        .contains("Recorded blocker:")
-                );
+                assert!(!format!("{rows:?}").contains("Recorded blocker:"));
                 let reopened = codex_stateful_runtime::StatefulRunStore::open(f.services.sqlite())
                     .await
                     .unwrap();
