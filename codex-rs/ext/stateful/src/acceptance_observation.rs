@@ -58,6 +58,8 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::acceptance_workspace::Manifest;
+use crate::acceptance_identity_reason::IdentityGap;
+use crate::acceptance_identity_reason::IdentityRefusal;
 use crate::acceptance_workspace::changed_unpinned;
 use crate::acceptance_workspace::workspace_manifest;
 use crate::services::ProjectIntelligenceServices;
@@ -83,8 +85,8 @@ struct CheckStarts(Mutex<HashMap<String, CheckStart>>);
 
 struct CheckStart {
     generation: u64,
-    /// Content identity of the workspace at start; `None` when it could not be taken.
-    manifest: Option<Manifest>,
+    /// Content identity at start, including the cause when it could not be taken.
+    identity: Result<Manifest, IdentityGap>,
     /// Matched criteria: revision, pinned-artifact digest and checker digest at start.
     criteria: BTreeMap<u32, (u64, Option<String>, Option<String>)>,
     /// Every active criterion's pinned artifacts and checker files at start.
@@ -214,10 +216,10 @@ pub(crate) async fn command_started(
         return;
     }
     let governing = governing_digests(roots, &ledger).await;
-    let manifest = workspace_manifest(roots).await;
+    let identity = workspace_manifest(roots).await;
     let start = CheckStart {
         generation: ledger.workspace_generation,
-        manifest,
+        identity,
         criteria: matched
             .iter()
             .map(|criterion| {
@@ -366,7 +368,7 @@ async fn observe_command(
     });
     let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
     let end = governing_digests(roots, &ledger).await;
-    let end_manifest = workspace_manifest(roots).await;
+    let end_identity = workspace_manifest(roots).await;
     // A check's effects are accounted for only when its whole run is known: it started at
     // the current generation, and the workspace's content identity outside the active
     // criteria's pins is unchanged (file metadata is no identity). Otherwise its own receipt
@@ -378,19 +380,14 @@ async fn observe_command(
     if let Some(start) = &start {
         if start.generation != ledger.workspace_generation {
             bump(services, run_id).await?;
-            refused = Some(
-                "another workspace change was observed while the check ran, so its effects overlap other evidence",
-            );
-        } else if changed_unpinned(
-            roots,
+            refused = Some(IdentityRefusal::Overlap);
+        } else if let Some(change) = changed_unpinned(
             &ledger,
-            start.manifest.as_ref(),
-            end_manifest.as_ref(),
+            start.identity.as_ref(),
+            end_identity.as_ref(),
         ) {
             bump(services, run_id).await?;
-            refused = Some(
-                "the check changed files no criterion pins, or the workspace could not be identified, so its effects are unknown",
-            );
+            refused = Some(IdentityRefusal::Change(change));
         } else if start.governing != end {
             bump(services, run_id).await?;
             stamp_generation = Some(ledger.workspace_generation + 1);
@@ -431,7 +428,7 @@ async fn observe_command(
                         ),
                         (CommandExecutionStatus::Completed, Some(0)) if refused.is_some() => (
                             EvidenceOutcome::Unavailable,
-                            refused.map(str::to_string),
+                            refused.as_ref().map(IdentityRefusal::render),
                         ),
                         (CommandExecutionStatus::Completed, Some(0)) if !unchanged => (
                             EvidenceOutcome::Unavailable,

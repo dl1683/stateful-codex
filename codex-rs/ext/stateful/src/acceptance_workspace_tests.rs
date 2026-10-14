@@ -10,11 +10,35 @@ use tempfile::TempDir;
 
 use super::LIMITS;
 use super::Limits;
-use super::changed_unpinned;
-use super::identify;
-use super::workspace_manifest;
+use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_observation::MAX_OUTSTANDING_READERS;
 use crate::acceptance_observation::OUTSTANDING_READERS;
+
+#[path = "acceptance_identity_tests.rs"]
+mod witnesses;
+
+// Preserve the existing regression assertions while supplying the shared deadline and
+// representing unavailable snapshots through the new typed API.
+fn identify(roots: &[PathBuf], limits: Limits) -> Option<super::Manifest> {
+    super::identify(roots, limits, std::time::Instant::now() + limits.budget).ok()
+}
+
+async fn workspace_manifest(roots: &[String]) -> Option<super::Manifest> {
+    super::workspace_manifest(roots).await.ok()
+}
+
+fn changed_unpinned(
+    _roots: &[String],
+    ledger: &AcceptanceLedger,
+    start: Option<&super::Manifest>,
+    end: Option<&super::Manifest>,
+) -> bool {
+    super::changed_unpinned(
+        ledger,
+        start.ok_or(&IdentityGap::Roots),
+        end.ok_or(&IdentityGap::Roots),
+    ).is_some()
+}
 
 fn roots(root: &Path) -> Vec<String> {
     vec![root.to_string_lossy().to_string()]

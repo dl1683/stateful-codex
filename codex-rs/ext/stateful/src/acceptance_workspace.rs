@@ -42,6 +42,9 @@ use crate::acceptance_observation::MAX_OUTSTANDING_READERS;
 use crate::acceptance_observation::OUTSTANDING_READERS;
 use crate::acceptance_observation::hash_bounded;
 use crate::acceptance_observation::open_nonblocking;
+use crate::acceptance_identity_reason::IdentityChange;
+use crate::acceptance_identity_reason::IdentityGap;
+use crate::acceptance_identity_reason::Side;
 
 /// Content identity of the workspace.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -49,7 +52,15 @@ pub(crate) struct Manifest {
     /// Content digest of every listed path.
     files: BTreeMap<PathBuf, String>,
     /// State of every git repository a root belongs to, by root.
-    repositories: BTreeMap<PathBuf, RepositoryState>,
+    roots: BTreeMap<PathBuf, RootState>,
+    first_root: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RootState {
+    Git(RepositoryState),
+    #[expect(dead_code, reason = "Walk mode belongs to stage 2B")]
+    Walk,
 }
 
 /// The commit `HEAD` names and the digest of the staged index.
@@ -85,23 +96,25 @@ const GITLINK_MODE: &[u8] = b"160000";
 /// Whether the repository state, or any file outside every active criterion's pins, differs
 /// between two identities; an unavailable identity counts as a difference.
 pub(crate) fn changed_unpinned(
-    roots: &[String],
     ledger: &AcceptanceLedger,
-    start: Option<&Manifest>,
-    end: Option<&Manifest>,
-) -> bool {
-    let (Some(start), Some(end)) = (start, end) else {
-        return true;
+    start: Result<&Manifest, &IdentityGap>,
+    end: Result<&Manifest, &IdentityGap>,
+) -> Option<IdentityChange> {
+    let start = match start {
+        Ok(start) => start,
+        Err(gap) => return Some(IdentityChange::Gap(Side::Start, gap.clone())),
     };
-    if start.repositories != end.repositories {
-        return true;
+    let end = match end {
+        Ok(end) => end,
+        Err(gap) => return Some(IdentityChange::Gap(Side::End, gap.clone())),
+    };
+    if start.first_root != end.first_root || start.roots.keys().ne(end.roots.keys()) {
+        return Some(IdentityChange::Roots);
     }
-    let Some(root) = roots
-        .first()
-        .and_then(|root| std::fs::canonicalize(root).ok())
-    else {
-        return true;
-    };
+    if start.roots != end.roots {
+        return Some(IdentityChange::Repository);
+    }
+    let root = &start.first_root;
     let pinned = ledger
         .criteria
         .iter()
@@ -121,44 +134,53 @@ pub(crate) fn changed_unpinned(
         .files
         .keys()
         .chain(end.files.keys())
-        .any(|path| differs(path) && !pinned.contains(path))
+        .find(|path| differs(path) && !pinned.contains(*path))
+        .cloned()
+        .map(IdentityChange::Path)
 }
 
 /// The workspace's content identity, or `None` when it cannot be taken within the bounds or
 /// no reader slot is free.
-pub(crate) async fn workspace_manifest(roots: &[String]) -> Option<Manifest> {
+pub(crate) async fn workspace_manifest(roots: &[String]) -> Result<Manifest, IdentityGap> {
     let roots = roots
         .iter()
         .filter_map(|root| std::fs::canonicalize(root).ok())
         .collect::<Vec<_>>();
     if roots.is_empty() {
-        return None;
+        return Err(IdentityGap::Roots);
     }
     if OUTSTANDING_READERS.fetch_add(1, Ordering::SeqCst) >= MAX_OUTSTANDING_READERS {
         OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
-        return None;
+        return Err(IdentityGap::Slots);
     }
+    let deadline = Instant::now() + LIMITS.budget;
     let worker = tokio::task::spawn_blocking(move || {
-        let manifest = identify(&roots, LIMITS);
+        let manifest = identify(&roots, LIMITS, deadline);
         OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
         manifest
     });
     tokio::time::timeout(LIMITS.budget, worker)
         .await
-        .ok()?
-        .ok()?
+        .map_err(|_| IdentityGap::Time)?
+        .map_err(|_| IdentityGap::Worker)?
 }
 
-/// Takes the identity of `roots` within `limits`; `None` when it cannot be taken exactly.
-pub(crate) fn identify(roots: &[PathBuf], limits: Limits) -> Option<Manifest> {
-    let deadline = Instant::now() + limits.budget;
-    let mut manifest = Manifest::default();
+/// Takes the identity of canonical roots using the caller's single deadline.
+pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> Result<Manifest, IdentityGap> {
+    if Instant::now() >= deadline {
+        return Err(IdentityGap::Time);
+    }
+    identify_legacy(roots, limits, deadline).ok_or(IdentityGap::Git)
+}
+
+fn identify_legacy(roots: &[PathBuf], limits: Limits, deadline: Instant) -> Option<Manifest> {
+    let mut manifest = Manifest { first_root: roots.first()?.clone(), ..Manifest::default() };
     let mut hashed = 0_u64;
     // Directories below a root already known to hold no `.git` entry, with all their ancestors.
     let mut outside_embedded = HashSet::new();
     for root in roots {
         let (state, listed) = git_listing(root, limits, deadline)?;
-        manifest.repositories.insert(root.clone(), state);
+        manifest.roots.insert(root.clone(), RootState::Git(state));
         for relative in listed {
             if manifest.files.len() >= limits.entries || Instant::now() >= deadline {
                 return None;
