@@ -431,7 +431,7 @@ async fn oversized_unknown_resolutions_refuse_with_bounded_diagnostics() {
     let rejected = call(
         "obligation_update",
         &json!({
-            "idempotencyKey":"unknown", "packet":{}, "resolvedIssues":["\"Î»\n".repeat(32_000)]
+            "idempotencyKey":"unknown", "packet":{}, "resolvedIssues":["\"λ\n".repeat(32_000)]
         }),
     );
     let error = tool
