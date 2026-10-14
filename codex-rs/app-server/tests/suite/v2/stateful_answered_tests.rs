@@ -54,6 +54,9 @@ const BLOCK: &str =
 #[path = "stateful_answered_activation_tests.rs"]
 mod activation;
 
+#[path = "stateful_answered_persistence_tests.rs"]
+mod persistence;
+
 fn ready() -> String {
     format!("{ANSWER}\n\n{BLOCK}")
 }

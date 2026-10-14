@@ -6,7 +6,7 @@ use runtime::PARTIAL_RESULT_HEADER;
 use runtime::PARTIAL_UNVERIFIED_BASIS;
 use serde_json::json;
 
-fn tool(id: &str, name: &str, args: serde_json::Value) -> String {
+pub(super) fn tool(id: &str, name: &str, args: serde_json::Value) -> String {
     responses::sse(vec![
         responses::ev_response_created(id),
         responses::ev_function_call(id, name, &args.to_string()),
@@ -14,7 +14,7 @@ fn tool(id: &str, name: &str, args: serde_json::Value) -> String {
     ])
 }
 
-fn progress() -> String {
+pub(super) fn progress() -> String {
     tool(
         "progress",
         "obligation_update",
