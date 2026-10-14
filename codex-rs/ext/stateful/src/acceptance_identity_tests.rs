@@ -50,8 +50,9 @@ fn w12_refs_and_symbolic_head_are_identity() {
     let active = git(root, &["symbolic-ref", "HEAD"]);
     git(root, &["symbolic-ref", "refs/alias", &active]);
     let retarget = differs(&alias, &snapshot(root), root);
+    let before_detach = snapshot(root);
     git(root, &["checkout", "--quiet", "--detach"]);
-    let detached = differs(&before_move, &snapshot(root), root);
+    let detached = differs(&before_detach, &snapshot(root), root);
     assert_eq!(
         [creation, deletion, symbolic, movement, detached, retarget],
         [true; 6]
@@ -139,11 +140,31 @@ fn w7_w8_links_are_contained_and_include_target_content() {
     let outside = TempDir::new().expect("outside");
     std::fs::write(outside.path().join("data"), "outside").expect("outside file");
     assert!(link_file(&outside.path().join("data"), &link));
-    let escaping = identify(&canonical(root), LIMITS).is_none();
+    assert_eq!(
+        crate::acceptance_workspace::identify(
+            &canonical(root),
+            LIMITS,
+            std::time::Instant::now() + LIMITS.budget
+        ),
+        Err(IdentityGap::Entry {
+            path: root.canonicalize().unwrap().join("alias"),
+            kind: crate::acceptance_identity_reason::EntryKind::EscapingLink,
+        })
+    );
     std::fs::remove_file(&link).expect("remove link");
     assert!(link_file(Path::new("missing"), &link));
-    let dangling = identify(&canonical(root), LIMITS).is_none();
-    assert_eq!([target_content, escaping, dangling], [true; 3]);
+    assert_eq!(
+        crate::acceptance_workspace::identify(
+            &canonical(root),
+            LIMITS,
+            std::time::Instant::now() + LIMITS.budget
+        ),
+        Err(IdentityGap::Entry {
+            path: root.canonicalize().unwrap().join("alias"),
+            kind: crate::acceptance_identity_reason::EntryKind::EscapingLink,
+        })
+    );
+    assert!(target_content);
 }
 
 #[test]
