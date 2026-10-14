@@ -11,7 +11,7 @@ struct ReaderSlot;
 
 impl Drop for ReaderSlot {
     fn drop(&mut self) {
-        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
+        OUTSTANDING_READERS.fetch_sub(/*val*/ 1, Ordering::SeqCst);
     }
 }
 
@@ -19,15 +19,17 @@ pub(super) async fn read_identity<T: Send + 'static>(
     budget: Duration,
     read: impl FnOnce(Instant) -> Result<T, IdentityGap> + Send + 'static,
 ) -> Result<T, IdentityGap> {
-    if OUTSTANDING_READERS.fetch_add(1, Ordering::SeqCst) >= MAX_OUTSTANDING_READERS {
-        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
+    if OUTSTANDING_READERS.fetch_add(/*val*/ 1, Ordering::SeqCst) >= MAX_OUTSTANDING_READERS {
+        OUTSTANDING_READERS.fetch_sub(/*val*/ 1, Ordering::SeqCst);
         return Err(IdentityGap::Slots);
     }
     let slot = ReaderSlot;
     let deadline = Instant::now() + budget;
     let worker = tokio::task::spawn_blocking(move || {
         let _slot = slot;
-        if Instant::now() >= deadline { return Err(IdentityGap::Time); }
+        if Instant::now() >= deadline {
+            return Err(IdentityGap::Time);
+        }
         read(deadline)
     });
     tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), worker)

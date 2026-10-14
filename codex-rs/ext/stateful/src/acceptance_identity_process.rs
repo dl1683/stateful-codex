@@ -23,9 +23,16 @@ pub(super) fn records(
     deadline: Instant,
     mut on_record: impl FnMut(&[u8]) -> Result<(), IdentityGap>,
 ) -> Result<i32, IdentityGap> {
-    if Instant::now() >= deadline { return Err(IdentityGap::Time); }
-    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|_| IdentityGap::Git)?;
-    let stdout = child.stdout.take().expect("piped stdout");
+    if Instant::now() >= deadline {
+        return Err(IdentityGap::Time);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| IdentityGap::Git)?;
+    let stdout = child.stdout.take();
     let (cancel, cancelled) = mpsc::channel();
     let supervisor = thread::spawn(move || {
         let mut stopping = false;
@@ -48,12 +55,19 @@ pub(super) fn records(
                     stopping = true;
                 }
             }
-            thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())));
+            thread::sleep(
+                Duration::from_millis(/*millis*/ 10)
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     });
-    let (sender, receiver) = mpsc::sync_channel(1);
+    let (sender, receiver) = mpsc::sync_channel(/*bound*/ 1);
     let reader = thread::spawn(move || {
-        let mut reader = BufReader::new(stdout.take(output_limit.saturating_add(1)));
+        let Some(stdout) = stdout else {
+            let _ = sender.send(Err(IdentityGap::Git));
+            return;
+        };
+        let mut reader = BufReader::new(stdout.take(output_limit.saturating_add(/*rhs*/ 1)));
         let mut total = 0_u64;
         loop {
             let mut record = Vec::new();
@@ -64,35 +78,49 @@ pub(super) fn records(
                     if total > output_limit {
                         Err(IdentityGap::Bound(Bound::GitOutput))
                     } else {
-                        if record.last() == Some(&terminator) { record.pop(); }
+                        if record.last() == Some(&terminator) {
+                            record.pop();
+                        }
                         Ok(Some(record))
                     }
                 }
                 Err(_) => Err(IdentityGap::Git),
             };
             let done = !matches!(result, Ok(Some(_)));
-            if sender.send(result).is_err() || done { break; }
+            if sender.send(result).is_err() || done {
+                break;
+            }
         }
     });
     let streamed = (|| loop {
-        if Instant::now() >= deadline { return Err(IdentityGap::Time); }
-        let result = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())).map_err(|error| match error {
-            mpsc::RecvTimeoutError::Timeout => IdentityGap::Time,
-            mpsc::RecvTimeoutError::Disconnected => IdentityGap::Worker,
-        })?;
+        if Instant::now() >= deadline {
+            return Err(IdentityGap::Time);
+        }
+        let result = receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => IdentityGap::Time,
+                mpsc::RecvTimeoutError::Disconnected => IdentityGap::Worker,
+            })?;
         match result? {
             None => return Ok(()),
             Some(record) => {
-                if Instant::now() >= deadline { return Err(IdentityGap::Time); }
+                if Instant::now() >= deadline {
+                    return Err(IdentityGap::Time);
+                }
                 on_record(&record)?;
             }
         }
     })();
-    if streamed.is_err() { let _ = cancel.send(()); }
+    if streamed.is_err() {
+        let _ = cancel.send(());
+    }
     let exited = supervisor.join().map_err(|_| IdentityGap::Worker)?;
     // An inherited pipe can outlive the child. Do not wait for that reader after a gap.
     drop(receiver);
-    if reader.is_finished() { let _ = reader.join(); }
+    if reader.is_finished() {
+        let _ = reader.join();
+    }
     streamed?;
     exited
 }

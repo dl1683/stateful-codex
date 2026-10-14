@@ -20,8 +20,8 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
@@ -37,10 +37,10 @@ use sha2::Sha256;
 use crate::acceptance_identity_content::content_digest;
 use crate::acceptance_identity_content::retain;
 use crate::acceptance_identity_process::records;
-use crate::acceptance_identity_reason::IdentityChange;
-use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::Bound;
 use crate::acceptance_identity_reason::EntryKind;
+use crate::acceptance_identity_reason::IdentityChange;
+use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::Side;
 use crate::acceptance_identity_worker::read_identity;
 
@@ -71,8 +71,13 @@ struct RepositoryState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HeadState {
-    Branch { name: String, object: Option<String> },
-    Detached { object: String },
+    Branch {
+        name: String,
+        object: Option<String>,
+    },
+    Detached {
+        object: String,
+    },
 }
 
 /// Bounds of one identity.
@@ -156,38 +161,68 @@ pub(crate) async fn workspace_manifest(roots: &[String]) -> Result<Manifest, Ide
     read_identity(LIMITS.budget, move |deadline| {
         let mut canonical = Vec::with_capacity(roots.len());
         for root in roots {
-            if Instant::now() >= deadline { return Err(IdentityGap::Time); }
+            if Instant::now() >= deadline {
+                return Err(IdentityGap::Time);
+            }
             let root = std::fs::canonicalize(root).map_err(|_| IdentityGap::Roots)?;
-            if !std::fs::metadata(&root).map_err(|_| IdentityGap::Roots)?.is_dir() {
+            if !std::fs::metadata(&root)
+                .map_err(|_| IdentityGap::Roots)?
+                .is_dir()
+            {
                 return Err(IdentityGap::Roots);
             }
             canonical.push(root);
         }
         identify(&canonical, LIMITS, deadline)
-    }).await
+    })
+    .await
 }
 
 /// Takes the identity of canonical roots using the caller's single deadline.
-pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> Result<Manifest, IdentityGap> {
+pub(crate) fn identify(
+    roots: &[PathBuf],
+    limits: Limits,
+    deadline: Instant,
+) -> Result<Manifest, IdentityGap> {
     if Instant::now() >= deadline {
         return Err(IdentityGap::Time);
     }
-    if roots.is_empty() { return Err(IdentityGap::Roots); }
-    let mut manifest = Manifest { first_root: roots[0].clone(), ..Manifest::default() };
+    if roots.is_empty() {
+        return Err(IdentityGap::Roots);
+    }
+    let mut manifest = Manifest {
+        first_root: roots[0].clone(),
+        ..Manifest::default()
+    };
     let mut hashed = 0_u64;
     let mut ancestors = HashMap::new();
     let mut retained = 0;
     for root in roots {
-        let (state, listed) = git_listing(root, manifest.files.len(), &mut retained, limits, deadline)?;
+        let (state, listed) =
+            git_listing(root, manifest.files.len(), &mut retained, limits, deadline)?;
         manifest.roots.insert(root.clone(), RootState::Git(state));
         for relative in listed {
-            if manifest.files.len() >= limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
-            if Instant::now() >= deadline { return Err(IdentityGap::Time); }
-            let digest = content_digest(root, &relative, &mut ancestors, &mut retained, &mut hashed, limits, deadline)?;
+            if manifest.files.len() >= limits.entries {
+                return Err(IdentityGap::Bound(Bound::Entries));
+            }
+            if Instant::now() >= deadline {
+                return Err(IdentityGap::Time);
+            }
+            let digest = content_digest(
+                root,
+                &relative,
+                &mut ancestors,
+                &mut retained,
+                &mut hashed,
+                limits,
+                deadline,
+            )?;
             manifest.files.insert(root.join(relative), digest);
         }
     }
-    if Instant::now() >= deadline { return Err(IdentityGap::Time); }
+    if Instant::now() >= deadline {
+        return Err(IdentityGap::Time);
+    }
     Ok(manifest)
 }
 
@@ -229,15 +264,30 @@ fn git_listing(
             }
             HeadState::Branch { name, object }
         }
-        (1, branch) if branch.is_empty() => HeadState::Detached { object: object.ok_or(IdentityGap::Git)? },
+        (1, branch) if branch.is_empty() => HeadState::Detached {
+            object: object.ok_or(IdentityGap::Git)?,
+        },
         _ => return Err(IdentityGap::Git),
     };
     let mut refs = Sha256::new();
-    if git_records(root, &["for-each-ref", "--format=%(objectname) %(objecttype) %(refname) %(symref)"], b'\n', limits, deadline, |record| {
-        refs.update((record.len() as u64).to_be_bytes());
-        refs.update(record);
-        Ok(())
-    })? != 0 { return Err(IdentityGap::Git); }
+    if git_records(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(objectname) %(objecttype) %(refname) %(symref)",
+        ],
+        b'\n',
+        limits,
+        deadline,
+        |record| {
+            refs.update((record.len() as u64).to_be_bytes());
+            refs.update(record);
+            Ok(())
+        },
+    )? != 0
+    {
+        return Err(IdentityGap::Git);
+    }
     let mut index = Sha256::new();
     let mut paths = BTreeSet::new();
     let staged = git_records(
@@ -249,11 +299,26 @@ fn git_listing(
         |record| {
             index.update((record.len() as u64).to_be_bytes());
             index.update(record);
-            let (entry, path) = record.split_at(record.iter().position(|byte| *byte == b'\t').ok_or(IdentityGap::Git)?);
+            let (entry, path) = record.split_at(
+                record
+                    .iter()
+                    .position(|byte| *byte == b'\t')
+                    .ok_or(IdentityGap::Git)?,
+            );
             if entry.starts_with(GITLINK_MODE) {
-                return Err(IdentityGap::Entry { path: root.join(exact_path(&path[1..])?), kind: EntryKind::Submodule });
+                return Err(IdentityGap::Entry {
+                    path: root.join(exact_path(&path[1..])?),
+                    kind: EntryKind::Submodule,
+                });
             }
-            add_path(root, &mut paths, &path[1..], already_listed, retained, limits)
+            add_path(
+                root,
+                &mut paths,
+                &path[1..],
+                already_listed,
+                retained,
+                limits,
+            )
         },
     )?;
     let untracked = git_records(
@@ -278,10 +343,19 @@ fn git_listing(
 }
 
 /// Adds one git path, exactly as git names it, within the entry bound.
-fn add_path(root: &Path, paths: &mut BTreeSet<PathBuf>, name: &[u8], already_listed: usize, retained: &mut usize, limits: Limits) -> Result<(), IdentityGap> {
+fn add_path(
+    root: &Path,
+    paths: &mut BTreeSet<PathBuf>,
+    name: &[u8],
+    already_listed: usize,
+    retained: &mut usize,
+    limits: Limits,
+) -> Result<(), IdentityGap> {
     let path = exact_path(name)?;
     if !paths.contains(&path) {
-        if paths.len() + already_listed >= limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
+        if paths.len() + already_listed >= limits.entries {
+            return Err(IdentityGap::Bound(Bound::Entries));
+        }
         retain(&root.join(&path), retained, limits)?;
         paths.insert(path);
     }
@@ -291,7 +365,10 @@ fn add_path(root: &Path, paths: &mut BTreeSet<PathBuf>, name: &[u8], already_lis
 /// The path git names with these bytes, without lossy identity conversion.
 fn exact_path(name: &[u8]) -> Result<PathBuf, IdentityGap> {
     if name.is_empty() {
-        return Err(IdentityGap::Entry { path: PathBuf::new(), kind: EntryKind::NotContained });
+        return Err(IdentityGap::Entry {
+            path: PathBuf::new(),
+            kind: EntryKind::NotContained,
+        });
     }
     #[cfg(unix)]
     {
@@ -300,7 +377,10 @@ fn exact_path(name: &[u8]) -> Result<PathBuf, IdentityGap> {
     }
     #[cfg(not(unix))]
     {
-        let exact = std::str::from_utf8(name).map_err(|_| IdentityGap::Entry { path: PathBuf::from(String::from_utf8_lossy(name).into_owned()), kind: EntryKind::InexactName })?;
+        let exact = std::str::from_utf8(name).map_err(|_| IdentityGap::Entry {
+            path: PathBuf::from(String::from_utf8_lossy(name).into_owned()),
+            kind: EntryKind::InexactName,
+        })?;
         Ok(PathBuf::from(OsString::from(exact)))
     }
 }

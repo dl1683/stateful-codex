@@ -1,12 +1,12 @@
 //! Project-scoped Stateful Codex integration.
 
-mod acceptance_observation;
+#[cfg(test)]
+mod acceptance_identity_api_tests;
 mod acceptance_identity_content;
 mod acceptance_identity_process;
 mod acceptance_identity_reason;
 mod acceptance_identity_worker;
-#[cfg(test)]
-mod acceptance_identity_api_tests;
+mod acceptance_observation;
 mod acceptance_policy;
 mod acceptance_render;
 mod acceptance_workspace;

@@ -57,9 +57,9 @@ use codex_stateful_runtime::StatefulRunId;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::acceptance_workspace::Manifest;
 use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::IdentityRefusal;
+use crate::acceptance_workspace::Manifest;
 use crate::acceptance_workspace::changed_unpinned;
 use crate::acceptance_workspace::workspace_manifest;
 use crate::services::ProjectIntelligenceServices;
@@ -381,11 +381,9 @@ async fn observe_command(
         if start.generation != ledger.workspace_generation {
             bump(services, run_id).await?;
             refused = Some(IdentityRefusal::Overlap);
-        } else if let Some(change) = changed_unpinned(
-            &ledger,
-            start.identity.as_ref(),
-            end_identity.as_ref(),
-        ) {
+        } else if let Some(change) =
+            changed_unpinned(&ledger, start.identity.as_ref(), end_identity.as_ref())
+        {
             bump(services, run_id).await?;
             refused = Some(IdentityRefusal::Change(change));
         } else if start.governing != end {

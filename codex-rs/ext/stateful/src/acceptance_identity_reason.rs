@@ -71,12 +71,17 @@ impl IdentityChange {
     pub(crate) fn render(&self) -> String {
         match self {
             Self::Gap(side, gap) => {
-                let side = match side { Side::Start => "start", Side::End => "end" };
+                let side = match side {
+                    Side::Start => "start",
+                    Side::End => "end",
+                };
                 let reason = match gap {
                     IdentityGap::Roots => "project roots could not be identified".to_string(),
                     IdentityGap::Git => "git state could not be read".to_string(),
                     IdentityGap::Bound(bound) => format!("identity bound exceeded: {bound:?}"),
-                    IdentityGap::Entry { path, kind } => format!("identity entry {}: {kind:?}", display_path(path)),
+                    IdentityGap::Entry { path, kind } => {
+                        format!("identity entry {}: {kind:?}", display_path(path))
+                    }
                     IdentityGap::Slots => "no identity reader slot is free".to_string(),
                     IdentityGap::Worker => "identity worker failed".to_string(),
                     IdentityGap::Time => "identity deadline expired".to_string(),
@@ -85,7 +90,10 @@ impl IdentityChange {
             }
             Self::Roots => "the check changed the project roots".to_string(),
             Self::Repository => "the check changed repository state".to_string(),
-            Self::Path(path) => format!("the check changed a file no criterion pins: {}", display_path(path)),
+            Self::Path(path) => format!(
+                "the check changed a file no criterion pins: {}",
+                display_path(path)
+            ),
         }
     }
 }
@@ -94,7 +102,9 @@ fn display_path(path: &Path) -> String {
     let mut text = path.to_string_lossy().into_owned();
     if text.len() > 200 {
         let mut end = 200;
-        while !text.is_char_boundary(end) { end -= 1; }
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
         text.truncate(end);
     }
     text
