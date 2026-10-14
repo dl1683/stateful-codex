@@ -29,6 +29,69 @@ use crate::WorkflowMode;
 use super::StatefulRunStore;
 use super::StatefulRunStoreError;
 
+#[test]
+fn run_goal_validation_reports_exact_fault_messages() {
+    let cases = [
+        (String::new(), "run goal is empty"),
+        (
+            "x".repeat(/*n*/ 20_000),
+            "run goal is 20000 bytes, over the 16384-byte limit (UTF-8 bytes)",
+        ),
+        (
+            "é".repeat(/*n*/ 8_193),
+            "run goal is 16386 bytes, over the 16384-byte limit (UTF-8 bytes)",
+        ),
+        ("goal\0text".to_string(), "run goal contains a NUL byte"),
+        (
+            " goal".to_string(),
+            "run goal has leading or trailing whitespace",
+        ),
+        (
+            "goal\u{2003}".to_string(),
+            "run goal has leading or trailing whitespace",
+        ),
+        (" \0goal".to_string(), "run goal contains a NUL byte"),
+        (
+            format!(" \0{}", "x".repeat(/*n*/ 20_000)),
+            "run goal is 20002 bytes, over the 16384-byte limit (UTF-8 bytes)",
+        ),
+    ];
+    for (goal, message) in cases {
+        let run = NewStatefulRun {
+            project_id: "project-1".to_string(),
+            thread_ids: vec!["thread-1".to_string()],
+            goal,
+            mode: WorkflowMode::Collaborative,
+            budget: RunBudget {
+                max_continuations: 4,
+                max_elapsed_seconds: 600,
+            },
+        };
+        let error = run.validate().expect_err("invalid goal is rejected");
+        assert!(matches!(
+            error,
+            crate::run::StatefulRunError::InvalidGoal(_)
+        ));
+        assert_eq!(error.to_string(), message);
+        assert_eq!(StatefulRunStoreError::from(error).to_string(), message);
+    }
+}
+
+#[test]
+fn run_goal_validation_accepts_utf8_byte_limit() {
+    let run = NewStatefulRun {
+        project_id: "project-1".to_string(),
+        thread_ids: vec!["thread-1".to_string()],
+        goal: "é".repeat(/*n*/ 8_192),
+        mode: WorkflowMode::Collaborative,
+        budget: RunBudget {
+            max_continuations: 4,
+            max_elapsed_seconds: 600,
+        },
+    };
+    assert_eq!(run.validate(), Ok(()));
+}
+
 #[tokio::test]
 async fn turn_measurement_merges_terminal_trajectory_and_is_project_queryable() {
     let temp_dir = TempDir::new().expect("tempdir created");

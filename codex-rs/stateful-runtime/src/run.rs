@@ -108,7 +108,8 @@ impl NewStatefulRun {
             validate_identity(thread_id, MAX_ID_BYTES)
                 .map_err(|()| StatefulRunError::InvalidThreadIds)?;
         }
-        validate_text(&self.goal, MAX_GOAL_BYTES).map_err(|()| StatefulRunError::InvalidGoal)?;
+        validate_text(&self.goal, MAX_GOAL_BYTES)
+            .map_err(|()| StatefulRunError::InvalidGoal(classify_invalid_goal(&self.goal)))?;
         self.budget.validate()
     }
 }
@@ -252,6 +253,34 @@ fn validate_optional_text(value: Option<&str>, maximum: usize) -> Result<(), ()>
     value.map_or(Ok(()), |value| validate_text(value, maximum))
 }
 
+fn classify_invalid_goal(value: &str) -> GoalFault {
+    // Called only after validate_text rejects the goal; precedence is empty, length,
+    // NUL, then whitespace. str::len counts UTF-8 bytes, not characters.
+    if value.is_empty() {
+        GoalFault::Empty
+    } else if value.len() > MAX_GOAL_BYTES {
+        GoalFault::TooLong { bytes: value.len() }
+    } else if value.contains('\0') {
+        GoalFault::Nul
+    } else {
+        GoalFault::Whitespace
+    }
+}
+
+// Public within the private run module because it is a public error's payload;
+// no crate-root export is needed by callers.
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
+pub enum GoalFault {
+    #[error("run goal is empty")]
+    Empty,
+    #[error("run goal is {bytes} bytes, over the {MAX_GOAL_BYTES}-byte limit (UTF-8 bytes)")]
+    TooLong { bytes: usize },
+    #[error("run goal contains a NUL byte")]
+    Nul,
+    #[error("run goal has leading or trailing whitespace")]
+    Whitespace,
+}
+
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum StatefulRunError {
     #[error("run ID must be non-empty, bounded, and contain no controls")]
@@ -260,8 +289,8 @@ pub enum StatefulRunError {
     InvalidProjectId,
     #[error("run must contain 1-64 valid thread IDs")]
     InvalidThreadIds,
-    #[error("run goal must be non-empty, bounded, trimmed, and contain no NUL")]
-    InvalidGoal,
+    #[error("{0}")]
+    InvalidGoal(GoalFault),
     #[error("run budget must allow 1-1000 continuations and 60-604800 elapsed seconds")]
     InvalidBudget,
     #[error("run strategy must be bounded, trimmed, and contain no NUL")]
