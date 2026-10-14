@@ -1,6 +1,6 @@
 # Stateful Codex current state
 
-Updated 2026-10-12. This page says what the published code does, what has and
+Updated 2026-10-12 (a snapshot: landings of 2026-10-13 and 2026-10-14 are summarised in the note at the top of `STATEFUL_CODEX_EVALUATION.md`, which is the current pointer until this page is refreshed). This page says what the published code does, what has and
 has not been measured, where unmerged work lives, and how to operate the
 system safely. It is the only current-state page; it is not a chronological
 handoff.
