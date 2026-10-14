@@ -5,6 +5,9 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+#[path = "acceptance_check_cwd_tests.rs"]
+mod check_cwd;
+
 use crate::AcceptanceChange;
 use crate::AcceptanceCommit;
 use crate::AcceptanceError;
