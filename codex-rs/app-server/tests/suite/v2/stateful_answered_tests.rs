@@ -294,9 +294,8 @@ async fn a_run_that_acted_and_then_answers_is_answered_not_completed() -> Result
     Ok(())
 }
 
-/// Anything that is not a genuine, ready final answer keeps the ordinary route: no block,
-/// work that continues, open issues, a declaration with no answer, a block that does not end
-/// the message, a ready block in commentary, and a Collaborative run.
+/// Explicit continuation, a declaration without an answer, commentary, and Collaborative
+/// finals keep their ordinary route.
 #[tokio::test]
 async fn anything_but_a_genuine_ready_answer_keeps_the_ordinary_route() -> Result<()> {
     let continuing = format!(
