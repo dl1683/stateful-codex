@@ -2,7 +2,8 @@
 //! Only pending directories and listed paths are retained. Validating each directory before
 //! entering it supplies the ancestor chain for the shared leaf reader, without retaining or
 //! repeatedly scanning every ancestor of a deep tree. Output order comes from the manifest's
-//! BTreeMap, not filesystem enumeration order.
+//! BTreeMap, not filesystem enumeration order. Eligibility charges all scheduled directory
+//! work and path bytes without refunds on pop, so neither cap depends on traversal order.
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::Path;
@@ -52,25 +53,44 @@ pub(super) fn excluded_untracked(relative: &Path) -> bool {
 }
 
 /// Enumeration totals shared across all walk roots in one identity.
-#[derive(Default)]
 pub(super) struct WalkBudget {
     visits: usize,
     directories: usize,
+    scheduled: usize,
+    limits: Limits,
+    deadline: Instant,
 }
 
-pub(super) fn walk(
+impl WalkBudget {
+    pub(super) fn new(limits: Limits, deadline: Instant) -> Self {
+        Self {
+            visits: 0,
+            directories: 0,
+            scheduled: 0,
+            limits,
+            deadline,
+        }
+    }
+}
+
+pub(super) fn walk<I>(
     root: &Path,
     files: &mut BTreeMap<PathBuf, String>,
     retained: &mut usize,
     hashed: &mut u64,
     budget: &mut WalkBudget,
-    limits: Limits,
-    deadline: Instant,
-) -> Result<(), IdentityGap> {
+    mut read_directory: impl FnMut(&Path) -> std::io::Result<I>,
+) -> Result<(), IdentityGap>
+where
+    I: Iterator<Item = std::io::Result<std::fs::DirEntry>>,
+{
+    let limits = budget.limits;
+    let deadline = budget.deadline;
     if Instant::now() >= deadline {
         return Err(IdentityGap::Time);
     }
-    if limits.pending == 0 {
+    budget.scheduled += 1;
+    if budget.scheduled > limits.pending {
         return Err(IdentityGap::Bound(Bound::Pending));
     }
     retain(root, retained, limits)?;
@@ -93,7 +113,7 @@ pub(super) fn walk(
         }
         contained(&directory)?;
         let entries =
-            std::fs::read_dir(&directory).map_err(|_| entry(&directory, EntryKind::Unreadable))?;
+            read_directory(&directory).map_err(|_| entry(&directory, EntryKind::Unreadable))?;
         for item in entries {
             if Instant::now() >= deadline {
                 return Err(IdentityGap::Time);
@@ -123,7 +143,8 @@ pub(super) fn walk(
                 if excluded_directory(&item.file_name()) {
                     continue;
                 }
-                if pending.len() >= limits.pending {
+                budget.scheduled += 1;
+                if budget.scheduled > limits.pending {
                     return Err(IdentityGap::Bound(Bound::Pending));
                 }
                 retain(&path, retained, limits)?;
@@ -139,7 +160,6 @@ pub(super) fn walk(
                 return Err(entry(&path, EntryKind::Special));
             }
         }
-        *retained -= directory.as_os_str().as_encoded_bytes().len();
     }
     Ok(())
 }

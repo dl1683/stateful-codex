@@ -50,6 +50,51 @@ fn w5_parent_repository_is_not_workspace_state() {
 }
 
 #[test]
+fn broken_git_directory_never_discovers_an_ignoring_parent_repository() {
+    let parent = super::repository();
+    let project = parent.path().join("build");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::create_dir(project.join(".git")).unwrap();
+    let input = project.join("input");
+    std::fs::write(&input, "first").unwrap();
+    // The valid parent ignores build/, so upward discovery would silently hide input.
+    assert_eq!(
+        super::git(parent.path(), &["check-ignore", "build/input"]),
+        "build/input"
+    );
+    assert_eq!(snapshot(&project), Err(IdentityGap::Git));
+    std::fs::write(input, "other").unwrap();
+    assert_eq!(snapshot(&project), Err(IdentityGap::Git));
+}
+
+#[test]
+fn owned_gitfile_worktree_uses_its_own_files() {
+    let parent = super::repository();
+    let holder = TempDir::new().unwrap();
+    let project = holder.path().join("worktree");
+    super::git(
+        parent.path(),
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            project.to_str().unwrap(),
+        ],
+    );
+    assert!(project.join(".git").is_file());
+    let before = snapshot(&project).unwrap();
+    std::fs::write(project.join("src/parse.py"), "changed\n").unwrap();
+    let after = snapshot(&project).unwrap();
+    assert_eq!(
+        changed_unpinned(&empty_ledger(), Ok(&before), Ok(&after)),
+        Some(IdentityChange::Path(
+            project.canonicalize().unwrap().join("src/parse.py")
+        ))
+    );
+}
+
+#[test]
 fn w6_exclusions_apply_to_directories_at_every_depth() {
     let project = TempDir::new().unwrap();
     let root = project.path();

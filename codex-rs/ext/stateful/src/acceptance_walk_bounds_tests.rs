@@ -11,7 +11,7 @@ fn enumerate(
     WalkBudget,
     BTreeMap<PathBuf, String>,
 ) {
-    let mut budget = WalkBudget::default();
+    let mut budget = WalkBudget::new(limits, Instant::now() + limits.budget);
     let mut files = BTreeMap::new();
     let mut retained = 0;
     let mut hashed = 0;
@@ -21,8 +21,7 @@ fn enumerate(
         &mut retained,
         &mut hashed,
         &mut budget,
-        limits,
-        Instant::now() + limits.budget,
+        |directory| std::fs::read_dir(directory),
     );
     (result, budget, files)
 }
@@ -58,7 +57,7 @@ fn w14_wide_directories_overflow_pending_without_collection() {
         },
     );
     assert_eq!(result, Err(IdentityGap::Bound(Bound::Pending)));
-    assert_eq!(budget.visits, 6);
+    assert_eq!(budget.visits, 5);
 }
 
 #[test]
@@ -154,7 +153,72 @@ fn w2_w14_deep_visits_stop_at_fifty_one() {
     assert_eq!(budget.visits, 51);
 }
 
+// Portable counterpart to the Windows-only 5000-level witness. Even macOS's
+// pathname limit accommodates this 200-level, one-character-component fixture.
 #[test]
+fn w14_portable_depth_succeeds_and_low_limits_refuse_exactly() {
+    let project = TempDir::new().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let mut directory = root.clone();
+    for _ in 0..200 {
+        directory.push("d");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("f"), "x").unwrap();
+    }
+    let limits = Limits {
+        path_bytes: 512 * 1024,
+        path_length: 1024,
+        budget: std::time::Duration::from_secs(/*secs*/ 30),
+        ..LIMITS
+    };
+    let (result, budget, files) = enumerate(&root, limits);
+    assert_eq!(
+        (result, budget.visits, budget.directories, files.len()),
+        (Ok(()), 400, 201, 200)
+    );
+    for (limits, bound) in [
+        (
+            Limits {
+                visits: 50,
+                ..limits
+            },
+            Bound::Visits,
+        ),
+        (
+            Limits {
+                directories: 25,
+                ..limits
+            },
+            Bound::Directories,
+        ),
+        (
+            Limits {
+                pending: 25,
+                ..limits
+            },
+            Bound::Pending,
+        ),
+        (
+            Limits {
+                path_bytes: 1024,
+                ..limits
+            },
+            Bound::RetainedBytes,
+        ),
+        (
+            Limits {
+                path_length: root.as_os_str().as_encoded_bytes().len() + 20,
+                ..limits
+            },
+            Bound::PathLength,
+        ),
+    ] {
+        assert_eq!(enumerate(&root, limits).0, Err(IdentityGap::Bound(bound)));
+    }
+}
+
+#[test]
+#[cfg(windows)]
 fn w14_five_thousand_directories_are_walked_iteratively() {
     let started = Instant::now();
     let project = TempDir::new().unwrap();
@@ -229,6 +293,13 @@ fn bounds_are_totals_across_roots() {
             },
             Bound::Directories,
         ),
+        (
+            Limits {
+                pending: 1,
+                ..LIMITS
+            },
+            Bound::Pending,
+        ),
         (Limits { bytes: 4, ..LIMITS }, Bound::Bytes),
     ] {
         assert_eq!(
@@ -253,4 +324,95 @@ fn retained_bytes_include_simultaneously_pending_directories() {
         enumerate(&root, limits).0,
         Err(IdentityGap::Bound(Bound::RetainedBytes))
     );
+}
+
+#[test]
+fn sibling_subtree_eligibility_is_independent_of_enumeration_order() {
+    let project = TempDir::new().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    for relative in ["a", "b", "a/x", "a/y"] {
+        std::fs::create_dir(root.join(relative)).unwrap();
+    }
+    let total_bytes = std::iter::once(root.clone())
+        .chain(["a", "b", "a/x", "a/y"].map(|relative| root.join(relative)))
+        .map(|path| path.as_os_str().as_encoded_bytes().len())
+        .sum::<usize>();
+    for reverse in [false, true] {
+        for (limits, expected) in [
+            (
+                Limits {
+                    pending: 2,
+                    ..LIMITS
+                },
+                Err(IdentityGap::Bound(Bound::Pending)),
+            ),
+            (
+                Limits {
+                    pending: 4,
+                    ..LIMITS
+                },
+                Err(IdentityGap::Bound(Bound::Pending)),
+            ),
+            (
+                Limits {
+                    path_bytes: total_bytes - root.join("b").as_os_str().as_encoded_bytes().len(),
+                    ..LIMITS
+                },
+                Err(IdentityGap::Bound(Bound::RetainedBytes)),
+            ),
+            (
+                Limits {
+                    pending: 5,
+                    path_bytes: total_bytes,
+                    ..LIMITS
+                },
+                Ok(()),
+            ),
+        ] {
+            let mut budget = WalkBudget::new(limits, Instant::now() + limits.budget);
+            let mut files = BTreeMap::new();
+            let mut retained = 0;
+            let mut hashed = 0;
+            let mut entered = Vec::new();
+            let result = walk(
+                &root,
+                &mut files,
+                &mut retained,
+                &mut hashed,
+                &mut budget,
+                |directory| {
+                    entered.push(directory.to_path_buf());
+                    // Only the witness collects/sorts, to inject both orders reliably.
+                    // Production uses read_dir and still streams each entry.
+                    let mut entries =
+                        std::fs::read_dir(directory)?.collect::<std::io::Result<Vec<_>>>()?;
+                    entries.sort_by_key(std::fs::DirEntry::file_name);
+                    if reverse {
+                        entries.reverse();
+                    }
+                    Ok(entries.into_iter().map(Ok))
+                },
+            );
+            assert_eq!(result, expected, "reverse enumeration: {reverse}");
+            if result.is_ok() {
+                let order = if reverse {
+                    ["", "a", "a/x", "a/y", "b"]
+                } else {
+                    ["", "b", "a", "a/y", "a/x"]
+                };
+                assert_eq!(entered, order.map(|relative| root.join(relative)));
+                assert_eq!(
+                    (
+                        budget.visits,
+                        budget.directories,
+                        budget.scheduled,
+                        retained,
+                        files,
+                        hashed
+                    ),
+                    (4, 5, 5, total_bytes, BTreeMap::new(), 0)
+                );
+            }
+        }
+    }
 }

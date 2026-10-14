@@ -27,7 +27,8 @@ path = "junit.xml"
 inherits = "default"
 
 [[profile.default.overrides]]
-# The iterative-walk witness creates, hashes and removes 5000 nested directories.
+# The Windows iterative-walk witness creates, hashes and removes 5000 nested directories.
+platform = 'cfg(windows)'
 filter = 'package(codex-stateful-extension) & test(w14_five_thousand_directories_are_walked_iteratively)'
 slow-timeout = { period = "30s", terminate-after = 60 }
 retries = 0

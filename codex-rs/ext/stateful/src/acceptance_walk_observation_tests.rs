@@ -12,7 +12,7 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
         .store
         .revise_acceptance(
             &fixture.run_id,
-            1,
+            /*expected_revision*/ 1,
             vec![AcceptanceChange::Refine {
                 ordinal: 1,
                 statement: None,
@@ -53,7 +53,14 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
         .expect("python preflight");
     assert!(output.status.success());
     fixture
-        .finish("python", "python check.py", root, "completed", 0, "unknown")
+        .finish(
+            "python",
+            "python check.py",
+            root,
+            "completed",
+            /*exit_code*/ 0,
+            "unknown",
+        )
         .await;
     let ledger = fixture
         .store
@@ -87,7 +94,7 @@ async fn w6_generated_cache_does_not_invalidate_a_passing_walk_check() {
             "pytest -q tests/test_parse.py",
             root,
             "completed",
-            0,
+            /*exit_code*/ 0,
             "unknown",
         )
         .await;
@@ -104,7 +111,7 @@ async fn w6_an_excluded_pin_remains_governed() {
         .store
         .revise_acceptance(
             &fixture.run_id,
-            1,
+            /*expected_revision*/ 1,
             vec![AcceptanceChange::Refine {
                 ordinal: 1,
                 statement: None,
@@ -128,7 +135,7 @@ async fn w6_an_excluded_pin_remains_governed() {
             "pytest -q tests/test_parse.py",
             root,
             "completed",
-            0,
+            /*exit_code*/ 0,
             "unknown",
         )
         .await;

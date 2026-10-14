@@ -92,13 +92,13 @@ pub(crate) struct Limits {
     pub(crate) visits: usize,
     /// Directories entered across all walk roots.
     pub(crate) directories: usize,
-    /// Directories pending on the walk stack.
+    /// Total directory work scheduled by walks, including roots and already-popped work.
     pub(crate) pending: usize,
     /// File bytes hashed.
     pub(crate) bytes: u64,
     /// Bytes read from one git enumeration.
     pub(crate) git_output: u64,
-    /// Retained pending, listed and cached ancestor path bytes.
+    /// Total scheduled walk, listed and cached ancestor path bytes, without walk refunds.
     pub(crate) path_bytes: usize,
     /// Maximum path length in encoded bytes.
     pub(crate) path_length: usize,
@@ -209,7 +209,7 @@ pub(crate) fn identify(
     let mut hashed = 0_u64;
     let mut ancestors = HashMap::new();
     let mut retained = 0;
-    let mut walk_budget = WalkBudget::default();
+    let mut walk_budget = WalkBudget::new(limits, deadline);
     for root in roots {
         if Instant::now() >= deadline {
             return Err(IdentityGap::Time);
@@ -223,8 +223,7 @@ pub(crate) fn identify(
                     &mut retained,
                     &mut hashed,
                     &mut walk_budget,
-                    limits,
-                    deadline,
+                    |directory| std::fs::read_dir(directory),
                 )?;
                 continue;
             }
@@ -433,7 +432,9 @@ fn exact_path(name: &[u8]) -> Result<PathBuf, IdentityGap> {
 /// A gap means git cannot run, the callback refuses a record, or a bound is
 /// exceeded (the process is then killed).
 /// Repository configuration cannot start helper programs: the file-system monitor is disabled
-/// and optional locks are off.
+/// and optional locks are off. Explicit repository/worktree paths prevent an invalid root
+/// marker from reopening upward repository discovery. Resolve them in `root` rather than
+/// passing Windows verbatim canonical paths, which Git does not accept as option values.
 fn git_records(
     root: &Path,
     arguments: &[&str],
@@ -444,6 +445,8 @@ fn git_records(
 ) -> Result<i32, IdentityGap> {
     let mut command = Command::new("git");
     command
+        .arg("--git-dir=.git")
+        .arg("--work-tree=.")
         .arg("-c")
         .arg("core.fsmonitor=false")
         .arg("-c")
