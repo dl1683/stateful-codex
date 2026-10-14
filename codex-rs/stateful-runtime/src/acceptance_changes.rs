@@ -21,7 +21,6 @@ use crate::EvidenceOutcome;
 use crate::EvidenceSource;
 use crate::RequestSpan;
 use crate::StatefulRun;
-use crate::StatefulRunId;
 use crate::StatefulRunStoreError;
 use crate::TermsUpdate;
 use crate::acceptance::AcceptanceError;
@@ -34,6 +33,7 @@ use crate::acceptance::validate_artifacts;
 use crate::acceptance::validate_bounded;
 use crate::acceptance::validate_check_command;
 use crate::acceptance::validate_path;
+use crate::acceptance_check_dir::stored_check_directory;
 use crate::acceptance_storage::EvidenceRow;
 use crate::acceptance_storage::executes;
 use crate::acceptance_storage::host_checked;
@@ -74,10 +74,15 @@ pub(crate) async fn apply_change(
             kind,
             statement,
             request_span,
-            terms,
+            mut terms,
         } => {
             validate_bounded(&statement, MAX_STATEMENT_BYTES)?;
             let ordinal = next_ordinal(ledger);
+            if let Some(cwd) = &mut terms.check_cwd {
+                *cwd = stored_check_directory(context.project_root, cwd)
+                    .map_err(|reason| AcceptanceError::Refused(reason.to_string()))?
+                    .text;
+            }
             validate_terms(ledger, ordinal, &terms)?;
             let requirement = match (origin, request_span) {
                 (AcceptanceOrigin::Omission, _) => {
@@ -146,7 +151,7 @@ pub(crate) async fn apply_change(
                     )));
                 }
                 if let Some(message) =
-                    weakening_refusal(connection, &context.run.id, criterion, &terms).await?
+                    weakening_refusal(connection, context, criterion, &terms).await?
                 {
                     return Err(refused(message));
                 }
@@ -336,7 +341,7 @@ pub(crate) async fn insert_omission_proposal(
 /// Why a terms update would weaken a user-bound criterion, if it would.
 async fn weakening_refusal(
     connection: &mut SqliteConnection,
-    run_id: &StatefulRunId,
+    context: &ChangeContext<'_>,
     criterion: &AcceptanceCriterion,
     terms: &TermsUpdate,
 ) -> Result<Option<String>, StatefulRunStoreError> {
@@ -369,12 +374,23 @@ async fn weakening_refusal(
             "{alias} comes from the user's words; its milestone link cannot be replaced"
         )));
     }
-    let check_change = terms.check_command.is_some()
-        || terms.expected_observation.is_some()
-        || terms.check_cwd.is_some();
+    let directory_changed = if let Some(cwd) = terms.check_cwd.as_deref() {
+        let next = stored_check_directory(context.project_root, cwd)
+            .map_err(|reason| AcceptanceError::Refused(reason.to_string()))?;
+        let previous = stored_check_directory(
+            context.project_root,
+            criterion.check_cwd.as_deref().unwrap_or("."),
+        )
+        .map_err(|reason| AcceptanceError::Refused(reason.to_string()))?;
+        next.directory != previous.directory
+    } else {
+        false
+    };
+    let check_change =
+        terms.check_command.is_some() || terms.expected_observation.is_some() || directory_changed;
     if check_change
         && criterion.check_command.is_some()
-        && host_checked(connection, run_id, criterion.ordinal).await?
+        && host_checked(connection, &context.run.id, criterion.ordinal).await?
     {
         return Ok(Some(format!(
             "{alias} comes from the user's words and its check already ran; the check, its directory and its expected observation cannot be replaced. Repair the work, or report the failure"
@@ -576,7 +592,7 @@ async fn update_criterion(
     if let Some(statement) = &update.statement {
         validate_bounded(statement, MAX_STATEMENT_BYTES)?;
     }
-    let terms = CriterionTerms {
+    let mut terms = CriterionTerms {
         required: update.required,
         depends_on: update
             .terms
@@ -607,6 +623,11 @@ async fn update_criterion(
             .expected_observation
             .or_else(|| criterion.expected_observation.clone()),
     };
+    if let Some(cwd) = &mut terms.check_cwd {
+        *cwd = stored_check_directory(context.project_root, cwd)
+            .map_err(|reason| AcceptanceError::Refused(reason.to_string()))?
+            .text;
+    }
     validate_terms(context.ledger, criterion.ordinal, &terms)?;
     let statement = update
         .statement

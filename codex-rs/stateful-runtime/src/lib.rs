@@ -2,6 +2,7 @@
 
 mod acceptance;
 mod acceptance_changes;
+mod acceptance_check_dir;
 mod acceptance_coverage;
 mod acceptance_lifecycle;
 mod acceptance_plan;

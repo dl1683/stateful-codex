@@ -189,7 +189,7 @@ fn only_an_execution_of_a_declared_checker_is_admissible() {
         ("../verify.sh", Some("tests")),
     ] {
         assert_eq!(
-            crate::acceptance_plan::executed_checker(command, cwd, &checker),
+            crate::acceptance_plan::executed_checker(command, cwd, Some(root.path()), &checker),
             Ok(()),
             "{command}"
         );
@@ -216,6 +216,7 @@ fn only_an_execution_of_a_declared_checker_is_admissible() {
             crate::acceptance_plan::executed_checker(
                 command,
                 /*check_cwd*/ None,
+                Some(root.path()),
                 &checker
             )
             .is_err(),

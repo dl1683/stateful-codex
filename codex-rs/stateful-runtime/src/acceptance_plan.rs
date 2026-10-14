@@ -4,6 +4,7 @@
 //! dependencies requires a new admission.
 
 use sqlx::SqliteConnection;
+use std::path::Path;
 
 use crate::AcceptanceCriterion;
 use crate::AcceptanceState;
@@ -13,6 +14,8 @@ use crate::acceptance::MAX_REASON_BYTES;
 use crate::acceptance::validate_bounded;
 use crate::acceptance_changes::ChangeContext;
 use crate::acceptance_changes::count;
+use crate::acceptance_check_dir::CwdReason;
+use crate::acceptance_check_dir::stored_check_directory;
 
 /// Interpreters whose first operand is the script they execute.
 const SCRIPT_INTERPRETERS: &[&str] = &[
@@ -45,9 +48,25 @@ pub(crate) async fn admit_plan(
             "{alias} needs checker files (the tests or scripts the command runs) and pinned artifacts before its plan can be admitted"
         )));
     }
-    if let Err(reason) =
-        executed_checker(command, criterion.check_cwd.as_deref(), &criterion.checker)
-    {
+    let cwd = criterion
+        .check_cwd
+        .as_deref()
+        .map(|input| stored_check_directory(context.project_root, input))
+        .transpose()
+        .map_err(|reason| {
+            refused(match reason {
+                CwdReason::NeedsRoot => reason.to_string(),
+                CwdReason::InvalidDirectory | CwdReason::OutsideRoot => {
+                    CwdReason::InvalidDirectory.to_string()
+                }
+            })
+        })?;
+    if let Err(reason) = executed_checker(
+        command,
+        cwd.as_ref().map(|cwd| cwd.text.as_str()),
+        context.project_root,
+        &criterion.checker,
+    ) {
         return Err(refused(format!(
             "`{command}` does not execute one of {alias}'s checker files: {reason}"
         )));
@@ -57,22 +76,44 @@ pub(crate) async fn admit_plan(
             "{alias}'s checker files could not be read on the local executor, so their bytes cannot be frozen"
         )));
     };
-    if criterion.plan.as_ref().is_some_and(|plan| {
-        plan.criterion_revision == criterion.revision && plan.checker_digest == checker_digest
-    }) {
+    let rewrite = cwd
+        .as_ref()
+        .is_some_and(|cwd| Some(cwd.text.as_str()) != criterion.check_cwd.as_deref());
+    if let (Some(cwd), Some(stored)) = (&cwd, criterion.check_cwd.as_deref())
+        && (stored_check_directory(context.project_root, &cwd.text)
+            .map_err(|reason| refused(reason.to_string()))?
+            .directory
+            != cwd.directory
+            || stored_check_directory(context.project_root, stored)
+                .map_err(|reason| refused(reason.to_string()))?
+                .directory
+                != cwd.directory)
+    {
+        return Err(refused(
+            "checkCwd rewrite must preserve its canonical directory".to_string(),
+        ));
+    }
+    if !rewrite
+        && criterion.plan.as_ref().is_some_and(|plan| {
+            plan.criterion_revision == criterion.revision && plan.checker_digest == checker_digest
+        })
+    {
         return Ok(false);
     }
+    let revision = criterion.revision + u64::from(rewrite);
     sqlx::query(
         "UPDATE stateful_acceptance_criteria
          SET plan_criterion_revision = ?, plan_checker_digest = ?, plan_ledger_revision = ?,
-             ledger_revision = ?, updated_at_ms = ?
+             ledger_revision = ?, updated_at_ms = ?, revision = ?, check_cwd = ?
          WHERE run_id = ? AND ordinal = ?",
     )
-    .bind(count(criterion.revision)?)
+    .bind(count(revision)?)
     .bind(&checker_digest)
     .bind(count(context.ledger_revision)?)
     .bind(count(context.ledger_revision)?)
     .bind(context.now)
+    .bind(count(revision)?)
+    .bind(cwd.as_ref().map(|cwd| cwd.text.as_str()))
     .bind(context.run.id.as_str())
     .bind(i64::from(criterion.ordinal))
     .execute(&mut *connection)
@@ -80,14 +121,16 @@ pub(crate) async fn admit_plan(
     Ok(true)
 }
 
-/// Checks, lexically, that a command executes one of the checker files: the argv is plain
+/// Checks that a command executes one of the checker files: the argv is plain
 /// words with no shell syntax, and either an interpreter runs the checker as its first
 /// operand or the first word is a path to the checker itself. The script path, resolved
-/// against the check directory, must equal a declared checker path. A mention of a checker
+/// against the canonical check directory, must have the same canonical target as a declared
+/// checker path. Declared alias spellings are retained. A mention of a checker
 /// that does not execute it (an echo, a comment, another file of the same name) is refused.
 pub(crate) fn executed_checker(
     command: &str,
     check_cwd: Option<&str>,
+    project_root: Option<&Path>,
     checker: &[String],
 ) -> Result<(), String> {
     if let Some(character) = command.chars().find(|character| {
@@ -129,43 +172,36 @@ pub(crate) fn executed_checker(
                 .to_string(),
         );
     };
-    if script.starts_with(['/', '\\']) {
+    if script.starts_with(['/', '\\']) || script.contains(':') {
         return Err("the checker must be named by a project-relative path".to_string());
     }
-    let resolved =
-        normalize(&format!("{}/{script}", check_cwd.unwrap_or("."))).ok_or_else(|| {
-            "the script and the check directory must be project-relative paths inside the project"
-                .to_string()
-        })?;
-    if checker
-        .iter()
-        .any(|path| normalize(path).as_deref() == Some(resolved.as_str()))
-    {
+    let root = project_root
+        .ok_or_else(|| "checker files could not be read on the local executor".to_string())?;
+    let root = root
+        .canonicalize()
+        .map_err(|_| "checker files could not be read on the local executor".to_string())?;
+    let cwd = stored_check_directory(Some(&root), check_cwd.unwrap_or("."))
+        .map_err(|reason| reason.to_string())?;
+    let resolved = cwd
+        .directory
+        .join(script)
+        .canonicalize()
+        .map_err(|_| "the executed checker must exist on the local executor".to_string())?;
+    if !resolved.is_file() {
+        return Err("the executed checker must be a file on the local executor".to_string());
+    }
+    if checker.iter().any(|path| {
+        root.join(path)
+            .canonicalize()
+            .is_ok_and(|path| path == resolved)
+    }) {
         Ok(())
     } else {
         Err(format!(
-            "it runs `{resolved}`, which is not one of the declared checker files"
+            "it runs `{}`, which is not one of the declared checker files",
+            resolved.display()
         ))
     }
-}
-
-/// A project-relative path with `.` and `..` resolved lexically; `None` for an absolute path
-/// or one that leaves the project.
-fn normalize(path: &str) -> Option<String> {
-    if path.starts_with(['/', '\\']) || path.contains(':') {
-        return None;
-    }
-    let mut parts = Vec::new();
-    for part in path.split(['/', '\\']) {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            part => parts.push(part),
-        }
-    }
-    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 /// Records how an applied steering instruction affects acceptance. The scope may have
