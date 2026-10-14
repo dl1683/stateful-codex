@@ -577,7 +577,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
                     "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."},
-                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed or blocked: unresolved issues ([] if none); Autonomous completed retains them for a partial final answer; other modes and explicit blocked stop the run."}
+                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed or blocked: unresolved issues ([] if none); Autonomous completed ends partial, other cases block the run."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false
