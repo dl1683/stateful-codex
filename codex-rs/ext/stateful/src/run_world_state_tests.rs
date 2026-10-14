@@ -14,6 +14,8 @@ use codex_stateful_runtime::SteeringId;
 use codex_stateful_runtime::SteeringStatus;
 use codex_stateful_runtime::WorkflowMode;
 
+use pretty_assertions::assert_eq;
+
 use super::RunWorldStateStatus;
 use super::run_world_state_section;
 
@@ -644,10 +646,10 @@ fn changed_collaborative_policy_replaces_a_retained_packet() {
     );
 }
 
-/// G1/G2: snapshot the emitted mode policy, and ensure changed guidance reaches retained
+/// G1/G2: check the exact emitted mode policy, and ensure changed guidance reaches retained
 /// packets. This renders the contribution rather than testing a static constant.
 #[test]
-fn completion_guidance_world_state_snapshot() {
+fn completion_guidance_world_state_exact_text() {
     for mode in [
         WorkflowMode::Autonomous,
         WorkflowMode::Collaborative,
@@ -686,7 +688,18 @@ fn completion_guidance_world_state_snapshot() {
         } else {
             policy.to_string()
         };
-        insta::assert_snapshot!(format!("completion_guidance_{mode:?}"), policy);
+        let expected = match mode {
+            WorkflowMode::Autonomous => {
+                "Mode obligation: continue useful authorized work without routine checkpoints; emit semantic updates at meaningful changes and stop only at a genuine terminal condition. Give a substantive final answer; an eligible final ends Answered or Partial. Neither certifies work. While work remains, keep working, or record next work with obligation_update; use a trailing [stateful-outcome] block on separate lines with disposition: continue and open-issues: none to continue. After recording next work, disposition: answer explicitly chooses the answer. List unfinished items under open-issues; retained blockers require Partial. Resolve retained issues only with obligation_update resolvedIssues. Apply or settle pending steering first; size, binding and authorization gates still apply.\nSemantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. Choose the completion disposition by what the run learned, not by whether files changed or the answer is short. Use noReusableLearning for an answer drawn from adequate existing project knowledge, a narrow source citation that adds no reusable understanding, or a trivial answer or cheap-to-recompute inventory. Reading sources can produce reusable learning even when no source files change: when an orientation establishes project purpose, module responsibilities and relationships (not a directory listing), or how to run the tests (stating whether that procedure is documented, executed successfully, or blocked), record the findings worth reusing and complete with durableLearning. Do not create duplicate entries or persist routine inventories merely to qualify for completion. Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Use completed only for declared acceptance criteria, as the final Stateful mutation with the fields in stateful_run_update. Give a substantive final answer; an eligible final ends Answered or Partial. Open issues or blockers require Partial; resolve retained issues with obligation_update resolvedIssues."
+            }
+            WorkflowMode::Collaborative => {
+                "Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. This Collaborative run stays open across the user's turns and the host records every final answer, so complete it only when the user says the overall goal is done or asks to close it, never at a turn's end; completion then covers everything recorded since the run began. To complete, as the final Stateful mutation: stateful_run_update with expectedRevision, status completed and optional openIssues (unresolved issues or host blockers end the run blocked), plus completionDisposition noReusableLearning and result when nothing reusable was learned, otherwise durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings."
+            }
+            WorkflowMode::Socratic => {
+                "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. Choose the completion disposition by what the run learned, not by whether files changed or the answer is short. Use noReusableLearning for an answer drawn from adequate existing project knowledge, a narrow source citation that adds no reusable understanding, or a trivial answer or cheap-to-recompute inventory. Reading sources can produce reusable learning even when no source files change: when an orientation establishes project purpose, module responsibilities and relationships (not a directory listing), or how to run the tests (stating whether that procedure is documented, executed successfully, or blocked), record the findings worth reusing and complete with durableLearning. Do not create duplicate entries or persist routine inventories merely to qualify for completion. Stateful write tools (blackboard_record_batch, blackboard_update_batch, blackboard_relate, obligation_update, stateful_acceptance_update, stateful_run_update, steering_reconcile) are direct function tools and are not callable inside exec. Completion, the final Stateful mutation, is one stateful_run_update with expectedRevision, status completed and optional openIssues (unresolved issues or recorded blockers end the run blocked), plus exactly completionDisposition noReusableLearning and result if the run learned nothing reusable, otherwise, after recording the reusable findings and all other warranted durable writes, durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings."
+            }
+        };
+        assert_eq!(policy, expected);
         assert!(
             section
                 .render_diff(PreviousWorldStateSection::Known(section.snapshot()))

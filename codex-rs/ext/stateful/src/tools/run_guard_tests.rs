@@ -65,7 +65,10 @@ fn eligible_final_guidance_fallback_snapshot() {
         Some(super::ANSWER_GUIDANCE),
         RejectionRoute::Answer,
     );
-    insta::assert_snapshot!(error.to_string(), @"stateful_run_update was rejected; read the run. Give a substantive final answer; an eligible final ends Answered or Partial. Apply or settle pending steering first.");
+    assert_eq!(
+        error.to_string(),
+        "stateful_run_update was rejected; read the run. Give a substantive final answer; an eligible final ends Answered or Partial. Apply or settle pending steering first."
+    );
 }
 
 #[test]

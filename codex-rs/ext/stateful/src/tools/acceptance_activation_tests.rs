@@ -45,7 +45,10 @@ async fn autonomous_redirects_retain_raw_issues_without_acceptance_work() {
                 .contains("an eligible final ends Answered or Partial")
         );
         assert!(output.to_string().len() <= 900);
-        insta::assert_snapshot!(output["instruction"].as_str().expect("instruction"), @"This run declared no acceptance criteria; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply.");
+        assert_eq!(
+            output["instruction"].as_str().expect("instruction"),
+            "This run declared no acceptance criteria; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply."
+        );
     }
     assert_eq!(fixture.stored_run().await, fixture.run);
     assert_eq!(fixture.ledger().await, ledger);
@@ -152,7 +155,10 @@ async fn completion_shapes_are_conditional() {
             json!({"expectedRevision":1,"status":"completed",
             "completionDisposition":"noReusableLearning","result":"<final answer>","openIssues":[]})
         );
-        insta::assert_snapshot!(shapes.split(" Replace").next().expect("label"), @" verification and terminal gates still apply.");
+        assert_eq!(
+            shapes.split(" Replace").next().expect("label"),
+            " verification and terminal gates still apply."
+        );
         assert_eq!(f.stored_run().await, f.run);
     }
 }
@@ -171,14 +177,10 @@ async fn eligible_final_guidance() {
         .split_once("Final-answer guidance: ")
         .expect("decode guidance")
         .1;
-    insta::assert_snapshot!(guide, @r###"
-    Give a substantive final answer; an eligible final ends Answered or Partial. Neither outcome certifies work; no completion call is required. If you recorded next work this turn, explicitly choose the answer with this trailing block on separate lines:
-    [stateful-outcome]
-    disposition: answer
-    open-issues: none
-    [/stateful-outcome]
-    List unfinished items under open-issues instead of none. Apply or settle pending steering first; size, binding and authorization gates still apply.
-    "###);
+    assert_eq!(
+        guide,
+        "Give a substantive final answer; an eligible final ends Answered or Partial. Neither outcome certifies work; no completion call is required. If you recorded next work this turn, explicitly choose the answer with this trailing block on separate lines:\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]\nList unfinished items under open-issues instead of none. Apply or settle pending steering first; size, binding and authorization gates still apply."
+    );
     assert_eq!(f.stored_run().await, f.run);
 }
 
@@ -558,7 +560,10 @@ async fn redirected_final_blockers_survive_into_the_answer_and_disclosure() {
                 );
                 assert!(receipt.to_string().len() <= 900);
                 if contract {
-                    insta::assert_snapshot!(receipt["instruction"].as_str().expect("instruction"), @"Open issues or blockers remain; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply.");
+                    assert_eq!(
+                        receipt["instruction"].as_str().expect("instruction"),
+                        "Open issues or blockers remain; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply."
+                    );
                 }
             }
             let runtime = f.services.runtime().await.expect("runtime");
