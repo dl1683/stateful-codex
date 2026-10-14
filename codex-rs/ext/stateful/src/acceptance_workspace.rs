@@ -21,6 +21,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -37,8 +38,8 @@ use codex_stateful_runtime::AcceptanceState;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::acceptance_observation::hash_bounded;
-use crate::acceptance_observation::open_nonblocking;
+use crate::acceptance_identity_content::content_digest;
+use crate::acceptance_identity_content::retain;
 use crate::acceptance_identity_reason::IdentityChange;
 use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::Bound;
@@ -86,6 +87,10 @@ pub(crate) struct Limits {
     pub(crate) bytes: u64,
     /// Bytes read from one git enumeration.
     pub(crate) git_output: u64,
+    /// Retained listed and cached ancestor path bytes.
+    pub(crate) path_bytes: usize,
+    /// Maximum path length in encoded bytes.
+    pub(crate) path_length: usize,
     /// Time for the whole identity.
     pub(crate) budget: Duration,
 }
@@ -94,6 +99,8 @@ pub(crate) const LIMITS: Limits = Limits {
     entries: 50_000,
     bytes: 512 * 1024 * 1024,
     git_output: 16 * 1024 * 1024,
+    path_bytes: 16 * 1024 * 1024,
+    path_length: 4096,
     budget: Duration::from_secs(10),
 };
 
@@ -171,40 +178,19 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> 
     if roots.is_empty() { return Err(IdentityGap::Roots); }
     let mut manifest = Manifest { first_root: roots[0].clone(), ..Manifest::default() };
     let mut hashed = 0_u64;
-    // Directories below a root already known to hold no `.git` entry, with all their ancestors.
-    let mut outside_embedded = HashSet::new();
+    let mut ancestors = HashMap::new();
+    let mut retained = 0;
     for root in roots {
-        let (state, listed) = git_listing(root, limits, deadline)?;
+        let (state, listed) = git_listing(root, manifest.files.len(), &mut retained, limits, deadline)?;
         manifest.roots.insert(root.clone(), RootState::Git(state));
         for relative in listed {
             if manifest.files.len() >= limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
             if Instant::now() >= deadline { return Err(IdentityGap::Time); }
-            // Deepest first: once a directory is known, so are all of its ancestors.
-            for directory in relative.ancestors().skip(1) {
-                if directory.as_os_str().is_empty() {
-                    break;
-                }
-                let directory = root.join(directory);
-                if outside_embedded.contains(&directory) {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    return Err(IdentityGap::Time);
-                }
-                let absent = matches!(
-                    std::fs::symlink_metadata(directory.join(".git")),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
-                );
-                if !absent {
-                    return Err(IdentityGap::Entry { path: directory, kind: EntryKind::EmbeddedRepository });
-                }
-                outside_embedded.insert(directory);
-            }
-            let path = root.join(relative);
-            let digest = content_digest(&path, &mut hashed, limits, deadline).ok_or_else(|| IdentityGap::Entry { path: path.clone(), kind: EntryKind::Unreadable })?;
-            manifest.files.insert(path.components().collect(), digest);
+            let digest = content_digest(root, &relative, &mut ancestors, &mut retained, &mut hashed, limits, deadline)?;
+            manifest.files.insert(root.join(relative), digest);
         }
     }
+    if Instant::now() >= deadline { return Err(IdentityGap::Time); }
     Ok(manifest)
 }
 
@@ -213,6 +199,8 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> 
 /// (a git failure, a submodule, an inexact name, or a bound exceeded).
 fn git_listing(
     root: &Path,
+    already_listed: usize,
+    retained: &mut usize,
     limits: Limits,
     deadline: Instant,
 ) -> Result<(RepositoryState, BTreeSet<PathBuf>), IdentityGap> {
@@ -268,7 +256,7 @@ fn git_listing(
             if entry.starts_with(GITLINK_MODE) {
                 return Err(IdentityGap::Entry { path: root.join(exact_path(&path[1..])?), kind: EntryKind::Submodule });
             }
-            add_path(&mut paths, &path[1..], limits)
+            add_path(root, &mut paths, &path[1..], already_listed, retained, limits)
         },
     )?;
     let untracked = git_records(
@@ -277,7 +265,7 @@ fn git_listing(
         0,
         limits,
         deadline,
-        |record| add_path(&mut paths, record, limits),
+        |record| add_path(root, &mut paths, record, already_listed, retained, limits),
     )?;
     if staged != 0 || untracked != 0 {
         return Err(IdentityGap::Git);
@@ -293,9 +281,13 @@ fn git_listing(
 }
 
 /// Adds one git path, exactly as git names it, within the entry bound.
-fn add_path(paths: &mut BTreeSet<PathBuf>, name: &[u8], limits: Limits) -> Result<(), IdentityGap> {
-    paths.insert(exact_path(name)?);
-    if paths.len() > limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
+fn add_path(root: &Path, paths: &mut BTreeSet<PathBuf>, name: &[u8], already_listed: usize, retained: &mut usize, limits: Limits) -> Result<(), IdentityGap> {
+    let path = exact_path(name)?;
+    if !paths.contains(&path) {
+        if paths.len() + already_listed >= limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
+        retain(&root.join(&path), retained, limits)?;
+        paths.insert(path);
+    }
     Ok(())
 }
 
@@ -369,42 +361,6 @@ fn git_records(
         streamed?;
     }
     child.wait().map_err(|_| IdentityGap::Git)?.code().ok_or(IdentityGap::Git)
-}
-
-/// The content digest of one listed path: file bytes, a link's target, or a marker for an
-/// absent path. `None` for a directory or special file (a submodule or nested repository
-/// listed as a path, a FIFO, a device), which the identity cannot represent.
-fn content_digest(
-    path: &Path,
-    hashed: &mut u64,
-    limits: Limits,
-    deadline: Instant,
-) -> Option<String> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Some("absent".to_string());
-        }
-        Err(_) => return None,
-    };
-    if metadata.file_type().is_symlink() {
-        let target = std::fs::read_link(path).ok()?;
-        return Some(format!(
-            "link:{:x}",
-            Sha256::digest(target.as_os_str().as_encoded_bytes())
-        ));
-    }
-    if !metadata.is_file() {
-        return None;
-    }
-    let file = open_nonblocking(path).ok()?;
-    let length = file.metadata().ok()?.len();
-    *hashed += length;
-    if *hashed > limits.bytes {
-        return None;
-    }
-    let stop = || Instant::now() >= deadline;
-    hash_bounded(file, length, &stop).ok()
 }
 
 #[cfg(test)]
