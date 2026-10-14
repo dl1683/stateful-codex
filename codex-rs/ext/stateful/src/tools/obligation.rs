@@ -100,8 +100,14 @@ impl ObligationUpdateTool {
             provenance_source_id: source_id,
         };
         let obligation = match store.append_obligation(id.clone(), value.clone()).await {
-            Err(codex_stateful_runtime::StatefulRunStoreError::ObligationIdentityConflict(_)) => {
+            Err(
+                error
+                @ codex_stateful_runtime::StatefulRunStoreError::ObligationIdentityConflict(_),
+            ) => {
                 value.provenance_source_id = call.call_id.clone();
+                if value.validate().is_err() {
+                    return Err(respond(error));
+                }
                 store.append_obligation(id, value).await.map_err(respond)?
             }
             result => result.map_err(respond)?,

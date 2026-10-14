@@ -731,8 +731,15 @@ impl BlackboardRelateTool {
         };
         let store = self.services.blackboard().await.map_err(respond)?;
         let relation = match store.create_relation(id.clone(), value.clone()).await {
-            Err(codex_project_intelligence::BlackboardStoreError::RelationIdentityConflict(_)) => {
+            Err(
+                error @ codex_project_intelligence::BlackboardStoreError::RelationIdentityConflict(
+                    _,
+                ),
+            ) => {
                 value.provenance.source_id = source_id.to_string();
+                if value.validate().is_err() {
+                    return Err(respond(error));
+                }
                 store.create_relation(id, value).await.map_err(respond)?
             }
             result => result.map_err(respond)?,

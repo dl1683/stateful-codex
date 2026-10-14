@@ -199,13 +199,13 @@ fn counts(output: &Value) -> (Value, Value, Value, Value) {
 #[test]
 fn provenance_is_bounded_deterministic_and_uses_the_whole_id() {
     let source = |raw: &str| crate::call_source::call_source(raw).expect("nonempty");
-    for raw in ["c".repeat(/*n*/ 512), "é".repeat(/*n*/ 256)] {
+    for raw in ["c".repeat(/*n*/ 512), "ÃƒÂ©".repeat(/*n*/ 256)] {
         assert_eq!(source(&raw), raw);
     }
     for raw in [
         "c".repeat(/*n*/ 513),
-        format!("{}x", "é".repeat(/*n*/ 256)),
-        "é".repeat(/*n*/ 257),
+        format!("{}x", "ÃƒÂ©".repeat(/*n*/ 256)),
+        "ÃƒÂ©".repeat(/*n*/ 257),
         bridged_call_id(),
         "call\n1".to_string(),
         " padded ".to_string(),
@@ -521,6 +521,64 @@ async fn oversized_ids_reach_acceptance_and_completion_validation() {
                 .map(|relation| relation.value.provenance.source_id)
                 .collect::<Vec<_>>(),
             vec![crate::call_source::call_source(&raw).unwrap(); 2]
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_raw_fallbacks_preserve_identity_conflicts() {
+    for raw in [
+        "x".repeat(/*n*/ 539),
+        "x".repeat(/*n*/ 67_222),
+        "call\ncontrol".to_string(),
+        " padded ".to_string(),
+    ] {
+        let fixture = fixture().await;
+        fixture.record(&raw).await.expect("batch");
+        fixture.update(&raw).await.expect("obligation");
+        let before = (fixture.findings().await, fixture.obligation_sources().await);
+        let mut changed = progress();
+        changed["packet"]["learning"] = json!(["different payload"]);
+        let error = fixture
+            .obligations
+            .handle(with_call_id("obligation_update", changed, &raw))
+            .await
+            .err()
+            .expect("identity conflict");
+        assert!(
+            error
+                .to_string()
+                .contains("obligation ID was already used for different content"),
+            "{error}"
+        );
+        let relation = super::blackboard_write::BlackboardRelateTool::new(
+            PROJECT_ID.to_string(),
+            fixture.services.clone(),
+            /*event_sink*/ None,
+        );
+        let error = relation
+            .handle(with_call_id(
+                "blackboard_relate",
+                json!({
+                    "idempotencyKey": "relation-1",
+                    "fromEntryId": stable_id("entry", PROJECT_ID, "finding-1"),
+                    "toEntryId": stable_id("entry", PROJECT_ID, "finding-2"),
+                    "kind": "supports", "confidenceBasisPoints": 8000, "note": "different payload"
+                }),
+                &raw,
+            ))
+            .await
+            .err()
+            .expect("identity conflict");
+        assert!(
+            error
+                .to_string()
+                .contains("blackboard relation ID was already used for different content"),
+            "{error}"
+        );
+        assert_eq!(
+            (fixture.findings().await, fixture.obligation_sources().await),
+            before
         );
     }
 }
