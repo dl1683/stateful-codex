@@ -121,7 +121,7 @@ impl StatefulRunUpdateTool {
         &self,
         call: ToolCall<'_>,
         arguments: Arguments,
-        category: &mut run_guard::RejectionCategory,
+        category: &mut guard::RejectionCategory,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let Arguments {
             expected_revision,
@@ -232,7 +232,7 @@ impl StatefulRunUpdateTool {
         // through the runtime commit, so no project mutation can land in between.
         let mut fence = None;
         let (completion, final_obligation) = if no_reusable_learning {
-            *category = run_guard::RejectionCategory::Structural;
+            *category = guard::RejectionCategory::Structural;
             let durable_fields = [
                 ("rootRevision", root_revision.is_some()),
                 ("materialRootFindings", material_root_findings.is_some()),
@@ -251,7 +251,7 @@ impl StatefulRunUpdateTool {
                     durable_fields.join(", ")
                 )));
             }
-            *category = run_guard::RejectionCategory::Evidence;
+            *category = guard::RejectionCategory::Evidence;
             let knowledge_changed = fence
                 .insert(self.acquire_fence().await?)
                 .agent_knowledge_changed_since(&self.project_id, current.created_at_ms)
@@ -262,7 +262,7 @@ impl StatefulRunUpdateTool {
                     "agent-written project knowledge changed in this project during this run, so completion must use durableLearning and select the material finding (promote it first with blackboard_update_batch setRootPromotion if it is not in the root)".to_string(),
                 ));
             }
-            *category = run_guard::RejectionCategory::Structural;
+            *category = guard::RejectionCategory::Structural;
             if result
                 .as_deref()
                 .is_none_or(|result| result.trim().is_empty())
@@ -271,7 +271,7 @@ impl StatefulRunUpdateTool {
                     "completed requires a final evidence-grounded result".to_string(),
                 ));
             }
-            *category = run_guard::RejectionCategory::Evidence;
+            *category = guard::RejectionCategory::Evidence;
             (None, None)
         } else if status == StatefulRunStatus::Completed {
             let source_id = provenance_source_id(&call)?;
@@ -281,7 +281,7 @@ impl StatefulRunUpdateTool {
                     current.revision
                 )));
             }
-            *category = run_guard::RejectionCategory::Structural;
+            *category = guard::RejectionCategory::Structural;
             let material_root_findings = material_root_findings.ok_or_else(|| {
                 FunctionCallError::RespondToModel(
                     format!("completed requires materialRootFindings; pass at most {MAX_MATERIAL_ROOT_FINDINGS} highest-priority E aliases directly material to the outcome. If finalObligation.learning is non-empty, select at least one current root alias that preserves the reusable learning. Pass [] only when the run produced no reusable project learning")
@@ -310,7 +310,7 @@ impl StatefulRunUpdateTool {
                         .to_string(),
                 )
             })?;
-            *category = run_guard::RejectionCategory::Evidence;
+            *category = guard::RejectionCategory::Evidence;
             let project = self
                 .projects
                 .read_project(self.project_id.clone())
