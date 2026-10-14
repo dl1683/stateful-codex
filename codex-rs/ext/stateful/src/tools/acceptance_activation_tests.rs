@@ -218,6 +218,7 @@ async fn preliminary_store_read_failure_is_bounded() {
             &json!({"expectedRevision":1,"status":"completed"}),
         );
         call.truncation_policy = TruncationPolicy::Bytes(budget);
+        let allowance = call.response_byte_budget(crate::tools::MAX_RESPONSE_BYTES);
         let error = f
             .completion
             .handle(call)
@@ -228,7 +229,7 @@ async fn preliminary_store_read_failure_is_bounded() {
             serde_json::to_string(&error.to_string())
                 .expect("json")
                 .len()
-                <= budget
+                <= allowance
         );
     }
 }
