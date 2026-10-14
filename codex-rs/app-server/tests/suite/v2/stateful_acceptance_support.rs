@@ -43,16 +43,6 @@ pub(super) const CHECK_COMMAND: &str = "python verify-acceptance.py";
 pub(super) fn write_acceptance_files(root: &Path) -> Result<()> {
     std::fs::write(root.join(OUTPUT), "accepted\n")?;
     std::fs::write(root.join(CHECKER), CHECKER_SCRIPT)?;
-    init_repository(root)
-}
-
-/// Makes `root` a git work tree: the host identifies a check's workspace only through git.
-pub(super) fn init_repository(root: &Path) -> Result<()> {
-    let status = std::process::Command::new("git")
-        .args(["init", "--quiet"])
-        .current_dir(root)
-        .status()?;
-    anyhow::ensure!(status.success(), "git init failed");
     Ok(())
 }
 

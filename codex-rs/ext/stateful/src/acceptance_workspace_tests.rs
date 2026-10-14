@@ -95,16 +95,7 @@ fn repository() -> TempDir {
 }
 
 #[tokio::test]
-async fn only_a_git_work_tree_can_be_identified() {
-    // A plain project root is unavailable, even when a normal repository is nested in it.
-    let plain = TempDir::new().expect("plain");
-    std::fs::write(plain.path().join("input.csv"), "1,2").expect("input");
-    assert_eq!(workspace_manifest(&roots(plain.path())).await, None);
-    let child = plain.path().join("child");
-    std::fs::create_dir(&child).expect("child");
-    git(&child, &["init", "--quiet"]);
-    assert_eq!(workspace_manifest(&roots(plain.path())).await, None);
-
+async fn broken_git_is_unavailable_and_unborn_git_is_identified() {
     // A git failure (here a broken `.git` link) is unavailable, never a plain workspace.
     let broken = TempDir::new().expect("broken");
     std::fs::write(broken.path().join(".git"), "gitdir: missing-directory\n").expect("link");

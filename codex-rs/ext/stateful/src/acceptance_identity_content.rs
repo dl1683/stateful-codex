@@ -95,17 +95,29 @@ pub(super) fn content_digest(
         Err(_) => return Err(entry(&path, EntryKind::Unreadable)),
         Ok(metadata) => metadata,
     };
+    leaf_digest(root, &path, &metadata, hashed, limits, deadline)
+}
+
+/// Read a leaf after its ancestor chain has been validated by listing or walking.
+pub(super) fn leaf_digest(
+    root: &Path,
+    path: &Path,
+    metadata: &Metadata,
+    hashed: &mut u64,
+    limits: Limits,
+    deadline: Instant,
+) -> Result<String, IdentityGap> {
     if metadata.file_type().is_symlink() {
-        let target = std::fs::read_link(&path).map_err(|_| entry(&path, EntryKind::Unreadable))?;
+        let target = std::fs::read_link(path).map_err(|_| entry(path, EntryKind::Unreadable))?;
         let canonical =
-            std::fs::canonicalize(&path).map_err(|_| entry(&path, EntryKind::EscapingLink))?;
+            std::fs::canonicalize(path).map_err(|_| entry(path, EntryKind::EscapingLink))?;
         if !canonical.starts_with(root) {
-            return Err(entry(&path, EntryKind::EscapingLink));
+            return Err(entry(path, EntryKind::EscapingLink));
         }
         let metadata =
-            std::fs::metadata(&canonical).map_err(|_| entry(&path, EntryKind::Unreadable))?;
+            std::fs::metadata(&canonical).map_err(|_| entry(path, EntryKind::Unreadable))?;
         if metadata.is_dir() {
-            return Err(entry(&path, EntryKind::DirectoryLink));
+            return Err(entry(path, EntryKind::DirectoryLink));
         }
         let digest = read_regular(&canonical, &metadata, hashed, limits, deadline)?;
         return Ok(format!(
@@ -113,7 +125,7 @@ pub(super) fn content_digest(
             Sha256::digest(target.as_os_str().as_encoded_bytes())
         ));
     }
-    read_regular(&path, &metadata, hashed, limits, deadline)
+    read_regular(path, metadata, hashed, limits, deadline)
 }
 
 pub(super) fn check_handle(
@@ -164,7 +176,7 @@ fn read_regular(
     })
 }
 
-fn contained(path: &Path) -> Result<(), IdentityGap> {
+pub(super) fn contained(path: &Path) -> Result<(), IdentityGap> {
     let canonical = std::fs::canonicalize(path).map_err(|_| entry(path, EntryKind::Unreadable))?;
     if canonical != path {
         return Err(entry(path, EntryKind::NotContained));
@@ -172,7 +184,7 @@ fn contained(path: &Path) -> Result<(), IdentityGap> {
     Ok(())
 }
 
-fn reparse(metadata: &Metadata) -> bool {
+pub(super) fn reparse(metadata: &Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;

@@ -100,13 +100,6 @@ async fn fixture(run: &str) -> Fixture {
         "def test(): pass",
     )
     .expect("checker");
-    // Check identity is qualified only inside a git work tree.
-    let initialized = std::process::Command::new("git")
-        .args(["init", "--quiet"])
-        .current_dir(project.path())
-        .status()
-        .expect("git runs");
-    assert!(initialized.success());
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state.path().abs()));
     let store = services.runtime().await.expect("runtime").clone();

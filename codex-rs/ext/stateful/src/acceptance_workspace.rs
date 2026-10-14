@@ -3,11 +3,12 @@
 //! outside the active criteria's pins makes the check a mutation of inputs nothing pins. File
 //! metadata (size, modification time) is never identity.
 //!
-//! Every project root must be inside a git work tree. The listed files are those git tracks or
-//! would track (untracked files that `.gitignore` does not exclude), and the repository state
-//! (symbolic or detached `HEAD`, the staged index, and framed refs) is a separate
-//! typed part of the identity that no file pin excludes. Outside git, or on any git failure,
-//! the identity is unavailable, which fails the check closed. It is also unavailable for
+//! A root uses git only when it owns a `.git` entry; other roots use a bounded content walk,
+//! never a parent repository's state. Git lists tracked and non-ignored untracked paths;
+//! fixed directory exclusions apply only to untracked paths and walk directories. Repository
+//! state (symbolic or detached `HEAD`, the staged index, and framed refs) is a separate typed
+//! identity that no pin excludes. A git failure never falls back to walking. Identity is
+//! unavailable for
 //! anything it cannot represent exactly: submodules (gitlinks), nested repositories or other
 //! non-regular entries, and path names that are not exact on this platform. A listed path
 //! inside an embedded repository (any directory strictly below the root, between the root and
@@ -43,6 +44,9 @@ use crate::acceptance_identity_reason::IdentityChange;
 use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::Side;
 use crate::acceptance_identity_worker::read_identity;
+use crate::acceptance_walk::WalkBudget;
+use crate::acceptance_walk::excluded_untracked;
+use crate::acceptance_walk::walk;
 
 /// Content identity of the workspace.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -57,7 +61,6 @@ pub(crate) struct Manifest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum RootState {
     Git(RepositoryState),
-    #[expect(dead_code, reason = "Walk mode belongs to stage 2B")]
     Walk,
 }
 
@@ -85,11 +88,17 @@ enum HeadState {
 pub(crate) struct Limits {
     /// Listed paths.
     pub(crate) entries: usize,
+    /// Every entry yielded by a walk, including excluded entries.
+    pub(crate) visits: usize,
+    /// Directories entered across all walk roots.
+    pub(crate) directories: usize,
+    /// Directories pending on the walk stack.
+    pub(crate) pending: usize,
     /// File bytes hashed.
     pub(crate) bytes: u64,
     /// Bytes read from one git enumeration.
     pub(crate) git_output: u64,
-    /// Retained listed and cached ancestor path bytes.
+    /// Retained pending, listed and cached ancestor path bytes.
     pub(crate) path_bytes: usize,
     /// Maximum path length in encoded bytes.
     pub(crate) path_length: usize,
@@ -99,6 +108,9 @@ pub(crate) struct Limits {
 
 pub(crate) const LIMITS: Limits = Limits {
     entries: 50_000,
+    visits: 200_000,
+    directories: 10_000,
+    pending: 10_000,
     bytes: 512 * 1024 * 1024,
     git_output: 16 * 1024 * 1024,
     path_bytes: 16 * 1024 * 1024,
@@ -197,7 +209,33 @@ pub(crate) fn identify(
     let mut hashed = 0_u64;
     let mut ancestors = HashMap::new();
     let mut retained = 0;
+    let mut walk_budget = WalkBudget::default();
     for root in roots {
+        if Instant::now() >= deadline {
+            return Err(IdentityGap::Time);
+        }
+        match std::fs::symlink_metadata(root.join(".git")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                manifest.roots.insert(root.clone(), RootState::Walk);
+                walk(
+                    root,
+                    &mut manifest.files,
+                    &mut retained,
+                    &mut hashed,
+                    &mut walk_budget,
+                    limits,
+                    deadline,
+                )?;
+                continue;
+            }
+            Err(_) => {
+                return Err(IdentityGap::Entry {
+                    path: root.join(".git"),
+                    kind: EntryKind::Unreadable,
+                });
+            }
+            Ok(_) => {}
+        }
         let (state, listed) =
             git_listing(root, manifest.files.len(), &mut retained, limits, deadline)?;
         manifest.roots.insert(root.clone(), RootState::Git(state));
@@ -327,7 +365,12 @@ fn git_listing(
         0,
         limits,
         deadline,
-        |record| add_path(root, &mut paths, record, already_listed, retained, limits),
+        |record| {
+            if excluded_untracked(&exact_path(record)?) {
+                return Ok(());
+            }
+            add_path(root, &mut paths, record, already_listed, retained, limits)
+        },
     )?;
     if staged != 0 || untracked != 0 {
         return Err(IdentityGap::Git);
@@ -407,6 +450,10 @@ fn git_records(
         .arg("core.untrackedCache=false")
         .args(arguments)
         .current_dir(root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
         .env("GIT_OPTIONAL_LOCKS", "0");
     records(command, terminator, limits.git_output, deadline, on_record)
 }
