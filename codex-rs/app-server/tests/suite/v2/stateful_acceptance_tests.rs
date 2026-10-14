@@ -443,11 +443,41 @@ async fn a_check_that_changes_unpinned_repository_files_is_refused() -> Result<(
             .function_call_output("refused")
             .to_string();
         assert!(refused.contains("completion refused"), "{case}: {refused}");
+        // Freeze 2.3.1 / 3.2: the refused check does not certify C1; a substantive
+        // Autonomous final ends Partial, listing the still-active contract.
+        let read: StatefulRunReadResponse = harness
+            .server
+            .request(|request_id| ClientRequest::StatefulRunRead {
+                request_id,
+                params: StatefulRunReadParams {
+                    run_id: Some(harness.run.id.clone()),
+                    thread_id: None,
+                },
+            })
+            .await?;
+        let run = read.run.expect("run");
         assert_eq!(
-            harness.read_run().await?.status,
-            StatefulRunStatus::Running,
+            (run.status, run.continuations_used),
+            (StatefulRunStatus::Answered, 0),
             "{case}"
         );
+        assert_eq!(
+            run.result.as_deref(),
+            Some(concat!(
+                "Partial result (not certified). Open or not certified:\n",
+                "- C1 (Write out.txt.): not certified by this terminal answer path\n\n",
+                "The check changed the repository."
+            )),
+            "{case}"
+        );
+        let answer = read.host_answer.expect("unverified answer");
+        assert_eq!(
+            answer.outcome,
+            codex_app_server_protocol::StatefulHostAnswerOutcome::Partial,
+            "{case}"
+        );
+        assert_eq!(answer.answer, "The check changed the repository.", "{case}");
+        assert_eq!(response_log.requests().len(), 6, "{case}");
     }
     Ok(())
 }

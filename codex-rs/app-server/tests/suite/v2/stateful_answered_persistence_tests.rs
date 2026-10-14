@@ -173,7 +173,8 @@ async fn durable(omission: bool) -> Result<()> {
     let turn = h.start_turn().await?;
     let (_, warnings, _) = h.outcome(&turn, /*next*/ false).await?;
     assert_eq!(warnings.len(), 1);
-    h.assert_terminal(run, &turn, &ready(), &items, 2).await?;
+    h.assert_terminal(run, &turn, (&ready(), ANSWER), &items, 2)
+        .await?;
     Ok(())
 }
 

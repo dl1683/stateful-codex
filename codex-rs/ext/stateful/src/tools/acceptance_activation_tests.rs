@@ -431,7 +431,7 @@ async fn oversized_unknown_resolutions_refuse_with_bounded_diagnostics() {
     let rejected = call(
         "obligation_update",
         &json!({
-            "idempotencyKey":"unknown", "packet":{}, "resolvedIssues":["\"λ\n".repeat(32_000)]
+            "idempotencyKey":"unknown", "packet":{}, "resolvedIssues":["\"Î»\n".repeat(32_000)]
         }),
     );
     let error = tool
@@ -448,5 +448,145 @@ async fn oversized_unknown_resolutions_refuse_with_bounded_diagnostics() {
     assert_eq!(
         runtime.latest_obligation(&f.run.id).await.expect("latest"),
         None
+    );
+}
+
+/// Completion-only blockers survive redirects, independent of openIssues and contracts.
+#[tokio::test]
+async fn redirected_final_blockers_survive_into_the_answer_and_disclosure() {
+    use codex_stateful_runtime::AnsweredRunCommit;
+    use codex_stateful_runtime::AnsweredRunOutcome;
+    use codex_stateful_runtime::HostAnswerOutcome;
+    for contract in [false, true] {
+        for issues in [json!([]), json!(["y"])] {
+            let f = fixture("Fix the parser.", WorkflowMode::Autonomous).await;
+            if contract {
+                f.update(0, json!([{
+                    "action":"add", "origin":"derived", "kind":"manual", "statement":"Parser fixed."
+                }])).await.expect("contract");
+            }
+            let args = json!({
+                "expectedRevision":1, "status":"completed", "openIssues":issues,
+                "finalObligation":{"blockers":["x"]}
+            });
+            for _ in 0..2 {
+                f.complete_with(args.clone())
+                    .await
+                    .expect("redirect and replay");
+            }
+            let runtime = f.services.runtime().await.expect("runtime");
+            let packet = runtime
+                .latest_obligation(&f.run.id)
+                .await
+                .expect("read")
+                .expect("packet");
+            let mut blockers = if issues == json!([]) {
+                vec![]
+            } else {
+                vec!["Open issue (retained): y".to_string()]
+            };
+            blockers.push("Open issue (retained): x".into());
+            assert_eq!(
+                packet.value.packet,
+                ObligationPacket {
+                    blockers,
+                    ..Default::default()
+                }
+            );
+            let commit = AnsweredRunCommit {
+                run_id: f.run.id.clone(),
+                thread_id: THREAD_ID.into(),
+                turn_id: "turn-1".into(),
+                answer: "The parser returns tokens.".into(),
+                result: "The parser returns tokens.".into(),
+                trailer_issues: vec![],
+            };
+            let outcome = runtime
+                .end_run_answered(&commit, &|| true)
+                .await
+                .expect("final");
+            let AnsweredRunOutcome::Answered(run, record) = &outcome else {
+                panic!("answer")
+            };
+            assert_eq!(
+                (run.status, record.outcome(), run.continuations_used),
+                (StatefulRunStatus::Answered, HostAnswerOutcome::Partial, 0)
+            );
+            assert!(
+                run.result
+                    .as_deref()
+                    .expect("result")
+                    .contains("- Open issue (retained): x\n")
+            );
+            let disclosure = crate::answered::resolve(
+                runtime,
+                None,
+                &commit,
+                /*authorized*/ true,
+                Ok(outcome),
+            )
+            .await;
+            let codex_extension_api::TurnFinalizeOutcome::Warning(warning) = disclosure else {
+                panic!("disclosure")
+            };
+            assert!(warning.contains("Open issue (retained): x"));
+        }
+    }
+}
+
+/// The combined final blocker/open issue packet is bounded atomically, with raw identities.
+#[tokio::test]
+async fn redirected_final_blockers_refuse_overflow_without_retaining_anything() {
+    for blockers in [
+        (0..32).map(|i| format!("blocker-{i}")).collect::<Vec<_>>(),
+        vec!["x".repeat(8_192)],
+        vec!["Open issue (retained): forged".into()],
+    ] {
+        let f = fixture("Fix the parser.", WorkflowMode::Autonomous).await;
+        f.complete_with(json!({
+            "expectedRevision":1, "status":"completed", "openIssues":["y"],
+            "finalObligation":{"blockers":blockers}
+        }))
+        .await
+        .expect_err("whole refusal");
+        let runtime = f.services.runtime().await.expect("runtime");
+        assert_eq!(
+            runtime.latest_obligation(&f.run.id).await.expect("read"),
+            None
+        );
+        assert_eq!(f.stored_run().await, f.run);
+    }
+}
+
+/// Final blockers retain obligation capacity rather than inheriting openIssues' smaller caps.
+#[tokio::test]
+async fn redirected_final_blockers_keep_packet_capacity() {
+    let f = fixture("Fix the parser.", WorkflowMode::Autonomous).await;
+    let blockers: Vec<_> = (0..17)
+        .map(|i| format!("{i:02}{}", "x".repeat(1_024)))
+        .collect();
+    let output = f
+        .complete_with(json!({
+            "expectedRevision":1, "status":"completed", "openIssues":[],
+            "finalObligation":{"blockers":blockers}
+        }))
+        .await
+        .expect("packet capacity");
+    assert_eq!(output["status"], "running");
+    let runtime = f.services.runtime().await.expect("runtime");
+    let recorded = runtime
+        .latest_obligation(&f.run.id)
+        .await
+        .expect("read")
+        .expect("packet");
+    assert_eq!(
+        recorded.value.packet,
+        ObligationPacket {
+            blockers: blockers
+                .iter()
+                .map(|blocker| format!("Open issue (retained): {blocker}"))
+                .collect(),
+            ..Default::default()
+        }
     );
 }

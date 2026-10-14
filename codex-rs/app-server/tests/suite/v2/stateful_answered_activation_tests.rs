@@ -40,7 +40,7 @@ impl Harness {
         &mut self,
         started: StatefulRun,
         turn_id: &str,
-        final_text: &str,
+        (final_text, body): (&str, &str),
         items: &[String],
         requests: usize,
     ) -> Result<()> {
@@ -50,14 +50,14 @@ impl Harness {
         let partial = !items.is_empty();
         let result = if partial {
             format!(
-                "{PARTIAL_RESULT_HEADER}{}\n{ANSWER}",
+                "{PARTIAL_RESULT_HEADER}{}\n{body}",
                 items
                     .iter()
                     .map(|item| format!("- {item}\n"))
                     .collect::<String>()
             )
         } else {
-            ANSWER.into()
+            body.into()
         };
         let expected = StatefulRunReadResponse {
             run: Some(StatefulRun {
@@ -138,7 +138,8 @@ async fn delivery(text: String, items: Vec<String>, with_progress: bool) -> Resu
     if !items.is_empty() {
         assert!(warnings[0].contains("Open or not certified: y"));
     }
-    h.assert_terminal(run, &id, &text, &items, requests).await?;
+    h.assert_terminal(run, &id, (&text, ANSWER), &items, requests)
+        .await?;
     Ok(())
 }
 
@@ -203,7 +204,7 @@ async fn completion(contract: bool, issues: Vec<&str>, attempts: usize) -> Resul
             .collect()
     };
     assert_eq!(warnings.len(), usize::from(!items.is_empty()));
-    h.assert_terminal(run.clone(), &id, &text, &items, attempts + 1)
+    h.assert_terminal(run.clone(), &id, (&text, ANSWER), &items, attempts + 1)
         .await?;
     if !contract {
         assert_eq!(
@@ -407,6 +408,87 @@ witness!(
     running(
         "Progress.\n[stateful-outcome]\n disposition: blocked\nbad".into(),
         /*model_progress*/ false,
+        /*warning*/ false
+    )
+);
+
+/// Final-obligation blockers must survive every Autonomous redirect shape on the wire.
+#[tokio::test]
+async fn completion_final_blockers_disclose_with_and_without_contract_or_open_issues() -> Result<()>
+{
+    for contract in [false, true] {
+        for open_issues in [vec![], vec!["y"]] {
+            let mut h = harness().await?;
+            let run = h.start_run(StatefulWorkflowMode::Autonomous).await?;
+            if contract {
+                super::super::stateful_acceptance_support::seed_admitted_plan(
+                    h.codex_home.path(),
+                    &run.id,
+                    &[],
+                    h.project_root.path(),
+                )
+                .await?;
+            }
+            let mock = responses::mount_sse_sequence(&h.responses_server, vec![
+                tool("complete", "stateful_run_update", json!({
+                    "expectedRevision":run.revision, "status":"completed", "openIssues":open_issues,
+                    "finalObligation":{"blockers":["x"]}
+                })),
+                message("final", ANSWER),
+            ]).await;
+            let turn = h.start_turn().await?;
+            let (status, warnings, requests) = h.outcome(&turn, /*next*/ false).await?;
+            assert_eq!((status, requests), (TurnStatus::Completed, 2));
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("Open issue (retained): x"));
+            let receipt = mock.requests()[1]
+                .function_call_output_text("complete")
+                .expect("receipt");
+            let receipt: serde_json::Value = serde_json::from_str(&receipt)?;
+            assert_eq!(receipt["status"], "running");
+            let mut items = if contract {
+                vec![
+                    "C1 (The request is answered.): not certified by this terminal answer path"
+                        .into(),
+                ]
+            } else {
+                vec![]
+            };
+            if !open_issues.is_empty() {
+                items.push("Open issue (retained): y".into());
+            }
+            items.push("Open issue (retained): x".into());
+            h.assert_terminal(run, &turn, (ANSWER, ANSWER), &items, 2)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Duplicate answer trailers are structurally malformed: deliver before the last marker
+/// without model progress, but preserve the frozen progress guard when next was recorded.
+#[tokio::test]
+async fn repeated_identical_answer_trailers_deliver_without_progress() -> Result<()> {
+    let mut h = harness().await?;
+    let run = h.start_run(StatefulWorkflowMode::Autonomous).await?;
+    let body = format!("{ANSWER}\n{BLOCK}");
+    let text = format!("{body}\n{BLOCK}");
+    responses::mount_sse_once(&h.responses_server, message("final", &text)).await;
+    let turn = h.start_turn().await?;
+    assert_eq!(
+        h.outcome(&turn, /*next*/ false).await?,
+        (TurnStatus::Completed, vec![], 1)
+    );
+    h.assert_terminal(run, &turn, (&text, &body), &[], 1)
+        .await?;
+    Ok(())
+}
+
+witness!(
+    repeated_identical_answer_trailers_with_progress_keep_running,
+    running(
+        format!("{ANSWER}\n{BLOCK}\n{BLOCK}"),
+        /*model_progress*/ true,
         /*warning*/ false
     )
 );

@@ -179,9 +179,15 @@ impl StatefulRunUpdateTool {
                         &call,
                         &current,
                         expected_revision,
-                        open_issues.as_deref().unwrap_or_default(),
-                        &display,
-                        &retained,
+                        super::run_redirect::RedirectIssues {
+                            submitted: open_issues.as_deref().unwrap_or_default(),
+                            final_blockers: final_obligation
+                                .as_ref()
+                                .map(|packet| packet.blockers.as_slice())
+                                .unwrap_or_default(),
+                            display: &display,
+                            retained: &retained,
+                        },
                     )
                     .await?
             {

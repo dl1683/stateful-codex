@@ -42,6 +42,12 @@ const OVERFLOW: &str = "too many retained issues or resolution entries; resolve 
 pub enum ObligationOperation {
     /// The host retains these open issues (trimmed, raw) on the latest packet.
     Retain { issues: Vec<String> },
+    /// The host retains completion issues and raw final-obligation blockers together.
+    /// Issues use the completion caps; blockers use the obligation packet caps.
+    RetainCompletion {
+        issues: Vec<String>,
+        blockers: Vec<String>,
+    },
     /// The model records `packet`, resolving the named retained issues.
     Update {
         packet: Box<ObligationPacket>,
@@ -70,6 +76,8 @@ struct CanonicalOperation<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     issues: Option<&'a [String]>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    blockers: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     packet: Option<&'a ObligationPacket>,
     #[serde(skip_serializing_if = "Option::is_none")]
     resolved_issues: Option<&'a [String]>,
@@ -78,7 +86,7 @@ struct CanonicalOperation<'a> {
 impl ObligationOperation {
     fn kind(&self) -> &'static str {
         match self {
-            Self::Retain { .. } => "retain",
+            Self::Retain { .. } | Self::RetainCompletion { .. } => "retain",
             Self::Update { .. } => "update",
         }
     }
@@ -89,6 +97,15 @@ impl ObligationOperation {
                 kind: self.kind(),
                 run_id: run_id.as_str(),
                 issues: Some(issues),
+                blockers: None,
+                packet: None,
+                resolved_issues: None,
+            },
+            Self::RetainCompletion { issues, blockers } => CanonicalOperation {
+                kind: self.kind(),
+                run_id: run_id.as_str(),
+                issues: Some(issues),
+                blockers: Some(blockers),
                 packet: None,
                 resolved_issues: None,
             },
@@ -99,6 +116,7 @@ impl ObligationOperation {
                 kind: self.kind(),
                 run_id: run_id.as_str(),
                 issues: None,
+                blockers: None,
                 packet: Some(packet.as_ref()),
                 resolved_issues: Some(resolved_issues),
             },
@@ -177,14 +195,40 @@ impl StatefulRunStore {
                 ));
             }
         }
+        let completion_blockers = match &operation {
+            ObligationOperation::RetainCompletion { blockers, .. } if !blockers.is_empty() => {
+                ObligationPacket {
+                    blockers: blockers.clone(),
+                    ..Default::default()
+                }
+                .validate()?;
+                if blockers
+                    .iter()
+                    .any(|item| item.starts_with(RETAINED_ISSUE_PREFIX))
+                {
+                    return Err(refused(
+                        "final obligation blockers may not use the reserved retained issue prefix",
+                    ));
+                }
+                blockers.clone()
+            }
+            ObligationOperation::RetainCompletion { .. }
+            | ObligationOperation::Retain { .. }
+            | ObligationOperation::Update { .. } => Vec::new(),
+        };
         let packet = match operation {
-            ObligationOperation::Retain { issues } => {
+            ObligationOperation::Retain { issues }
+            | ObligationOperation::RetainCompletion {
+                issues,
+                blockers: _,
+            } => {
                 // 4. Validate.
                 validate_issues(&issues)?;
                 // 6. Carry forward: the latest packet verbatim plus the new retained issues.
                 let mut packet = latest.unwrap_or_default();
                 let added = issues
                     .iter()
+                    .chain(&completion_blockers)
                     .map(|issue| format!("{RETAINED_ISSUE_PREFIX}{issue}"));
                 packet.blockers = union(std::mem::take(&mut packet.blockers), added);
                 packet

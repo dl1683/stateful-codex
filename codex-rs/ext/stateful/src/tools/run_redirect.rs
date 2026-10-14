@@ -18,16 +18,27 @@ use serde_json::json;
 // Keep this new model-visible receipt below 1K tokens even at one UTF-8 byte per token.
 const MAX_REDIRECT_RECEIPT_BYTES: usize = 900;
 
+pub(super) struct RedirectIssues<'a> {
+    pub submitted: &'a [String],
+    pub final_blockers: &'a [String],
+    pub display: &'a [String],
+    pub retained: &'a [String],
+}
+
 impl StatefulRunUpdateTool {
     pub(super) async fn autonomous_completion_redirect(
         &self,
         call: &ToolCall<'_>,
         current: &StatefulRun,
         expected_revision: u64,
-        raw: &[String],
-        display: &[String],
-        retained: &[String],
+        issues: RedirectIssues<'_>,
     ) -> Result<Option<Box<dyn ToolOutput>>, FunctionCallError> {
+        let RedirectIssues {
+            submitted,
+            final_blockers,
+            display,
+            retained,
+        } = issues;
         if current.status != StatefulRunStatus::Running || expected_revision != current.revision {
             return Err(FunctionCallError::RespondToModel(
                 "completed requires this run to be running at the expected revision; nothing changed".into(),
@@ -68,15 +79,26 @@ impl StatefulRunUpdateTool {
                 "the bounded completion redirect receipt cannot fit; nothing changed; give the final answer directly, or read the run first",
             ));
         }
-        let issues: Vec<String> = raw.iter().map(|issue| issue.trim().to_string()).collect();
-        let retained = if issues.is_empty() {
+        let issues: Vec<String> = submitted
+            .iter()
+            .map(|issue| issue.trim().to_string())
+            .collect();
+        let retained = if issues.is_empty() && final_blockers.is_empty() {
             retained.to_vec()
         } else {
             let source = provenance_source_id(call)?;
+            let operation = if final_blockers.is_empty() {
+                ObligationOperation::Retain { issues }
+            } else {
+                ObligationOperation::RetainCompletion {
+                    issues,
+                    blockers: final_blockers.to_vec(),
+                }
+            };
             let obligation = runtime
                 .apply_obligation_operation(
                     &current.id,
-                    ObligationOperation::Retain { issues },
+                    operation,
                     &OperationReceiptKey::parse(source.clone()).map_err(respond)?,
                     &source,
                 )

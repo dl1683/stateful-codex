@@ -81,7 +81,7 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
             responses::sse(vec![
                 responses::ev_assistant_message(
                     "initial-progress",
-                    "I found the first dependency; more work remains.",
+                    "I found the first dependency; more work remains.\n[stateful-outcome]\ndisposition: continue\nopen-issues: none\n[/stateful-outcome]",
                 ),
                 responses::ev_completed("initial-response"),
             ]),
