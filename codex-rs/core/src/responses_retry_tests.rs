@@ -2,16 +2,73 @@ use super::ResponsesStreamRequest;
 use super::ResponsesStreamRetryState;
 use super::handle_response_stream_error;
 use super::log_retry;
+use super::remove_interrupted_reasoning;
 use crate::realtime_history::RealtimeHistoryState;
 use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use codex_http_client::RetryAfter;
 use codex_protocol::error::CodexErr;
+use codex_protocol::models::ResponseItem;
+use pretty_assertions::assert_eq;
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing_test::internal::MockWriter;
+
+#[test]
+fn retry_reasoning_filter_preserves_original_items_and_non_reasoning_tails() {
+    let earlier = json!({"type": "reasoning", "id": "earlier", "summary": []});
+    let interrupted = json!({"type": "reasoning", "id": "interrupted", "summary": []});
+    let user = json!({"type": "message", "role": "user", "content": []});
+    let assistant = json!({"type": "message", "role": "assistant", "content": []});
+    let call = json!({
+        "type": "function_call", "name": "exec_command", "call_id": "call", "arguments": "{}"
+    });
+    let output = json!({"type": "function_call_output", "call_id": "call", "output": "done"});
+    let original = vec![user.clone(), earlier.clone()];
+    let mut cases = vec![
+        (vec![], vec![]),
+        (original.clone(), original.clone()),
+        (
+            vec![user.clone(), earlier.clone(), interrupted.clone()],
+            original.clone(),
+        ),
+        // History normalization may move original items; membership, rather
+        // than the original length, protects earlier reasoning at the tail.
+        (
+            vec![earlier.clone(), interrupted.clone()],
+            vec![earlier.clone()],
+        ),
+    ];
+    for tail in [assistant, call, output] {
+        let retained = vec![earlier.clone(), interrupted.clone(), tail];
+        cases.push((retained.clone(), retained.clone()));
+        let mut with_reasoning = retained.clone();
+        with_reasoning.extend([interrupted.clone(), interrupted.clone()]);
+        cases.push((with_reasoning, retained));
+    }
+    let original = original
+        .into_iter()
+        .map(serde_json::from_value::<ResponseItem>)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for (input, expected) in cases {
+        let mut input = input
+            .into_iter()
+            .map(serde_json::from_value::<ResponseItem>)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let expected = expected
+            .into_iter()
+            .map(serde_json::from_value::<ResponseItem>)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        remove_interrupted_reasoning(&mut input, &original);
+        assert_eq!(input, expected);
+    }
+}
 
 #[tokio::test]
 async fn sampling_retry_logs_stream_error_context() {

@@ -15,6 +15,7 @@ use codex_features::Feature;
 use codex_http_client::RetryAfter;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::WarningEvent;
 use tokio::time::Instant;
@@ -22,6 +23,25 @@ use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+
+/// Filters only the request copy on retries of one sampling request. The caller's
+/// `original_input` is set after its first failure, unlike retry counters which
+/// can reset on transport fallback. Keep original reasoning even if history
+/// normalization changes item positions; stop at any other trailing item kind.
+/// The next sampling request is rebuilt from durable history, restoring omitted
+/// reasoning. Its incremental-request prefix comparison may therefore fail once
+/// after a recovered retry, requiring a full request.
+pub(crate) fn remove_interrupted_reasoning(
+    input: &mut Vec<ResponseItem>,
+    original_input: &[ResponseItem],
+) {
+    while let Some(item @ ResponseItem::Reasoning { .. }) = input.last() {
+        if original_input.contains(item) {
+            break;
+        }
+        input.pop();
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
