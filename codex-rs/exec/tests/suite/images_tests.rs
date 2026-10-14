@@ -60,7 +60,7 @@ fn exec_help_lists_image_input() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(contains("-i, --image <FILE>"));
+        .stdout(contains("  -i, --image <FILE>\n"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -104,19 +104,81 @@ async fn new_run_image_input_matches_fork_and_resume() -> anyhow::Result<()> {
     );
 
     for command in ["fork", "resume"] {
+        let prompt = format!("{command}: describe the page again");
+        let mut expected = expected.clone();
+        *expected
+            .as_array_mut()
+            .and_then(|content| content.last_mut())
+            .expect("message should end with the prompt") =
+            json!({"type": "input_text", "text": prompt});
         let response_mock = mount_response(&server).await;
         test.cmd_with_server(&server)
             .args(["--skip-git-repo-check", command])
             .arg(&source_id)
             .arg("--image")
             .arg(&image_path)
-            .arg(prompt)
+            .arg(&prompt)
             .assert()
             .success();
         assert_eq!(
             last_user_content(&response_mock.single_request()),
             expected,
-            "{command} should attach the same image and prompt as a new run"
+            "{command} should attach the image and its new prompt"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stateful_modes_attach_image_and_prompt_to_first_request() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    for mode in ["ask", "autonomous", "collaborative", "socratic"] {
+        let test = test_codex_exec();
+        let server = responses::start_mock_server().await;
+        let image_path = test.cwd_path().join("page.png");
+        std::fs::write(&image_path, TINY_PNG)?;
+        let prompt = format!("{mode}: describe the page");
+        // Let Autonomous end answered rather than scheduling another model turn.
+        let response_mock = responses::mount_sse_once(
+            &server,
+            responses::sse(vec![
+                responses::ev_response_created("resp-image"),
+                responses::ev_assistant_message(
+                    "msg-image",
+                    "The image is a tiny PNG.\n\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]",
+                ),
+                responses::ev_completed("resp-image"),
+            ]),
+        )
+        .await;
+        test.cmd_with_server(&server)
+            .args(["--skip-git-repo-check", "--stateful", mode, "--image"])
+            .arg(&image_path)
+            .arg(&prompt)
+            .assert()
+            .success();
+
+        let content = last_user_content(&response_mock.single_request());
+        let content = content
+            .as_array()
+            .expect("message content should be an array");
+        let images = content
+            .iter()
+            .filter(|item| item["type"] == "input_image")
+            .collect::<Vec<_>>();
+        assert_eq!(images.len(), 1, "{mode} should attach the image");
+        assert!(
+            images[0]["image_url"]
+                .as_str()
+                .expect("image should have an inline URL")
+                .starts_with("data:image/png;base64,"),
+            "{mode} should send the PNG inline"
+        );
+        assert_eq!(
+            content.last(),
+            Some(&json!({"type": "input_text", "text": prompt})),
+            "{mode} should send the prompt after the image"
         );
     }
     Ok(())
@@ -189,13 +251,20 @@ async fn assert_image_error_matches_fork_and_resume(failure: ImageFailure) -> an
 
     // Existing exec paths reject the attachment with a request placeholder, not an exit error.
     for command in ["fork", "resume"] {
+        let prompt = format!("{command}: describe the page again");
+        let mut expected = expected.clone();
+        *expected
+            .as_array_mut()
+            .and_then(|content| content.last_mut())
+            .expect("message should end with the prompt") =
+            json!({"type": "input_text", "text": prompt});
         let response_mock = mount_response(&server).await;
         test.cmd_with_server(&server)
             .args(["--skip-git-repo-check", command])
             .arg(&source_id)
             .arg("--image")
             .arg(&path)
-            .arg(prompt)
+            .arg(&prompt)
             .assert()
             .success();
         assert_eq!(
