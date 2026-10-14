@@ -6,7 +6,6 @@ use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 
 use super::Arguments;
-use super::CompletionDisposition;
 use super::EXAMPLE;
 use super::StatefulRunUpdateTool;
 use crate::completion::completion_root;
@@ -27,6 +26,12 @@ enum RejectionRoute {
     Verification,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum RejectionCategory {
+    Structural,
+    Evidence,
+}
+
 impl StatefulRunUpdateTool {
     /// Decodes the arguments once, runs the update, and returns every rejection within the
     /// call's serialized allowance. Guidance follows the run mode, never the error's prose.
@@ -34,22 +39,44 @@ impl StatefulRunUpdateTool {
         &self,
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
+        let reject =
+            |error: &str| bounded_rejection(&call, error, None, RejectionRoute::Verification);
+        let mut autonomous = false;
+        let incoming_issues = call
+            .function_arguments()
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .is_some_and(|value| {
+                [
+                    value.get("openIssues"),
+                    value.pointer("/finalObligation/blockers"),
+                ]
+                .into_iter()
+                .flatten()
+                .any(|items| items.as_array().is_some_and(|items| !items.is_empty()))
+            });
         let route = match thread_run(&self.project_id, &self.thread_id, &self.services).await {
             Ok(run) => match run.value.mode {
                 WorkflowMode::Autonomous => {
-                    let runtime = self.services.runtime().await.map_err(super::respond)?;
+                    autonomous = true;
+                    let runtime = self
+                        .services
+                        .runtime()
+                        .await
+                        .map_err(|error| reject(&error.to_string()))?;
                     let ledger = runtime
                         .acceptance_ledger(&run.id)
                         .await
-                        .map_err(super::respond)?;
+                        .map_err(|error| reject(&error.to_string()))?;
                     let blockers = runtime
                         .latest_obligation(&run.id)
                         .await
-                        .map_err(super::respond)?;
+                        .map_err(|error| reject(&error.to_string()))?;
                     if ledger.criteria.iter().any(|criterion| {
                         criterion.required
                             && criterion.state == codex_stateful_runtime::AcceptanceState::Active
-                    }) && blockers.is_none_or(|row| row.value.packet.blockers.is_empty())
+                    }) && !incoming_issues
+                        && blockers.is_none_or(|row| row.value.packet.blockers.is_empty())
                     {
                         RejectionRoute::Verification
                     } else {
@@ -60,56 +87,42 @@ impl StatefulRunUpdateTool {
                     RejectionRoute::Verification
                 }
             },
-            Err(_) => RejectionRoute::Verification,
+            Err(error) => return Err(reject(&error.to_string())),
         };
-        let example = match route {
-            RejectionRoute::Answer => ANSWER_GUIDANCE.to_string(),
-            RejectionRoute::Verification => format!(
-                "Argument shapes only; verification and terminal gates still apply. {EXAMPLE}"
-            ),
-        };
-        let arguments: Arguments = match parse_arguments(&call, &example) {
+        let arguments: Arguments = match parse_arguments(&call, "") {
             Ok(arguments) => arguments,
             Err(FunctionCallError::RespondToModel(message)) => {
-                let message = match route {
-                    RejectionRoute::Answer => {
-                        message.replace("Minimal valid call: ", "Final-answer guidance: ")
-                    }
-                    RejectionRoute::Verification => message,
+                let message = message
+                    .strip_suffix(". Minimal valid call: ")
+                    .unwrap_or(&message);
+                let guide = match route {
+                    RejectionRoute::Answer => format!("Final-answer guidance: {ANSWER_GUIDANCE}"),
+                    RejectionRoute::Verification => format!(
+                        "Argument shapes only; verification and terminal gates still apply. {EXAMPLE}"
+                    ),
                 };
-                return Err(bounded_rejection(
-                    &call, &message, /*guide*/ None, route,
-                ));
+                let guide_fits = serde_json::to_string(&format!("{message}. {guide}"))
+                    .is_ok_and(|json| json.len() <= call.response_byte_budget(MAX_RESPONSE_BYTES));
+                let message =
+                    if autonomous && !guide_fits && matches!(route, RejectionRoute::Answer) {
+                        ANSWER_FALLBACK
+                    } else {
+                        message
+                    };
+                return Err(bounded_rejection(&call, message, Some(&guide), route));
             }
             Err(error) => return Err(error),
         };
         let completing = arguments.status == StatefulRunStatus::Completed;
-        // Only known disposition-shape errors retain verification templates in Autonomous.
-        // Evidence refusals always give the qualified final-answer escape.
-        let shape_error = arguments.completion_disposition
-            == CompletionDisposition::NoReusableLearning
-            && arguments.open_issues.as_ref().is_none_or(Vec::is_empty)
-            && arguments
-                .final_obligation
-                .as_ref()
-                .is_none_or(|packet| packet.blockers.is_empty())
-            && (arguments.root_revision.is_some()
-                || arguments.material_root_findings.is_some()
-                || arguments.completion_idempotency_key.is_some()
-                || arguments.final_obligation.is_some());
-        let route = if matches!(route, RejectionRoute::Verification)
-            && !shape_error
-            && thread_run(&self.project_id, &self.thread_id, &self.services)
-                .await
-                .is_ok_and(|run| run.value.mode == WorkflowMode::Autonomous)
-        {
-            RejectionRoute::Answer
-        } else {
-            route
-        };
+        let mut category = RejectionCategory::Evidence;
         let reply = call.clone();
-        match self.handle_call(call, arguments).await {
+        match self.handle_call(call, arguments, &mut category).await {
             Err(FunctionCallError::RespondToModel(message)) => {
+                let route = if autonomous && matches!(category, RejectionCategory::Evidence) {
+                    RejectionRoute::Answer
+                } else {
+                    route
+                };
                 let guide = match (completing, route) {
                     (true, RejectionRoute::Answer) => Some(ANSWER_GUIDANCE.to_string()),
                     (true, RejectionRoute::Verification) => Some(self.completion_guide().await),
@@ -121,7 +134,7 @@ impl StatefulRunUpdateTool {
         }
     }
 
-    /// Copyable argument shapes; these establish neither evidence nor terminal eligibility.
+    /// Valid completion calls for the run's current state, as copyable JSON.
     async fn completion_guide(&self) -> String {
         let Ok(run) = thread_run(&self.project_id, &self.thread_id, &self.services).await else {
             return "Completion needs an active Stateful run on this thread.".to_string();

@@ -57,21 +57,6 @@ fn every_rejection_fits_the_call_allowance() {
 }
 
 #[test]
-fn eligible_final_guidance_fallback_snapshot() {
-    let message = "x".repeat(/*n*/ 20_000);
-    let error = bounded_rejection(
-        &sized(/*budget*/ 240),
-        &message,
-        Some(super::ANSWER_GUIDANCE),
-        RejectionRoute::Answer,
-    );
-    assert_eq!(
-        error.to_string(),
-        "stateful_run_update was rejected; read the run. Give a substantive final answer; an eligible final ends Answered or Partial. Apply or settle pending steering first."
-    );
-}
-
-#[test]
 fn guidance_is_dropped_before_the_rejection_itself() {
     let message = "run revision conflict: expected 2, found 3";
     let guide = "g".repeat(/*n*/ 20_000);

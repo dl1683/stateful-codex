@@ -34,7 +34,7 @@ const PARTIAL_DISCLOSURE: &str = "Stateful: this run ended partial; it is not ce
 const UNREAD_ENDING: &str = "The Stateful run ended with this answer; how it ended could not be re-read. Read the run before relying on it.";
 
 /// Model guidance for the outcome block, part of the Autonomous mode obligation.
-pub(crate) const ANSWER_OUTCOME_GUIDANCE: &str = "Give a substantive final answer; an eligible final ends Answered or Partial. Neither certifies work. While work remains, keep working, or record next work with obligation_update; use a trailing [stateful-outcome] block on separate lines with disposition: continue and open-issues: none to continue. After recording next work, disposition: answer explicitly chooses the answer. List unfinished items under open-issues; retained blockers require Partial. Resolve retained issues only with obligation_update resolvedIssues. Apply or settle pending steering first; size, binding and authorization gates still apply.";
+pub(crate) const ANSWER_OUTCOME_GUIDANCE: &str = "Give a substantive final answer; an eligible final ends Answered or Partial. Neither certifies work. While work remains, work or record next with obligation_update. A trailing [stateful-outcome] block uses separate lines: disposition: continue or answer; open-issues: none or unfinished items; [/stateful-outcome]. After recorded next work, answer explicitly chooses the answer. Retained blockers require Partial; resolve only with obligation_update resolvedIssues. Settle pending steering; size, binding and authorization gates apply.";
 
 /// The last assistant message the turn completed, as the host emitted it.
 #[derive(Debug, PartialEq, Eq)]

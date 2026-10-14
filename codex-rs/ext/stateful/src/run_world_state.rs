@@ -44,7 +44,7 @@ const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across
 /// Autonomous and Socratic completion, hashed with the packet so a wording change reaches
 /// runs whose earlier packet is retained in history.
 const RUN_COMPLETION: &str = "Completion, the final Stateful mutation, is one stateful_run_update with expectedRevision, status completed and optional openIssues (unresolved issues or recorded blockers end the run blocked), plus exactly completionDisposition noReusableLearning and result if the run learned nothing reusable, otherwise, after recording the reusable findings and all other warranted durable writes, durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
-const AUTONOMOUS_COMPLETION: &str = "Use completed only for declared acceptance criteria, as the final Stateful mutation with the fields in stateful_run_update. Give a substantive final answer; an eligible final ends Answered or Partial. Open issues or blockers require Partial; resolve retained issues with obligation_update resolvedIssues.";
+const AUTONOMOUS_COMPLETION: &str = "completed requests verified Completion only with declared criteria, as the final Stateful mutation using stateful_run_update fields. Answered/Partial require no completion call.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
@@ -600,6 +600,8 @@ fn append_segment(
     shortened: &str,
     render: impl FnOnce(&mut String),
 ) {
+    let maximum =
+        maximum.min(MAX_BODY_BYTES.saturating_sub(TRUNCATION_MARKER.len() + output.len() + 1));
     let mut segment = String::new();
     render(&mut segment);
     if segment.len() > maximum {

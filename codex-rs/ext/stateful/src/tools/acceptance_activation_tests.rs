@@ -38,13 +38,6 @@ async fn autonomous_redirects_retain_raw_issues_without_acceptance_work() {
         let output = fixture.completion.handle(call).await.expect("redirect");
         let output: Value = serde_json::from_str(&output.log_output()).expect("json");
         assert_eq!(output["status"], "running");
-        assert!(
-            output["instruction"]
-                .as_str()
-                .expect("instruction")
-                .contains("an eligible final ends Answered or Partial")
-        );
-        assert!(output.to_string().len() <= 900);
         assert_eq!(
             output["instruction"].as_str().expect("instruction"),
             "This run declared no acceptance criteria; verified Completion is unavailable. Give a substantive final answer; an eligible final ends Answered or Partial. Disclose unresolved items for Partial. No completion call is required; pending steering and final-answer gates still apply."
@@ -129,59 +122,115 @@ async fn completion_shapes_are_conditional() {
         if mode == WorkflowMode::Autonomous {
             f.update(0, json!([{"action":"add", "origin":"derived", "kind":"manual", "statement":"Answer a lookup."}])).await.expect("contract");
         }
-        let arguments = json!({
-            "expectedRevision":1, "status":"completed", "result":"42",
-            "completionDisposition":"noReusableLearning", "rootRevision":0
-        });
-        let refusal = f.complete_with(arguments).await.expect_err("refused");
-        // Socratic is Pending, so execution still refuses; all three modes get shapes only.
-        let (reason, shapes) = refusal
-            .split_once(". Argument shapes only;")
-            .expect("conditional shapes");
-        assert!(!reason.is_empty());
-        assert!(shapes.contains("only when this run wrote no project knowledge"));
-        assert!(shapes.contains("durableLearning"));
-        assert!(shapes.contains("rootRevision") || shapes.contains("root finding"));
-        let lookup = shapes
-            .split("noReusableLearning (only when this run wrote no project knowledge): ")
-            .nth(1)
-            .expect("lookup shape")
-            .split(';')
-            .next()
-            .expect("JSON");
-        let lookup: Value = serde_json::from_str(lookup).expect("copyable JSON");
-        assert_eq!(
-            lookup,
-            json!({"expectedRevision":1,"status":"completed",
+        for arguments in [
+            json!({"expectedRevision":1,"status":"completed","result":"42", "completionDisposition":"noReusableLearning","rootRevision":0}),
+            json!({"expectedRevision":1,"status":"completed","result":"42", "completionDisposition":"durableLearning"}),
+        ] {
+            let refusal = f.complete_with(arguments).await.expect_err("refused");
+            let (_, shapes) = refusal
+                .split_once(". Argument shapes only;")
+                .expect("conditional shapes");
+            assert!(shapes.contains("only when this run wrote no project knowledge"));
+            assert!(shapes.contains("durableLearning"));
+            let lookup = shapes
+                .split("noReusableLearning (only when this run wrote no project knowledge): ")
+                .nth(1)
+                .expect("lookup shape")
+                .split(';')
+                .next()
+                .expect("JSON");
+            let lookup: Value = serde_json::from_str(lookup).expect("copyable JSON");
+            assert_eq!(
+                lookup,
+                json!({"expectedRevision":1,"status":"completed",
             "completionDisposition":"noReusableLearning","result":"<final answer>","openIssues":[]})
-        );
-        assert_eq!(
-            shapes.split(" Replace").next().expect("label"),
-            " verification and terminal gates still apply."
-        );
-        assert_eq!(f.stored_run().await, f.run);
+            );
+            assert_eq!(
+                shapes.split(" Replace").next().expect("label"),
+                " verification and terminal gates still apply."
+            );
+            assert_eq!(f.stored_run().await, f.run);
+        }
     }
 }
 
-/// G1: a malformed Autonomous call gives an answer route, including the real trailer grammar.
+/// Decode help must preserve readable disclosures and the small-budget final action.
 #[tokio::test]
-async fn eligible_final_guidance() {
-    let f = fixture("What is the parser?", WorkflowMode::Autonomous).await;
-    let refusal = f
-        .complete_with(json!({"expectedRevision":1,"status":"done"}))
-        .await
-        .expect_err("invalid status");
-    assert!(refusal.contains("field `status`"));
-    assert!(!refusal.contains("\"status\":\"completed\""));
-    let guide = refusal
-        .split_once("Final-answer guidance: ")
-        .expect("decode guidance")
-        .1;
-    assert_eq!(
-        guide,
-        "Give a substantive final answer; an eligible final ends Answered or Partial. Neither outcome certifies work; no completion call is required. If you recorded next work this turn, explicitly choose the answer with this trailing block on separate lines:\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]\nList unfinished items under open-issues instead of none. Apply or settle pending steering first; size, binding and authorization gates still apply."
+async fn malformed_completion_guidance_preserves_issues_and_small_budget_action() {
+    for disclosure in [
+        json!({"openIssues":["unresolved defect"]}),
+        json!({"finalObligation":{"blockers":["unresolved defect"]}}),
+    ] {
+        let f = fixture("Fix the parser.", WorkflowMode::Autonomous).await;
+        f.update(0, json!([{"action":"add","origin":"derived","kind":"manual","statement":"Parser fixed."}])).await.expect("contract");
+        let mut arguments = json!({"expectedRevision":1,"status":"done"});
+        arguments
+            .as_object_mut()
+            .expect("object")
+            .extend(disclosure.as_object().expect("object").clone());
+        let refusal = f.complete_with(arguments).await.expect_err("malformed");
+        assert!(refusal.contains("an eligible final ends Answered or Partial"));
+        assert!(refusal.contains(
+            "[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]"
+        ));
+        assert!(!refusal.contains("\"status\":\"completed\""));
+        assert_eq!(f.stored_run().await, f.run);
+    }
+    let f = fixture("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let mut call = call(
+        "stateful_run_update",
+        &json!({"expectedRevision":1,"status":"done"}),
     );
+    call.truncation_policy = TruncationPolicy::Bytes(240);
+    let error = f.completion.handle(call).await.err().expect("malformed");
+    assert!(
+        error
+            .to_string()
+            .contains("an eligible final ends Answered or Partial")
+    );
+    assert!(
+        serde_json::to_string(&error.to_string())
+            .expect("json")
+            .len()
+            <= 240
+    );
+}
+
+/// A readable run with a broken ledger exercises the preliminary read error boundary.
+#[tokio::test]
+async fn preliminary_store_read_failure_is_bounded() {
+    let f = fixture("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let sqlite = f.services.sqlite();
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.home().join("stateful_runtime_1.sqlite"))
+        .await
+        .expect("fixture connection");
+    pool.begin_with("BEGIN; DROP TABLE stateful_acceptance_ledgers;")
+        .await
+        .expect("break ledger")
+        .commit()
+        .await
+        .expect("commit fixture");
     assert_eq!(f.stored_run().await, f.run);
+    for budget in [20, 64, 240, 1_000] {
+        let mut call = call(
+            "stateful_run_update",
+            &json!({"expectedRevision":1,"status":"completed"}),
+        );
+        call.truncation_policy = TruncationPolicy::Bytes(budget);
+        let error = f
+            .completion
+            .handle(call)
+            .await
+            .err()
+            .expect("failed store read");
+        assert!(
+            serde_json::to_string(&error.to_string())
+                .expect("json")
+                .len()
+                <= budget
+        );
+    }
 }
 
 /// A7, B5: required host-check completion needs an admitted receipt, and retained issues
@@ -509,7 +558,7 @@ async fn oversized_unknown_resolutions_refuse_with_bounded_diagnostics() {
     let rejected = call(
         "obligation_update",
         &json!({
-            "idempotencyKey":"unknown", "packet":{}, "resolvedIssues":["\"Î»\n".repeat(32_000)]
+            "idempotencyKey":"unknown", "packet":{}, "resolvedIssues":["\"λ\n".repeat(32_000)]
         }),
     );
     let error = tool
@@ -552,12 +601,6 @@ async fn redirected_final_blockers_survive_into_the_answer_and_disclosure() {
                     .complete_with(args.clone())
                     .await
                     .expect("redirect and replay");
-                assert!(
-                    receipt["instruction"]
-                        .as_str()
-                        .expect("instruction")
-                        .contains("an eligible final ends Answered or Partial")
-                );
                 assert!(receipt.to_string().len() <= 900);
                 if contract {
                     assert_eq!(

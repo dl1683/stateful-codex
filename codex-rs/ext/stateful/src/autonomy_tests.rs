@@ -232,3 +232,113 @@ async fn an_aborted_finalizer_leaves_the_run_its_warning() {
         ]
     );
 }
+
+/// G1: the extension hook consumes shared progress and respects explicit answer/steering.
+#[tokio::test]
+async fn finalization_hook_respects_recorded_progress_and_steering() {
+    for pending in [false, true] {
+        let home = TempDir::new().expect("home");
+        let services =
+            ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(home.path().abs()));
+        let store = services.runtime().await.expect("runtime");
+        let run = store
+            .create_run(
+                StatefulRunId::parse("run-1").expect("id"),
+                NewStatefulRun {
+                    project_id: "project-1".into(),
+                    thread_ids: vec!["thread-1".into()],
+                    goal: "What does parse_config return?".into(),
+                    mode: WorkflowMode::Autonomous,
+                    budget: RunBudget {
+                        max_continuations: 1,
+                        max_elapsed_seconds: 600,
+                    },
+                },
+            )
+            .await
+            .expect("run");
+        if pending {
+            store
+                .submit_steering(
+                    codex_stateful_runtime::SteeringId::parse("pending").expect("id"),
+                    codex_stateful_runtime::NewSteeringInstruction {
+                        project_id: "project-1".into(),
+                        run_id: run.id.clone(),
+                        input: "Check the revised scope.".into(),
+                        affected_obligation_ids: vec![],
+                    },
+                )
+                .await
+                .expect("steering");
+        }
+        let extension = crate::StatefulExtension {
+            projects: Arc::new(codex_thread_store::InMemoryThreadStore::default()),
+            services: Some(services.clone()),
+            event_sink: None,
+            autonomous: None,
+            attribution: Default::default(),
+            visible_root: Default::default(),
+            run_activity: Default::default(),
+            run_commits: Default::default(),
+            turn_progress: Default::default(),
+        };
+        let session = ExtensionData::new("session");
+        let thread = ExtensionData::new("thread-1");
+        let turn = ExtensionData::new("turn-1");
+        thread.insert(crate::SelectedThread::new("thread-1"));
+        thread.insert(ActiveRunTurn {
+            run_id: run.id.clone(),
+            turn_id: "turn-1".into(),
+        });
+        for explicit in [false, true] {
+            extension.turn_progress.record("turn-1", &run.id);
+            let answer = if explicit {
+                "It returns a Result.\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]"
+            } else {
+                "It returns a Result."
+            };
+            turn.insert(crate::answered::LastAgentMessage::from_item(
+                &AgentMessageItem {
+                    id: "final".into(),
+                    content: vec![AgentMessageContent::Text {
+                        text: answer.into(),
+                    }],
+                    phase: None,
+                    memory_citation: None,
+                    delivery: None,
+                    questions: None,
+                },
+            ));
+            let outcome = extension
+                .on_turn_finalize(TurnFinalizeInput {
+                    turn_id: "turn-1",
+                    last_agent_message: answer,
+                    authorize_commit: &|| true,
+                    session_store: &session,
+                    thread_store: &thread,
+                    turn_store: &turn,
+                })
+                .await;
+            let status = store
+                .get_run(&run.id)
+                .await
+                .expect("read")
+                .expect("run")
+                .status;
+            if !explicit {
+                assert_eq!(
+                    (outcome, status),
+                    (TurnFinalizeOutcome::NotHandled, StatefulRunStatus::Running)
+                );
+            } else if pending {
+                assert!(matches!(outcome, TurnFinalizeOutcome::Warning(_)));
+                assert_eq!(status, StatefulRunStatus::Running);
+            } else {
+                assert_eq!(
+                    (outcome, status),
+                    (TurnFinalizeOutcome::Recorded, StatefulRunStatus::Answered)
+                );
+            }
+        }
+    }
+}
