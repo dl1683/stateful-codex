@@ -26,6 +26,12 @@ path = "junit.xml"
 [profile.local]
 inherits = "default"
 
+[[profile.default.overrides]]
+# The iterative-walk witness creates, hashes and removes 5000 nested directories.
+filter = 'package(codex-stateful-extension) & test(w14_five_thousand_directories_are_walked_iteratively)'
+slow-timeout = { period = "30s", terminate-after = 60 }
+retries = 0
+
 [test-groups.app_server_protocol_codegen]
 max-threads = 1
 

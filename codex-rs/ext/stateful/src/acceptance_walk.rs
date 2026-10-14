@@ -143,3 +143,7 @@ pub(super) fn walk(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "acceptance_walk_bounds_tests.rs"]
+mod tests;
