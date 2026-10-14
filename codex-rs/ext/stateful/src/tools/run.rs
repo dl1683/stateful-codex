@@ -179,6 +179,7 @@ impl StatefulRunUpdateTool {
                         &current,
                         expected_revision,
                         result.as_deref(),
+                        current.strategy.as_deref(),
                         &open_issues,
                     )
                     .await?;
@@ -188,9 +189,9 @@ impl StatefulRunUpdateTool {
                     "The completion declared unresolved issues or open blockers, so the host recorded this run as blocked with a partial result instead of completed. Report the partial result and each open issue to the user; resume work (status running) only to resolve them.",
                 );
             }
-        } else if open_issues.is_some() {
+        } else if open_issues.is_some() && status != StatefulRunStatus::Blocked {
             return Err(FunctionCallError::RespondToModel(
-                "openIssues is only valid when status is completed".to_string(),
+                "openIssues is only valid when status is completed or blocked".to_string(),
             ));
         }
         let submitted_result = (status == StatefulRunStatus::Completed)
@@ -336,6 +337,22 @@ impl StatefulRunUpdateTool {
             }
             (None, None)
         };
+        if status == StatefulRunStatus::Blocked
+            && let Some(issues) = open_issues.as_deref()
+        {
+            run_acceptance::validate_open_issues(issues)?;
+            let run = self
+                .block_with_open_issues(
+                    &current,
+                    expected_revision,
+                    result.as_deref().or(current.result.as_deref()),
+                    strategy.as_deref().or(current.strategy.as_deref()),
+                    issues,
+                )
+                .await?;
+            return self.blocked_output(&call, &run,
+                "The run is blocked. Report the partial result and each unresolved issue to the user.");
+        }
         // The acceptance gate runs under the completion fence, after the disposition's own
         // validation, so its leased verification attempt and the terminal commit see one
         // consistent project state.
@@ -538,7 +555,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                 "type": "object",
                 "properties": {
                     "expectedRevision": {"type": "integer", "minimum": 1, "description": "The run revision from <stateful_run>, not rootRevision."},
-                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "completed only after all other durable writes."},
+                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "completed only after all other durable writes; blocked may include openIssues with a partial result."},
                     "strategy": {"type": "string"},
                     "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative."},
                     "rootRevision": {"type": "integer", "minimum": 0, "description": "durableLearning only; the root blackboard's project intelligence revision."},
@@ -546,7 +563,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
                     "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."},
-                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed: open doubts, discrepancies, failing checks, blockers ([] if none); any entry blocks the run."}
+                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed (required) or blocked (optional): open doubts, discrepancies, failing checks, blockers ([] if none); any entry keeps the run blocked."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

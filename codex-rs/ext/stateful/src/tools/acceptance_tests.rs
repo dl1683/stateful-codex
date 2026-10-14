@@ -695,7 +695,7 @@ async fn an_admitted_open_issue_ends_the_run_blocked_not_completed() {
     assert_eq!(
         run.result.as_deref(),
         Some(
-            "Partial result: the completion declared unresolved issues, so the run is blocked instead of completed.\nOpen issues:\n- The second source gives 41; the discrepancy is unresolved.\n\nSubmitted result (not accepted as complete): The answer is 42."
+            "Partial result: unresolved issues keep this run blocked.\nOpen issues:\n- The second source gives 41; the discrepancy is unresolved.\n\nSubmitted result (not accepted as complete): The answer is 42."
         )
     );
 }

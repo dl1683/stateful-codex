@@ -251,15 +251,7 @@ pub(super) async fn declared_open_issues(
             "completed requires openIssues: list every unresolved doubt, known discrepancy, failing check or open blocker that affects the result, or pass [] when there is none. Any entry ends the run blocked with a partial result instead of completed".to_string(),
         ));
     };
-    if declared.len() > MAX_OPEN_ISSUES
-        || declared.iter().any(|issue| {
-            issue.trim().is_empty() || issue.len() > MAX_OPEN_ISSUE_BYTES || issue.contains('\0')
-        })
-    {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "openIssues holds at most {MAX_OPEN_ISSUES} non-empty entries of at most {MAX_OPEN_ISSUE_BYTES} bytes"
-        )));
-    }
+    validate_open_issues(declared)?;
     let latest = runtime.latest_obligation(&run.id).await.map_err(respond)?;
     let sequence = latest.as_ref().map(|obligation| obligation.sequence);
     let blockers = match final_obligation {
@@ -282,6 +274,20 @@ pub(super) async fn declared_open_issues(
     ))
 }
 
+/// Shared bounds for declared blockers on completed and explicitly blocked updates.
+pub(super) fn validate_open_issues(declared: &[String]) -> Result<(), FunctionCallError> {
+    if declared.len() > MAX_OPEN_ISSUES
+        || declared.iter().any(|issue| {
+            issue.trim().is_empty() || issue.len() > MAX_OPEN_ISSUE_BYTES || issue.contains('\0')
+        })
+    {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "openIssues holds at most {MAX_OPEN_ISSUES} non-empty entries of at most {MAX_OPEN_ISSUE_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
 impl StatefulRunUpdateTool {
     /// Records an admitted-incomplete completion as Blocked with the partial result and the
     /// declared issues, so it can never read as done.
@@ -290,9 +296,11 @@ impl StatefulRunUpdateTool {
         current: &StatefulRun,
         expected_revision: u64,
         submitted: Option<&str>,
+        strategy: Option<&str>,
         open_issues: &[String],
     ) -> Result<StatefulRun, FunctionCallError> {
-        let mut result = "Partial result: the completion declared unresolved issues, so the run is blocked instead of completed.\nOpen issues:".to_string();
+        let mut result =
+            "Partial result: unresolved issues keep this run blocked.\nOpen issues:".to_string();
         for issue in open_issues {
             result.push_str("\n- ");
             result.push_str(issue);
@@ -311,7 +319,7 @@ impl StatefulRunUpdateTool {
                 StatefulRunUpdate {
                     expected_revision,
                     status: StatefulRunStatus::Blocked,
-                    strategy: current.strategy.clone(),
+                    strategy: strategy.map(str::to_string),
                     result: Some(result.trim().to_string()),
                 },
             )

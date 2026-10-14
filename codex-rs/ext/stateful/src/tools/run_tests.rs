@@ -326,3 +326,93 @@ async fn an_autonomous_refusal_points_a_plain_question_at_the_answered_outcome()
         ]
     );
 }
+
+#[tokio::test]
+async fn explicit_blockers_persist_without_bypassing_completion() {
+    let fixture = fixture().await;
+    let arguments = json!({"expectedRevision": fixture.run.revision, "status": "blocked",
+        "strategy": "Wait for the missing fixture.", "result": "Parser repaired.",
+        "openIssues": ["Verification fixture missing."]});
+    let stale = json!({"expectedRevision": fixture.run.revision + 1, "status": "blocked",
+        "openIssues": ["Verification fixture missing."]});
+    assert!(fixture.tool.handle_guided(call(&stale)).await.is_err());
+    assert_eq!(stored_run(&fixture).await, fixture.run);
+    let output = fixture
+        .tool
+        .handle_guided(call(&arguments))
+        .await
+        .expect("blocked");
+    let output: Value = serde_json::from_str(&output.log_output()).unwrap();
+    assert_eq!(output["status"], json!("blocked"));
+    let blocked = stored_run(&fixture).await;
+    assert_eq!(blocked.status, StatefulRunStatus::Blocked);
+    assert_eq!(
+        blocked.strategy.as_deref(),
+        Some("Wait for the missing fixture.")
+    );
+    assert!(
+        blocked
+            .result
+            .as_ref()
+            .is_some_and(|result| result.contains("Verification fixture missing.")
+                && result.contains("Parser repaired."))
+    );
+    let refused = fixture
+        .tool
+        .handle_guided(call(&lookup_completion(blocked.revision)))
+        .await;
+    let Err(FunctionCallError::RespondToModel(message)) = refused else {
+        panic!("unmet criteria");
+    };
+    assert!(message.contains("completion refused"), "{message}");
+    assert_ne!(
+        stored_run(&fixture).await.status,
+        StatefulRunStatus::Completed
+    );
+}
+
+#[tokio::test]
+async fn explicit_blockers_enforce_bounds_and_allowed_statuses() {
+    let fixture = fixture().await;
+    for issues in [
+        json!([""]),
+        json!([" "]),
+        json!(["a\u{0}b"]),
+        json!(["x".repeat(/*n*/ 1025)]),
+        json!(vec!["issue"; 17]),
+    ] {
+        let refused = fixture
+            .tool
+            .handle_guided(call(&json!({
+                "expectedRevision": fixture.run.revision, "status": "blocked", "openIssues": issues
+            })))
+            .await;
+        let Err(FunctionCallError::RespondToModel(message)) = refused else {
+            panic!("invalid blockers");
+        };
+        assert!(message.contains("openIssues holds at most"), "{message}");
+        assert_eq!(stored_run(&fixture).await, fixture.run);
+    }
+    for status in ["running", "failed"] {
+        let refused = fixture
+            .tool
+            .handle_guided(call(&json!({
+                "expectedRevision": fixture.run.revision, "status": status, "openIssues": []
+            })))
+            .await;
+        let Err(FunctionCallError::RespondToModel(message)) = refused else {
+            panic!("invalid status");
+        };
+        assert!(message.contains("completed or blocked"), "{message}");
+    }
+    let output = fixture
+        .tool
+        .handle_guided(call(&json!({
+            "expectedRevision": fixture.run.revision, "status": "blocked",
+            "openIssues": vec!["x".repeat(/*n*/ 1024); 16], "result": "r".repeat(/*n*/ 32_000)
+        })))
+        .await
+        .expect("bounded partial result");
+    assert!(!output.log_output().is_empty());
+    assert!(stored_run(&fixture).await.result.unwrap().len() <= 32 * 1024);
+}
