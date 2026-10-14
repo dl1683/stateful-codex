@@ -11,6 +11,47 @@ use crate::WorkflowMode;
 const PROJECT: &str = "project";
 const SOURCE: &str = "call-source";
 
+/// A legacy prefix-shaped blocker has no host receipt, so neither spelling may resolve it.
+#[tokio::test]
+async fn legacy_prefix_shaped_blockers_refuse_operations_without_writes() {
+    let home = TempDir::new().expect("home");
+    let store = open_store(&home).await;
+    let run_id = new_run(&store, "legacy-prefix").await;
+    store
+        .append_obligation(
+            "legacy".into(),
+            NewObligation {
+                project_id: PROJECT.into(),
+                run_id: run_id.clone(),
+                packet: ObligationPacket {
+                    blockers: vec![retained("x")],
+                    ..Default::default()
+                },
+                provenance_source_id: SOURCE.into(),
+            },
+        )
+        .await
+        .expect("legacy blocker");
+    let before = all_obligations(&store, &run_id).await;
+    for (index, resolution) in ["x".to_string(), retained("x")].into_iter().enumerate() {
+        let refused = update(
+            &store,
+            &run_id,
+            &format!("resolve-{index}"),
+            learning("new"),
+            &[&resolution],
+        )
+        .await;
+        assert!(matches!(
+            refused,
+            Err(StatefulRunStoreError::ObligationOperationRefused(_))
+        ));
+        assert_eq!(all_obligations(&store, &run_id).await, before);
+    }
+    assert!(retain(&store, &run_id, "new", &["y"]).await.is_err());
+    assert_eq!(all_obligations(&store, &run_id).await, before);
+}
+
 async fn open_store(home: &TempDir) -> StatefulRunStore {
     StatefulRunStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await

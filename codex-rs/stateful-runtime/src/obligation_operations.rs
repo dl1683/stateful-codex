@@ -160,6 +160,23 @@ impl StatefulRunStore {
             .filter(|blocker| blocker.starts_with(RETAINED_ISSUE_PREFIX))
             .cloned()
             .collect();
+        if !retained.is_empty() {
+            let latest_id = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM stateful_obligations WHERE run_id = ? ORDER BY sequence DESC LIMIT 1",
+            )
+            .bind(run_id.as_str())
+            .fetch_one(&mut *transaction)
+            .await?;
+            // Older tools allowed arbitrary prefix-shaped blockers. Do not interpret those
+            // as host-created identities, or let a resolution silently remove one.
+            if !latest_id.starts_with("stateful-retain-")
+                && !latest_id.starts_with("stateful-update-")
+            {
+                return Err(refused(
+                    "the latest packet has legacy prefix-shaped blockers without a host receipt; nothing changed; give a partial final answer or have the host reconcile the legacy packet",
+                ));
+            }
+        }
         let packet = match operation {
             ObligationOperation::Retain { issues } => {
                 // 4. Validate.
