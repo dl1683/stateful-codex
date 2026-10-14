@@ -197,42 +197,35 @@ fn counts(output: &Value) -> (Value, Value, Value, Value) {
 }
 
 #[test]
-fn provenance_keeps_every_store_valid_id_and_refuses_unrecordable_ones() {
-    let bridged = bridged_call_id();
-    let source = |call_id: &str| {
-        provenance_source_id(&with_call_id("obligation_update", json!({}), call_id))
-            .map_err(|error| error.to_string())
-    };
-    let no_id = Err("nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded".to_string());
-    let verbatim = [
-        "call_abc123".to_string(),
-        "c".repeat(/*n*/ 200),
-        "c".repeat(/*n*/ 512),
-        " call_padded".to_string(),
-        "stateful:oversized-call-id:legacy".to_string(),
-        "call-sha256:0123abcd".to_string(),
-    ];
-
-    assert_eq!(
-        verbatim
-            .iter()
-            .map(|call_id| source(call_id))
-            .chain([source(&bridged), source(""), source("call\n1")])
-            .collect::<Vec<_>>(),
-        verbatim
-            .iter()
-            .cloned()
-            .map(Ok)
-            .chain([
-                Err(format!(
-                    "nothing was written: this tool call's ID is {} bytes, over the 512-byte provenance limit, so Stateful cannot record its source. The model provider or its bridge issues oversized call IDs, which Stateful does not support yet; retrying the same call will not help.",
-                    bridged.len()
-                )),
-                no_id.clone(),
-                no_id,
-            ])
-            .collect::<Vec<_>>()
-    );
+fn provenance_is_bounded_deterministic_and_uses_the_whole_id() {
+    let source = |raw: &str| crate::call_source::call_source(raw).expect("nonempty");
+    for raw in ["c".repeat(/*n*/ 512), "é".repeat(/*n*/ 256)] {
+        assert_eq!(source(&raw), raw);
+    }
+    for raw in [
+        "c".repeat(/*n*/ 513),
+        format!("{}x", "é".repeat(/*n*/ 256)),
+        "é".repeat(/*n*/ 257),
+        bridged_call_id(),
+        "call\n1".to_string(),
+        " padded ".to_string(),
+        "trailing ".to_string(),
+        "call\0id".to_string(),
+        format!("stateful:call:v1:sha256:{}", "0".repeat(/*n*/ 64)),
+    ] {
+        let mapped = source(&raw);
+        assert_eq!(mapped.len(), 88);
+        assert_ne!(mapped, raw);
+        assert_eq!(mapped, source(&raw));
+        assert_ne!(mapped, source(&format!("{raw}x")));
+        assert!(
+            mapped
+                .strip_prefix("stateful:call:v1:sha256:")
+                .expect("prefix")
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        );
+    }
 }
 
 /// IDs the stores accepted verbatim before (a 200-byte ID, and one that looks like a
@@ -275,8 +268,7 @@ async fn store_valid_ids_replay_records_relations_and_obligations_unchanged() {
     }
 }
 
-/// Oversized bridge IDs, empty IDs and control-containing IDs could never be stored; they
-/// are refused before any write instead of failing record by record.
+/// An empty identity is still refused before any write.
 #[tokio::test]
 async fn unrecordable_call_ids_write_nothing() {
     let fixture = fixture().await;
@@ -290,7 +282,7 @@ async fn unrecordable_call_ids_write_nothing() {
         .expect("revision reads");
 
     let mut refusals = Vec::new();
-    for call_id in [bridged_call_id().as_str(), "", "call\u{7}"] {
+    for call_id in [""] {
         refusals.push((
             fixture.record(call_id).await.is_err(),
             matches!(
@@ -314,6 +306,221 @@ async fn unrecordable_call_ids_write_nothing() {
             fixture.findings().await,
             fixture.obligation_sources().await,
         ),
-        (vec![(true, true); 3], before, vec![None, None], Vec::new())
+        (vec![(true, true)], before, vec![None, None], Vec::new())
     );
+}
+
+#[tokio::test]
+async fn oversized_sources_record_batches_relations_and_obligations() {
+    for size in [539, 67_222] {
+        let fixture = fixture().await;
+        let raw = "x".repeat(size);
+        let source = provenance_source_id(&with_call_id("obligation_update", json!({}), &raw))
+            .expect("mapped");
+        assert_eq!(
+            counts(&fixture.record(&raw).await.expect("batch")),
+            (json!(2), json!(0), json!(1), json!(0))
+        );
+        let mut different_tail = raw.clone();
+        different_tail.pop();
+        different_tail.push('y');
+        assert_ne!(
+            source,
+            provenance_source_id(&with_call_id(
+                "obligation_update",
+                json!({}),
+                &different_tail
+            ))
+            .unwrap()
+        );
+        fixture.update(&raw).await.expect("obligation");
+        fixture.update(&raw).await.expect("retry");
+        assert_eq!(
+            (fixture.findings().await, fixture.obligation_sources().await),
+            (
+                vec![Some((source.clone(), 1)), Some((source.clone(), 1))],
+                vec![source]
+            )
+        );
+    }
+}
+
+#[tokio::test]
+async fn historical_reserved_sources_replay_without_rewriting() {
+    let raw = "stateful:call:v1:sha256:historical";
+    let seed = fixture().await;
+    seed.record("seed").await.expect("seed batch");
+    seed.update("seed").await.expect("seed obligation");
+    let target = fixture().await;
+    let node = target
+        .services
+        .project_node_id(PROJECT_ID)
+        .await
+        .expect("node");
+    let store = target.services.blackboard().await.expect("store");
+    let seed_store = seed.services.blackboard().await.expect("seed store");
+    let first_id = BlackboardEntryId::parse(stable_id("entry", PROJECT_ID, "finding-1")).unwrap();
+    for key in ["finding-1", "finding-2"] {
+        let id = BlackboardEntryId::parse(stable_id("entry", PROJECT_ID, key)).unwrap();
+        let mut value = seed_store
+            .get_entry(PROJECT_ID, &id)
+            .await
+            .unwrap()
+            .unwrap()
+            .value;
+        value.node_id = node.clone();
+        value.provenance.source_id = raw.to_string();
+        store
+            .create_entry(id, value)
+            .await
+            .expect("historical entry");
+    }
+    for relation in seed_store
+        .list_relations(PROJECT_ID, &first_id, /*max_results*/ 256)
+        .await
+        .unwrap()
+    {
+        let mut value = relation.value;
+        value.provenance.source_id = raw.to_string();
+        store
+            .create_relation(relation.id, value)
+            .await
+            .expect("historical relation");
+    }
+    let runtime = target.services.runtime().await.unwrap();
+    let mut obligation = seed
+        .services
+        .runtime()
+        .await
+        .unwrap()
+        .latest_obligation(&seed.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    obligation.value.provenance_source_id = raw.to_string();
+    runtime
+        .append_obligation(obligation.id, obligation.value)
+        .await
+        .expect("historical obligation");
+    assert_eq!(
+        counts(&target.record(raw).await.expect("historical retry")),
+        (json!(2), json!(0), json!(1), json!(0))
+    );
+    target
+        .update(raw)
+        .await
+        .expect("historical obligation retry");
+    assert_eq!(
+        (target.findings().await, target.obligation_sources().await),
+        (vec![Some((raw.to_string(), 1)); 2], vec![raw.to_string()])
+    );
+    let relation_tool = super::blackboard_write::BlackboardRelateTool::new(
+        PROJECT_ID.to_string(),
+        target.services.clone(),
+        /*event_sink*/ None,
+    );
+    relation_tool
+        .handle(with_call_id(
+            "blackboard_relate",
+            json!({
+                "idempotencyKey": "relation-1", "fromEntryId": first_id.to_string(),
+                "toEntryId": stable_id("entry", PROJECT_ID, "finding-2"),
+                "kind": "supports", "confidenceBasisPoints": 8000
+            }),
+            raw,
+        ))
+        .await
+        .expect("historical standalone retry");
+    assert_eq!(
+        store
+            .list_relations(PROJECT_ID, &first_id, /*max_results*/ 256)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|relation| (relation.value.provenance.source_id, relation.revision))
+            .collect::<Vec<_>>(),
+        vec![(raw.to_string(), 1)]
+    );
+    let mut changed = progress();
+    changed["packet"]["learning"] = json!(["different payload"]);
+    assert!(
+        target
+            .obligations
+            .handle(with_call_id("obligation_update", changed, raw))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn oversized_ids_reach_acceptance_and_completion_validation() {
+    for size in [539, 67_222] {
+        let fixture = fixture().await;
+        let raw = "x".repeat(size);
+        let acceptance = super::acceptance::AcceptanceUpdateTool::new(
+            PROJECT_ID.to_string(),
+            THREAD_ID.to_string(),
+            fixture.services.clone(),
+            Arc::new(InMemoryThreadStore::default()),
+        );
+        acceptance.handle(with_call_id("stateful_acceptance_update", json!({
+            "expectedLedgerRevision": 0,
+            "changes": [{"action": "add", "origin": "derived", "kind": "check", "statement": "Tests pass.",
+                "checkCommand": "pytest", "expectedObservation": "exit 0", "artifacts": ["out.txt"]}]
+        }), &raw)).await.expect("oversized acceptance ID accepted");
+        let completion = super::run::StatefulRunUpdateTool::new(
+            PROJECT_ID.to_string(),
+            THREAD_ID.to_string(),
+            fixture.services.clone(),
+            Arc::new(InMemoryThreadStore::default()),
+            /*event_sink*/ None,
+            VisibleRootRegistry::default(),
+            crate::deliverable::TurnRunCommits::default(),
+        );
+        let result = completion.handle(with_call_id("stateful_run_update", json!({
+            "expectedRevision": fixture.run.revision, "status": "completed", "openIssues": [],
+            "result": "Fixed."
+        }), &raw)).await;
+        let Err(FunctionCallError::RespondToModel(message)) = result else {
+            panic!("missing completion fields");
+        };
+        assert!(
+            message.contains("completed requires materialRootFindings"),
+            "{message}"
+        );
+        let relation = super::blackboard_write::BlackboardRelateTool::new(
+            PROJECT_ID.to_string(),
+            fixture.services.clone(),
+            /*event_sink*/ None,
+        );
+        fixture.record(&raw).await.expect("batch");
+        relation
+            .handle(with_call_id(
+                "blackboard_relate",
+                json!({"idempotencyKey": "standalone",
+            "fromEntryId": stable_id("entry", PROJECT_ID, "finding-1"),
+            "toEntryId": stable_id("entry", PROJECT_ID, "finding-2"),
+            "kind": "supports", "confidenceBasisPoints": 8000}),
+                &raw,
+            ))
+            .await
+            .expect("standalone relation");
+        let first_id =
+            BlackboardEntryId::parse(stable_id("entry", PROJECT_ID, "finding-1")).unwrap();
+        let relations = fixture
+            .services
+            .blackboard()
+            .await
+            .unwrap()
+            .list_relations(PROJECT_ID, &first_id, /*max_results*/ 256)
+            .await
+            .unwrap();
+        assert_eq!(
+            relations
+                .into_iter()
+                .map(|relation| relation.value.provenance.source_id)
+                .collect::<Vec<_>>(),
+            vec![crate::call_source::call_source(&raw).unwrap(); 2]
+        );
+    }
 }
