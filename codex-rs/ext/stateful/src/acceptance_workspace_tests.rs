@@ -17,6 +17,9 @@ use crate::acceptance_observation::OUTSTANDING_READERS;
 #[path = "acceptance_identity_tests.rs"]
 mod witnesses;
 
+#[path = "acceptance_walk_tests.rs"]
+mod walk_tests;
+
 // Preserve the existing regression assertions while supplying the shared deadline and
 // representing unavailable snapshots through the new typed API.
 fn identify(roots: &[PathBuf], limits: Limits) -> Option<super::Manifest> {
