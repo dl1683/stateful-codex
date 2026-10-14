@@ -222,8 +222,12 @@ impl StatefulRunStore {
                 issues,
                 blockers: _,
             } => {
-                // 4. Validate.
-                validate_issues(&issues)?;
+                // 4. Completion blockers can be the entire retained set. They were
+                // validated with packet caps above; only open issues use the smaller caps.
+                // An operation with neither input must still refuse without writing.
+                if !issues.is_empty() || completion_blockers.is_empty() {
+                    validate_issues(&issues)?;
+                }
                 // 6. Carry forward: the latest packet verbatim plus the new retained issues.
                 let mut packet = latest.unwrap_or_default();
                 let added = issues

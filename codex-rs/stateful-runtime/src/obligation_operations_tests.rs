@@ -157,6 +157,81 @@ async fn latest_packet(store: &StatefulRunStore, run_id: &StatefulRunId) -> Obli
         .packet
 }
 
+/// Completion blockers alone create one receipt; replay after resolution cannot restore them.
+#[tokio::test]
+async fn completion_blockers_alone_replay_without_resurrecting_resolved_issues() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    let run_id = new_run(&store, "completion-blockers").await;
+    let operation = ObligationOperation::RetainCompletion {
+        issues: Vec::new(),
+        blockers: strings(&["x"]),
+    };
+    let receipt = key("completion");
+    let original = store
+        .apply_obligation_operation(&run_id, operation.clone(), &receipt, SOURCE)
+        .await
+        .expect("blocker-only retention");
+    assert_eq!(
+        original.value.packet,
+        ObligationPacket {
+            blockers: vec![retained("x")],
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        store
+            .apply_obligation_operation(&run_id, operation.clone(), &receipt, SOURCE)
+            .await
+            .expect("identical replay"),
+        original
+    );
+    assert_eq!(
+        all_obligations(&store, &run_id).await,
+        vec![original.clone()]
+    );
+
+    let resolved = update(&store, &run_id, "resolve-x", learning("fixed"), &["x"])
+        .await
+        .expect("resolution");
+    let before = all_obligations(&store, &run_id).await;
+    assert_eq!(
+        store
+            .apply_obligation_operation(&run_id, operation, &receipt, SOURCE)
+            .await
+            .expect("replay after resolution"),
+        original
+    );
+    assert_eq!(all_obligations(&store, &run_id).await, before);
+    assert_eq!(latest_packet(&store, &run_id).await, resolved.value.packet);
+}
+
+/// Empty retention operations refuse atomically; an issue-free redirect skips the operation.
+#[tokio::test]
+async fn empty_retention_operations_refuse_without_writes() {
+    let home = TempDir::new().expect("tempdir");
+    let store = open_store(&home).await;
+    let run_id = new_run(&store, "empty-retention").await;
+    for operation in [
+        ObligationOperation::Retain { issues: Vec::new() },
+        ObligationOperation::RetainCompletion {
+            issues: Vec::new(),
+            blockers: Vec::new(),
+        },
+    ] {
+        assert_eq!(
+            store
+                .apply_obligation_operation(&run_id, operation, &key("empty"), SOURCE)
+                .await
+                .map_err(|error| error.to_string()),
+            Err(format!(
+                "nothing changed: retain 1-{MAX_OPERATION_ISSUES} open issues per call"
+            ))
+        );
+        assert_eq!(all_obligations(&store, &run_id).await, Vec::new());
+    }
+}
+
 /// B1: a replayed Retain returns its original row unchanged after an intervening write and
 /// appends nothing; the same call with other issues conflicts; retained issues accumulate
 /// without duplicates and the rest of the latest packet is copied verbatim.
