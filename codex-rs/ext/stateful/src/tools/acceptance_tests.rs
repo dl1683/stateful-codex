@@ -253,7 +253,7 @@ async fn admit_cannot_silently_drop_check_cwd() {
         .await
         .expect_err("admit cannot replace terms");
     assert!(
-        refused.contains("checkCwd is declared with update, not admit"),
+        refused.contains("action admit does not take checkCwd; meaningful fields: criterion"),
         "{refused}"
     );
     assert_eq!(fixture.ledger().await, before);
@@ -761,4 +761,101 @@ async fn a_long_request_with_budget_left_requires_the_independent_omission_check
         fixture.stored_run().await.status,
         StatefulRunStatus::Running
     );
+}
+
+#[tokio::test]
+async fn shape_rejections_name_the_action_and_meaningful_fields() {
+    let fixture = fixture("Fix the parser.", WorkflowMode::Collaborative).await;
+    let before = fixture.ledger().await;
+    for (action, fields, missing, unexpected) in [
+        (
+            "add",
+            "origin, kind, statement, requestQuote, required, terms",
+            json!({}),
+            json!({"text": "oops"}),
+        ),
+        (
+            "refine",
+            "criterion, statement, required, terms",
+            json!({}),
+            json!({"text": "oops"}),
+        ),
+        (
+            "accept",
+            "criterion, kind, terms",
+            json!({}),
+            json!({"text": "oops"}),
+        ),
+        (
+            "dismiss",
+            "criterion, text, coveredBy",
+            json!({"coveredBy": "C1"}),
+            json!({"coveredBy": "C1", "kind": "check"}),
+        ),
+        (
+            "retire",
+            "criterion, text",
+            json!({"criterion": "C1"}),
+            json!({"kind": "check"}),
+        ),
+        (
+            "observe",
+            "criterion, text",
+            json!({"criterion": "C1"}),
+            json!({"kind": "check"}),
+        ),
+        (
+            "noCheck",
+            "criterion, text",
+            json!({"criterion": "C1"}),
+            json!({"kind": "check"}),
+        ),
+        ("admit", "criterion", json!({}), json!({"text": "oops"})),
+        (
+            "reconcileSteering",
+            "steeringId, text",
+            json!({}),
+            json!({"criterion": "C1"}),
+        ),
+    ] {
+        for (mut change, kind) in [(missing, "needs"), (unexpected, "does not take")] {
+            change["action"] = json!(action);
+            let message = fixture
+                .update(/*revision*/ 0, json!([change]))
+                .await
+                .expect_err("shape rejection");
+            assert!(
+                message.contains(&format!("action {action} {kind}")),
+                "{message}"
+            );
+            assert!(
+                message.contains(&format!("meaningful fields: {fields}")),
+                "{message}"
+            );
+            if fields.ends_with("terms") {
+                assert!(message.contains("terms means dependsOn, milestone, artifacts, checker, checkCommand, checkCwd, expectedObservation"), "{message}");
+            }
+        }
+    }
+    assert_eq!(fixture.ledger().await, before);
+}
+
+#[tokio::test]
+async fn action_guidance_remains_within_the_call_allowance() {
+    let fixture = fixture("Fix the parser.", WorkflowMode::Collaborative).await;
+    for budget in [32, 100, 240, 1000] {
+        let mut request = call(
+            "stateful_acceptance_update",
+            &json!({"expectedLedgerRevision": 0,
+            "changes": [{"action": "add", "text": "unexpected"}]}),
+        );
+        request.truncation_policy = TruncationPolicy::Bytes(budget);
+        let allowance = request.response_byte_budget(super::MAX_RESPONSE_BYTES);
+        let Err(FunctionCallError::RespondToModel(message)) =
+            fixture.acceptance.handle_bounded(request).await
+        else {
+            panic!("shape rejection");
+        };
+        assert!(serde_json::to_string(&message).unwrap().len() <= allowance);
+    }
 }

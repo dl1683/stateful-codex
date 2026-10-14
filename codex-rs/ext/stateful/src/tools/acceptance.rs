@@ -255,9 +255,30 @@ fn convert(
     index: usize,
     change: ChangeArguments,
 ) -> Result<AcceptanceChange, FunctionCallError> {
+    let (action_name, fields) = match change.action {
+        Action::Add => (
+            "add",
+            "origin, kind, statement, requestQuote, required, terms",
+        ),
+        Action::Refine => ("refine", "criterion, statement, required, terms"),
+        Action::Accept => ("accept", "criterion, kind, terms"),
+        Action::Dismiss => ("dismiss", "criterion, text, coveredBy"),
+        Action::Retire => ("retire", "criterion, text"),
+        Action::Observe => ("observe", "criterion, text"),
+        Action::NoCheck => ("noCheck", "criterion, text"),
+        Action::Admit => ("admit", "criterion"),
+        Action::ReconcileSteering => ("reconcileSteering", "steeringId, text"),
+    };
+    let guidance = if matches!(change.action, Action::Add | Action::Refine | Action::Accept) {
+        format!(
+            "{fields}; terms means dependsOn, milestone, artifacts, checker, checkCommand, checkCwd, expectedObservation"
+        )
+    } else {
+        fields.to_string()
+    };
     let field = |name: &str| {
         FunctionCallError::RespondToModel(format!(
-            "nothing changed: changes[{index}] needs {name} for this action"
+            "nothing changed: changes[{index}] action {action_name} needs {name}; meaningful fields: {guidance}"
         ))
     };
     let unexpected = |names: &[(&str, bool)]| -> Result<(), FunctionCallError> {
@@ -268,12 +289,12 @@ fn convert(
         if present.is_empty() {
             Ok(())
         } else if change.action == Action::Admit && present.contains(&"checkCwd") {
-            Err(FunctionCallError::RespondToModel(
-                "nothing changed: checkCwd is declared with update, not admit".to_string(),
-            ))
+            Err(FunctionCallError::RespondToModel(format!(
+                "nothing changed: changes[{index}] action admit does not take checkCwd; meaningful fields: {guidance}. Declare checkCwd with add, refine, or accept"
+            )))
         } else {
             Err(FunctionCallError::RespondToModel(format!(
-                "nothing changed: changes[{index}] does not take {} for this action",
+                "nothing changed: changes[{index}] action {action_name} does not take {}; meaningful fields: {guidance}",
                 present.join(", ")
             )))
         }
