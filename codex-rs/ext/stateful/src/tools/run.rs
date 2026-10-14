@@ -179,7 +179,7 @@ impl StatefulRunUpdateTool {
                         &call,
                         &current,
                         expected_revision,
-                        super::run_redirect::RedirectIssues {
+                        run_redirect::RedirectIssues {
                             submitted: open_issues.as_deref().unwrap_or_default(),
                             final_blockers: final_obligation
                                 .as_ref()
