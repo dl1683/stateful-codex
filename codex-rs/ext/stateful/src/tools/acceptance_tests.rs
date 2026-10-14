@@ -21,6 +21,9 @@ use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::WorkflowMode;
 use codex_thread_store::InMemoryThreadStore;
+use codex_thread_store::LocalThreadStore;
+use codex_thread_store::LocalThreadStoreConfig;
+use codex_thread_store::ThreadStore;
 use codex_utils_absolute_path::test_support::PathExt;
 use codex_utils_output_truncation::TruncationPolicy;
 use pretty_assertions::assert_eq;
@@ -45,6 +48,21 @@ struct Fixture {
 }
 
 async fn fixture(goal: &str, mode: WorkflowMode) -> Fixture {
+    fixture_with_projects(
+        goal,
+        mode,
+        PROJECT_ID,
+        Arc::new(InMemoryThreadStore::default()),
+    )
+    .await
+}
+
+async fn fixture_with_projects(
+    goal: &str,
+    mode: WorkflowMode,
+    project_id: &str,
+    projects: Arc<dyn ThreadStore>,
+) -> Fixture {
     let state_home = TempDir::new().expect("temporary state home");
     let services =
         ProjectIntelligenceServices::new(SqliteConfig::new_for_testing(state_home.path().abs()));
@@ -55,7 +73,7 @@ async fn fixture(goal: &str, mode: WorkflowMode) -> Fixture {
         .create_run(
             StatefulRunId::parse("run-acceptance").expect("valid run ID"),
             NewStatefulRun {
-                project_id: PROJECT_ID.to_string(),
+                project_id: project_id.to_string(),
                 thread_ids: vec![THREAD_ID.to_string()],
                 goal: goal.to_string(),
                 mode,
@@ -69,16 +87,16 @@ async fn fixture(goal: &str, mode: WorkflowMode) -> Fixture {
         .expect("run is created");
     Fixture {
         acceptance: AcceptanceUpdateTool::new(
-            PROJECT_ID.to_string(),
+            project_id.to_string(),
             THREAD_ID.to_string(),
             services.clone(),
-            Arc::new(InMemoryThreadStore::default()),
+            projects.clone(),
         ),
         completion: StatefulRunUpdateTool::new(
-            PROJECT_ID.to_string(),
+            project_id.to_string(),
             THREAD_ID.to_string(),
             services.clone(),
-            Arc::new(InMemoryThreadStore::default()),
+            projects,
             /*event_sink*/ None,
             VisibleRootRegistry::default(),
             crate::deliverable::TurnRunCommits::default(),
@@ -198,6 +216,213 @@ impl Fixture {
             .await
             .expect("ledger")
     }
+}
+
+#[tokio::test]
+async fn check_cwd_uses_only_the_first_registered_local_root_through_the_tool() {
+    let home = TempDir::new().expect("project state home");
+    let first = TempDir::new().expect("first root");
+    let second = TempDir::new().expect("second root");
+    for root in [first.path(), second.path()] {
+        std::fs::create_dir_all(root.join("checks/nested")).expect("check directories");
+    }
+    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+    let state = codex_state::StateRuntime::init(sqlite.clone(), "test".to_string())
+        .await
+        .expect("project state");
+    let roots = [first.path(), second.path()]
+        .into_iter()
+        .map(|root| codex_state::ProjectRoot {
+            path: root.to_str().expect("UTF-8 root").to_string(),
+        })
+        .collect();
+    let rooted = state
+        .create_project(
+            "Two roots".to_string(),
+            roots,
+            Default::default(),
+            &[],
+            "rooted",
+        )
+        .await
+        .expect("registered roots")
+        .project;
+    let rootless = state
+        .create_project(
+            "No roots".to_string(),
+            Vec::new(),
+            Default::default(),
+            &[],
+            "rootless",
+        )
+        .await
+        .expect("registered rootless project")
+        .project;
+    let projects = Arc::new(LocalThreadStore::new(
+        LocalThreadStoreConfig {
+            codex_home: home.path().to_path_buf(),
+            sqlite,
+            default_model_provider_id: "test".to_string(),
+        },
+        Some(state),
+    ));
+    assert_eq!(
+        projects
+            .read_project(rooted.id.clone())
+            .await
+            .expect("project reads")
+            .expect("project exists")
+            .roots
+            .into_iter()
+            .map(|root| root.path)
+            .collect::<Vec<_>>(),
+        rooted
+            .roots
+            .iter()
+            .map(|root| root.path.clone())
+            .collect::<Vec<_>>()
+    );
+    // The call's cwd is deliberately in root two: only the registered first root owns checkCwd.
+    let sandbox = codex_file_system::FileSystemSandboxContext::from_legacy_sandbox_policy(
+        codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
+        second.path().abs().into(),
+    )
+    .expect("sandbox context");
+    for (project_id, environment_id) in [
+        (rooted.id.as_str(), "local"),
+        (rootless.id.as_str(), "local"),
+        (rooted.id.as_str(), "remote"),
+    ] {
+        let fixture = fixture_with_projects(
+            "All tests must pass.",
+            WorkflowMode::Autonomous,
+            project_id,
+            projects.clone(),
+        )
+        .await;
+        let before = fixture.ledger().await;
+        let mut declaration = call(
+            "stateful_acceptance_update",
+            &json!({"expectedLedgerRevision": 0, "changes": [{
+                "action": "add", "origin": "user", "kind": "check",
+                "statement": "All tests pass.", "requestQuote": "All tests must pass.",
+                "checkCommand": "python check.py", "checkCwd": "checks/./nested/.",
+                "expectedObservation": "every test passes", "artifacts": ["out.txt"]
+            }]}),
+        );
+        declaration.environments = vec![codex_extension_api::ToolEnvironment {
+            environment_id: environment_id.to_string(),
+            cwd: sandbox.cwd.clone(),
+            file_system: Arc::new(codex_exec_server::LocalFileSystem::unsandboxed()),
+            file_system_sandbox_context: sandbox.clone(),
+            _lifetime: std::marker::PhantomData,
+        }];
+        if project_id == rootless.id || environment_id == "remote" {
+            let error = fixture
+                .acceptance
+                .handle(declaration)
+                .await
+                .err()
+                .expect("refused");
+            let FunctionCallError::RespondToModel(message) = error else {
+                panic!("unexpected error: {error:?}");
+            };
+            assert_eq!(
+                message,
+                "nothing changed: checkCwd needs a local project root. Read the ledger in <stateful_run> or with stateful_run_read section \"acceptance\" before retrying"
+            );
+            assert_eq!(fixture.ledger().await, before);
+            continue;
+        }
+        let output = fixture
+            .acceptance
+            .handle(declaration.clone())
+            .await
+            .expect("first-root declaration accepted");
+        let output: Value = serde_json::from_str(&output.log_output()).expect("JSON output");
+        let ledger = fixture.ledger().await;
+        assert_eq!(output["ledgerRevision"], json!(1));
+        assert_eq!(
+            (
+                ledger.criteria[0].check_cwd.as_deref(),
+                first
+                    .path()
+                    .join(ledger.criteria[0].check_cwd.as_ref().expect("stored cwd"))
+                    .canonicalize()
+                    .expect("absolute stored target"),
+            ),
+            (
+                Some("checks/nested"),
+                first
+                    .path()
+                    .join("checks/nested")
+                    .canonicalize()
+                    .expect("first-root target")
+            )
+        );
+        // An absolute spelling of the same first-root target normalizes to the same ledger.
+        declaration.payload = ToolPayload::Function {
+            arguments: json!({"expectedLedgerRevision": 1, "changes": [{
+                "action": "refine", "criterion": "C1",
+                "checkCwd": first.path().join("checks/nested/.").to_str().expect("UTF-8 directory")
+            }]})
+            .to_string(),
+        };
+        fixture
+            .acceptance
+            .handle(declaration.clone())
+            .await
+            .expect("equivalent absolute declaration accepted");
+        assert_eq!(fixture.ledger().await, ledger);
+        declaration.payload = ToolPayload::Function {
+            arguments: json!({"expectedLedgerRevision": 1, "changes": [{
+                "action": "refine", "criterion": "C1",
+                "checkCwd": second.path().join("checks/nested").to_str().expect("UTF-8 directory")
+            }]})
+            .to_string(),
+        };
+        let error = fixture
+            .acceptance
+            .handle(declaration)
+            .await
+            .err()
+            .expect("second root refused");
+        let FunctionCallError::RespondToModel(message) = error else {
+            panic!("unexpected error: {error:?}");
+        };
+        assert_eq!(
+            message,
+            "nothing changed: checkCwd must be inside the first project root. Read the ledger in <stateful_run> or with stateful_run_read section \"acceptance\" before retrying"
+        );
+        assert_eq!(fixture.ledger().await, ledger);
+    }
+}
+
+#[tokio::test]
+async fn model_supplied_project_root_is_rejected_by_the_tool_decoder() {
+    let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
+    let before = fixture.ledger().await;
+    let mut declaration = call("stateful_acceptance_update", &json!({}));
+    declaration.payload = ToolPayload::Function {
+        arguments: r#"{"projectRoot":".","expectedLedgerRevision":0,"changes":[{"action":"add","origin":"derived","kind":"manual","statement":"All tests pass."}]}"#.to_string(),
+    };
+    let error = fixture
+        .acceptance
+        .handle(declaration)
+        .await
+        .err()
+        .expect("host-only argument refused");
+    let FunctionCallError::RespondToModel(message) = error else {
+        panic!("unexpected error: {error:?}");
+    };
+    assert_eq!(
+        message,
+        format!(
+            "field `projectRoot`: unknown field `projectRoot`, expected `expectedLedgerRevision` or `changes` at line 1 column 14. Minimal valid call: {}",
+            super::EXAMPLE
+        )
+    );
+    assert_eq!(fixture.ledger().await, before);
 }
 
 #[tokio::test]
