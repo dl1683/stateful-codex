@@ -24,7 +24,7 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
                 },
             }],
             "python-terms",
-            /*project_root*/ None,
+            /*project_root*/ Some(root.to_path_buf()),
         )
         .await
         .unwrap();
@@ -42,7 +42,7 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
                 checker_digest: Some(digest.clone()),
             }],
             "python-admit",
-            /*project_root*/ None,
+            /*project_root*/ Some(root.to_path_buf()),
         )
         .await
         .unwrap();
