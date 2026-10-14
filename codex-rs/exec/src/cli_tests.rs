@@ -2,6 +2,82 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn new_run_images_do_not_consume_the_prompt() {
+    for flag in ["-i", "--image"] {
+        let cli = Cli::parse_from(["codex-exec", flag, "page.png", "describe the page"]);
+
+        assert!(cli.command.is_none());
+        assert_eq!(
+            (cli.images.clone(), cli.prompt),
+            (
+                vec![PathBuf::from("page.png")],
+                Some("describe the page".to_string())
+            )
+        );
+    }
+}
+
+#[test]
+fn new_run_accepts_repeated_and_comma_delimited_images() {
+    let cli = Cli::parse_from([
+        "codex-exec",
+        "-i",
+        "first.png,second.png",
+        "--image",
+        "third.png",
+        "compare the pages",
+    ]);
+
+    assert_eq!(
+        (cli.images.clone(), cli.prompt),
+        (
+            vec![
+                PathBuf::from("first.png"),
+                PathBuf::from("second.png"),
+                PathBuf::from("third.png"),
+            ],
+            Some("compare the pages".to_string())
+        )
+    );
+}
+
+#[test]
+fn resume_and_fork_keep_their_own_image_arguments() {
+    for command in ["resume", "fork"] {
+        let cli = Cli::parse_from([
+            "codex-exec",
+            command,
+            "session-123",
+            "-i",
+            "first.png,second.png",
+            "--image",
+            "third.png",
+            "compare the pages",
+        ]);
+
+        assert!(cli.images.is_empty());
+        let (images, prompt) = match cli.command {
+            Some(Command::Resume(args)) => (args.images, args.prompt),
+            Some(Command::Fork(args)) => (args.images, args.prompt),
+            Some(Command::Review(_) | Command::Memory(_)) | None => {
+                panic!("expected resume or fork command")
+            }
+        };
+        assert_eq!(
+            (images, prompt),
+            (
+                vec![
+                    PathBuf::from("first.png"),
+                    PathBuf::from("second.png"),
+                    PathBuf::from("third.png"),
+                ],
+                Some("compare the pages".to_string())
+            )
+        );
+    }
+}
+
+#[test]
 fn resume_parses_prompt_after_global_flags() {
     const PROMPT: &str = "echo resume-with-global-flags-after-subcommand";
     let cli = Cli::parse_from([

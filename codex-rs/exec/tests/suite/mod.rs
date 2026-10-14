@@ -8,6 +8,8 @@ mod auth_env;
 mod completion_backfill;
 mod ephemeral;
 mod hooks;
+#[path = "images_tests.rs"]
+mod images;
 mod mcp_required_exit;
 mod originator;
 mod output_schema;
