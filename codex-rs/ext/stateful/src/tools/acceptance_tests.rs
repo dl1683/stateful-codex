@@ -607,7 +607,7 @@ async fn admission_outside_the_local_executor_cannot_freeze_checker_bytes() {
 
 #[tokio::test]
 async fn identical_no_check_statements_do_not_reset_the_refusal_count() {
-    let fixture = fixture("Reconcile the filing.", WorkflowMode::Autonomous).await;
+    let fixture = fixture("Reconcile the filing.", WorkflowMode::Collaborative).await;
     fixture
         .update(
             0,
@@ -646,7 +646,7 @@ async fn identical_no_check_statements_do_not_reset_the_refusal_count() {
 async fn a_dismissal_without_a_covering_criterion_is_refused() {
     let fixture = fixture(
         "Fix the parser. Write the report.",
-        WorkflowMode::Autonomous,
+        WorkflowMode::Collaborative,
     )
     .await;
     fixture.complete().await.expect_err("proposals created");
@@ -712,7 +712,7 @@ async fn acceptance_refusals_fit_the_call_allowance_and_dependency_bounds_hold()
 
 #[tokio::test]
 async fn no_op_refinements_do_not_reset_the_refusal_count() {
-    let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
+    let fixture = fixture("All tests must pass.", WorkflowMode::Collaborative).await;
     fixture
         .update(
             0,
@@ -815,7 +815,7 @@ async fn socratic_pending_run_agrees_criteria_but_records_no_evidence() {
 
 #[tokio::test]
 async fn required_work_without_a_safe_check_ends_blocked_not_completed() {
-    let fixture = fixture("Reconcile the filing.", WorkflowMode::Autonomous).await;
+    let fixture = fixture("Reconcile the filing.", WorkflowMode::Collaborative).await;
     fixture
         .update(
             0,
@@ -884,7 +884,7 @@ impl Fixture {
 
 #[tokio::test]
 async fn an_admitted_open_issue_ends_the_run_blocked_not_completed() {
-    let fixture = fixture("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let fixture = fixture("Answer a lookup.", WorkflowMode::Collaborative).await;
     let revision = fixture.stored_run().await.revision;
     let missing = fixture
         .complete_with(json!({
@@ -963,7 +963,7 @@ async fn a_recorded_open_blocker_ends_the_run_blocked_not_completed() {
 async fn a_long_request_with_budget_left_requires_the_independent_omission_check() {
     let fixture = fixture(
         "Convert every invoice in data/ to the new schema. Write the totals to out/totals.csv. Keep the original files unchanged.",
-        WorkflowMode::Autonomous,
+        WorkflowMode::Collaborative,
     )
     .await;
     // Nothing declared, nothing changed, nearly the whole budget left: the agent still

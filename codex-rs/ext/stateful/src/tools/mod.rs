@@ -65,6 +65,7 @@ pub(super) fn project_intelligence_tools(
     event_sink: Option<Arc<dyn StatefulEventSink>>,
     visible_root: VisibleRootRegistry,
     run_commits: TurnRunCommits,
+    turn_progress: crate::turn_progress::TurnProgress,
     run_tools: RunTools,
 ) -> Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> {
     let mut tools: Vec<Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>> = vec![
@@ -125,6 +126,7 @@ pub(super) fn project_intelligence_tools(
             thread_id.clone(),
             services.clone(),
             event_sink.clone(),
+            turn_progress,
         )) as Arc<dyn for<'call> ToolExecutor<ToolCall<'call>>>,
         Arc::new(run::StatefulRunUpdateTool::new(
             project_id.clone(),

@@ -15,52 +15,6 @@ use super::*;
 const BLOCK: &str =
     "[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]";
 
-/// Only an answer followed by a well-formed, trailing, ready block is admitted; a
-/// declaration-only message, whitespace before the block, text after it, and every other
-/// disposition keep the run's ordinary route.
-#[test]
-fn readiness_admits_only_a_ready_block_trailing_real_answer_text() {
-    assert_eq!(
-        readiness(&format!("It returns Result<Config, Error>.\n\n{BLOCK}\n")),
-        Readiness::Answered("It returns Result<Config, Error>.")
-    );
-    for (message, reason) in [
-        ("It returns a Result.".to_string(), "the final message has no outcome block"),
-        (BLOCK.to_string(), "no answer precedes the outcome block"),
-        (format!(" \n\t\n{BLOCK}"), "no answer precedes the outcome block"),
-        (
-            format!("It returns a Result.\n{BLOCK}\nAnything else?"),
-            "text follows the outcome block",
-        ),
-        (
-            format!("It returns a Result. {BLOCK}"),
-            "the outcome block does not start on its own line",
-        ),
-        (
-            format!("A.\n{BLOCK}\nB.\n{BLOCK}"),
-            "the final message has more than one outcome block",
-        ),
-        (
-            "I will read the parser next.\n[stateful-outcome]\ndisposition: continue\nopen-issues: none\n[/stateful-outcome]".to_string(),
-            "the model declared that work continues",
-        ),
-        (
-            "I cannot reach the file.\n[stateful-outcome]\ndisposition: blocked\nopen-issues:\n- The file is missing.\n[/stateful-outcome]".to_string(),
-            "the model declared that it is blocked",
-        ),
-        (
-            "It probably returns a Result.\n[stateful-outcome]\ndisposition: answer\nopen-issues:\n- I did not read the source.\n[/stateful-outcome]".to_string(),
-            "the answer declares open issues",
-        ),
-        (
-            "It returns a Result.\n[stateful-outcome]\ndisposition: answer\nopen-issues: none".to_string(),
-            "the outcome block is not closed",
-        ),
-    ] {
-        assert_eq!(readiness(&message), Readiness::NotAnswered(reason), "{message}");
-    }
-}
-
 async fn store(home: &TempDir) -> StatefulRunStore {
     StatefulRunStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await

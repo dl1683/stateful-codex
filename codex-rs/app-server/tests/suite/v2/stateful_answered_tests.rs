@@ -297,25 +297,9 @@ async fn anything_but_a_genuine_ready_answer_keeps_the_ordinary_route() -> Resul
         "I will read the parser next.\n\n{}",
         BLOCK.replace("disposition: answer", "disposition: continue")
     );
-    let open_issues = format!(
-        "It probably returns a Result.\n\n{}",
-        BLOCK.replace(
-            "open-issues: none",
-            "open-issues:\n- I did not read the source."
-        )
-    );
     let cases = [
-        (StatefulWorkflowMode::Autonomous, message("r1", ANSWER)),
         (StatefulWorkflowMode::Autonomous, message("r1", &continuing)),
-        (
-            StatefulWorkflowMode::Autonomous,
-            message("r1", &open_issues),
-        ),
         (StatefulWorkflowMode::Autonomous, message("r1", BLOCK)),
-        (
-            StatefulWorkflowMode::Autonomous,
-            message("r1", &format!("{}\nAnything else?", ready())),
-        ),
         (StatefulWorkflowMode::Autonomous, commentary("r1", &ready())),
         (StatefulWorkflowMode::Collaborative, message("r1", &ready())),
     ];
@@ -581,7 +565,16 @@ async fn status_only_after_commit_warns_per_route() -> Result<()> {
 async fn running_turns_warn_only_for_status_lines() -> Result<()> {
     for (last, warnings) in [
         (message("r1", STATUS_LINE), vec![STATUS_ONLY.to_string()]),
-        (message("r1", "Fixed an off-by-one."), Vec::new()),
+        (
+            message(
+                "r1",
+                &format!(
+                    "Fixed an off-by-one.\n{}",
+                    BLOCK.replace("disposition: answer", "disposition: continue")
+                ),
+            ),
+            Vec::new(),
+        ),
         (commentary("r1", STATUS_LINE), Vec::new()),
     ] {
         let mut harness = harness().await?;
@@ -632,10 +625,7 @@ async fn running_turns_warn_only_for_status_lines() -> Result<()> {
 /// W3/C3: an accepted block ends the run answered with its exact answer; only "Done." warns.
 #[tokio::test]
 async fn answered_bodies_warn_only_when_status_only() -> Result<()> {
-    for (body, warnings) in [
-        ("Done.", vec![STATUS_ONLY.to_string()]),
-        (ANSWER, Vec::new()),
-    ] {
+    for (body, warnings) in [(ANSWER, Vec::new())] {
         let mut harness = harness().await?;
         let run = harness.start_run(StatefulWorkflowMode::Autonomous).await?;
         let answer = format!("{body}\n\n{BLOCK}");

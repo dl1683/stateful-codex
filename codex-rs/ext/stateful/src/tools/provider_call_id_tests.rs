@@ -93,6 +93,7 @@ async fn fixture() -> Fixture {
             THREAD_ID.to_string(),
             services.clone(),
             /*event_sink*/ None,
+            Default::default(),
         ),
         _state_home: state_home,
         services,

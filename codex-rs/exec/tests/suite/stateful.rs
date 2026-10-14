@@ -316,7 +316,7 @@ async fn exec_autonomous_stateful_follows_continuations_until_completion() -> an
                 responses::ev_response_created("response-1"),
                 responses::ev_assistant_message(
                     "message-1",
-                    "I found useful work and need another turn.",
+                    "I found useful work and need another turn.\n[stateful-outcome]\ndisposition: continue\nopen-issues: none\n[/stateful-outcome]",
                 ),
                 responses::ev_completed("response-1"),
             ]),

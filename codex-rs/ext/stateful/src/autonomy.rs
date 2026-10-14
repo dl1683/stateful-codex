@@ -377,6 +377,7 @@ impl TurnLifecycleContributor for StatefulExtension {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Completed);
             // A turn that ends without a genuine final never reaches finalization.
             self.run_commits.take(input.turn_store.level_id());
+            self.turn_progress.take(input.turn_store.level_id());
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }
@@ -385,6 +386,7 @@ impl TurnLifecycleContributor for StatefulExtension {
         Box::pin(async move {
             finish_turn_attribution(self, input.turn_store, StatefulAttributionStatus::Aborted);
             self.run_commits.take(input.turn_store.level_id());
+            self.turn_progress.take(input.turn_store.level_id());
             self.observe_checkout_at_turn_end(input.thread_store).await;
         })
     }
@@ -395,6 +397,7 @@ impl TurnLifecycleContributor for StatefulExtension {
     ) -> ExtensionFuture<'a, TurnFinalizeOutcome> {
         Box::pin(async move {
             let receipt = self.run_commits.take(input.turn_id);
+            let progress = self.turn_progress.take(input.turn_id);
             let (Some(active_turn), Some(thread), Some(services)) = (
                 input.thread_store.get::<ActiveRunTurn>(),
                 input.thread_store.get::<SelectedThread>(),
@@ -421,6 +424,11 @@ impl TurnLifecycleContributor for StatefulExtension {
                 active_turn.run_id.clone(),
                 &thread.thread_id,
                 &input,
+                if progress.as_ref() == Some(&active_turn.run_id) {
+                    crate::final_reply::ModelProgress::Recorded
+                } else {
+                    crate::final_reply::ModelProgress::Absent
+                },
             )
             .await;
             let Some(reply) = status_only else {
@@ -442,6 +450,7 @@ impl TurnLifecycleContributor for StatefulExtension {
         Box::pin(async move {
             fail_turn_attribution(self, input.turn_id);
             self.run_commits.take(input.turn_id);
+            self.turn_progress.take(input.turn_id);
             if !matches!(input.error_details, CodexErrorDetails::TaskPanicked(_)) {
                 return;
             }

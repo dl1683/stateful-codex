@@ -43,7 +43,7 @@ const PENDING_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_secs(
 pub(super) const MAX_STALLED_COMPLETIONS: u32 = 3;
 /// Appended to an Autonomous run's refused completion: a plain question needs no acceptance
 /// work and ends answered through the outcome block, never blocked.
-pub(super) const PLAIN_ANSWER_HINT: &str = "If the request is a plain question that needs no work, it needs no acceptance work either: do not call stateful_run_update again and do not set blocked for it; give the answer as your final message, ending with the four lines [stateful-outcome], disposition: answer, open-issues: none, [/stateful-outcome], and the run ends answered, not verified";
+pub(super) const PLAIN_ANSWER_HINT: &str = "A plain question needs no acceptance work: give the answer as your final message; the run ends answered, not verified.";
 /// The runtime's bound on a stored run result.
 const MAX_DURABLE_RESULT_BYTES: usize = 32 * 1024;
 /// Bound on the unmet-gate list in one refusal; the exact ledger is a paged read away.
@@ -191,7 +191,7 @@ impl StatefulRunUpdateTool {
             .note_rejected_completion(&current.id)
             .await
             .map_err(respond)?;
-        if stalled >= MAX_STALLED_COMPLETIONS {
+        if stalled >= MAX_STALLED_COMPLETIONS && current.value.mode != WorkflowMode::Autonomous {
             let mut result = format!(
                 "Partial result: completion was refused {stalled} times in a row without acceptance progress, so the host stopped this run as blocked instead of done. Unmet acceptance gates: {gates}"
             );
@@ -219,7 +219,9 @@ impl StatefulRunUpdateTool {
             "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress before the host blocks it as partial). Unmet acceptance gates: {gates}. Settle each gate: repair the work and run its exact checkCommand with the shell tool, accept each omission proposal (dismiss only as covered by a user criterion), give each check its checker files and have the host admit its plan (admit). noCheck settles only optional criteria. Required work never completes unverified: if it cannot be verified or finished, set status blocked with a partial result that names the unmet criteria. Otherwise complete again"
         );
         Ok(AcceptanceDecision::Refused(match current.value.mode {
-            WorkflowMode::Autonomous => format!("{refusal}. {PLAIN_ANSWER_HINT}"),
+            WorkflowMode::Autonomous => format!(
+                "completion refused; the run stays running (refusal {stalled} of {MAX_STALLED_COMPLETIONS} without acceptance progress). Unmet acceptance gates: {gates}. Settle each gate; if it cannot be verified, give your answer as your final message; the run ends partial, listing what is not certified. {PLAIN_ANSWER_HINT}"
+            ),
             WorkflowMode::Collaborative | WorkflowMode::Socratic => refusal,
         }))
     }
@@ -245,21 +247,32 @@ pub(super) async fn declared_open_issues(
     final_obligation: Option<&ObligationPacket>,
     runtime: &StatefulRunStore,
     run: &StatefulRun,
-) -> Result<(Vec<String>, Option<u64>), FunctionCallError> {
+) -> Result<(Vec<String>, Vec<String>, Option<u64>), FunctionCallError> {
     let Some(declared) = open_issues else {
         return Err(FunctionCallError::RespondToModel(
-            "completed requires openIssues: list every unresolved doubt, known discrepancy, failing check or open blocker that affects the result, or pass [] when there is none. Any entry ends the run blocked with a partial result instead of completed".to_string(),
+            "completed requires openIssues: list every unresolved doubt, known discrepancy, failing check or open blocker that affects the result, or pass [] when there is none. An Autonomous final answer ends partial while issues remain; other modes end blocked with a partial result instead of completed".to_string(),
         ));
     };
     validate_open_issues(declared)?;
     let latest = runtime.latest_obligation(&run.id).await.map_err(respond)?;
     let sequence = latest.as_ref().map(|obligation| obligation.sequence);
-    let blockers = match final_obligation {
+    let retained: Vec<String> = latest
+        .iter()
+        .flat_map(|row| &row.value.packet.blockers)
+        .filter(|blocker| blocker.starts_with(codex_stateful_runtime::RETAINED_ISSUE_PREFIX))
+        .cloned()
+        .collect();
+    let mut blockers = match final_obligation {
         Some(packet) => packet.blockers.clone(),
         None => latest
             .map(|obligation| obligation.value.packet.blockers)
             .unwrap_or_default(),
     };
+    for issue in &retained {
+        if !blockers.contains(issue) {
+            blockers.push(issue.clone());
+        }
+    }
     Ok((
         declared
             .iter()
@@ -270,6 +283,7 @@ pub(super) async fn declared_open_issues(
                     .map(|blocker| format!("Recorded blocker: {blocker}")),
             )
             .collect(),
+        retained,
         sequence,
     ))
 }

@@ -77,6 +77,7 @@ async fn changed_promoted_source_is_reaudited_during_the_same_model_turn() {
         visible_root: Default::default(),
         run_activity: Default::default(),
         run_commits: Default::default(),
+        turn_progress: Default::default(),
     };
     let project = StoredProject {
         id: "project-1".to_string(),

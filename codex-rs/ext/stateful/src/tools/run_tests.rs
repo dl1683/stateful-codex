@@ -320,9 +320,7 @@ async fn an_autonomous_refusal_points_a_plain_question_at_the_answered_outcome()
     assert_eq!(
         refusals,
         vec![
-            format!(
-                "{refusal}. If the request is a plain question that needs no work, it needs no acceptance work either: do not call stateful_run_update again and do not set blocked for it; give the answer as your final message, ending with the four lines [stateful-outcome], disposition: answer, open-issues: none, [/stateful-outcome], and the run ends answered, not verified"
-            ),
+            "completion refused; the run stays running (refusal 1 of 3 without acceptance progress). Unmet acceptance gates: C1 (What is the capital of France?): omission proposal awaiting review: accept it as a criterion, or dismiss it only as coveredBy a user criterion. Settle each gate; if it cannot be verified, give your answer as your final message; the run ends partial, listing what is not certified. A plain question needs no acceptance work: give the answer as your final message; the run ends answered, not verified.".to_string(),
             refusal.to_string(),
         ]
     );

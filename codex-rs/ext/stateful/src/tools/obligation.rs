@@ -6,8 +6,9 @@ use codex_extension_api::ToolExposure;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
-use codex_stateful_runtime::NewObligation;
+use codex_stateful_runtime::ObligationOperation;
 use codex_stateful_runtime::ObligationPacket;
+use codex_stateful_runtime::OperationReceiptKey;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -19,7 +20,6 @@ use super::bounded_json_output;
 use super::parse_arguments;
 use super::provenance_source_id;
 use super::respond;
-use super::stable_id;
 use super::thread_run;
 
 /// Minimal valid call shown with every argument decoding rejection.
@@ -32,6 +32,8 @@ const TOOL_NAME: &str = "obligation_update";
 struct Arguments {
     idempotency_key: String,
     packet: ObligationPacket,
+    #[serde(default)]
+    resolved_issues: Vec<String>,
 }
 
 pub(super) struct ObligationUpdateTool {
@@ -39,6 +41,7 @@ pub(super) struct ObligationUpdateTool {
     thread_id: String,
     services: ProjectIntelligenceServices,
     event_sink: Option<Arc<dyn StatefulEventSink>>,
+    turn_progress: crate::turn_progress::TurnProgress,
 }
 
 impl ObligationUpdateTool {
@@ -47,12 +50,14 @@ impl ObligationUpdateTool {
         thread_id: String,
         services: ProjectIntelligenceServices,
         event_sink: Option<Arc<dyn StatefulEventSink>>,
+        turn_progress: crate::turn_progress::TurnProgress,
     ) -> Self {
         Self {
             project_id,
             thread_id,
             services,
             event_sink,
+            turn_progress,
         }
     }
 
@@ -65,7 +70,7 @@ impl ObligationUpdateTool {
         let has_forward_work = !arguments.packet.next.is_empty()
             || !arguments.packet.blockers.is_empty()
             || !arguments.packet.requested_judgment.is_empty();
-        if !has_forward_work {
+        if !has_forward_work && arguments.resolved_issues.is_empty() {
             return Err(FunctionCallError::RespondToModel(
                 "intermediate obligation_update requires substantive remaining next work, a blocker, or requested user judgment; answer drafting, formatting, and terminal persistence are not substantive next work. If the packet is final, pass it as stateful_run_update.finalObligation instead."
                     .to_string(),
@@ -79,7 +84,7 @@ impl ObligationUpdateTool {
             || !arguments.packet.uncertainty.is_empty()
             || !arguments.packet.blockers.is_empty()
             || !arguments.packet.requested_judgment.is_empty();
-        if !has_semantic_change {
+        if !has_semantic_change && arguments.resolved_issues.is_empty() {
             return Err(FunctionCallError::RespondToModel(
                 "intermediate obligation_update requires meaningful learning, implications, strategy change, uncertainty, a blocker, or requested user judgment in addition to future work; a next-only plan is not a semantic progress update. If the evidence is already reviewed and only synthesis or the final answer remains, pass the packet as stateful_run_update.finalObligation instead."
                     .to_string(),
@@ -91,27 +96,25 @@ impl ObligationUpdateTool {
                 "cannot update obligations for a terminal run".to_string(),
             ));
         }
-        let store = self.services.runtime().await.map_err(respond)?;
-        let id = stable_id("obligation", &self.project_id, &arguments.idempotency_key);
-        let mut value = NewObligation {
-            project_id: self.project_id.clone(),
-            run_id: run.id,
-            packet: arguments.packet,
-            provenance_source_id: source_id,
-        };
-        let obligation = match store.append_obligation(id.clone(), value.clone()).await {
-            Err(
-                error
-                @ codex_stateful_runtime::StatefulRunStoreError::ObligationIdentityConflict(_),
-            ) => {
-                value.provenance_source_id = call.call_id.clone();
-                if value.validate().is_err() {
-                    return Err(respond(error));
-                }
-                store.append_obligation(id, value).await.map_err(respond)?
-            }
-            result => result.map_err(respond)?,
-        };
+        let model_next = !arguments.packet.next.is_empty();
+        let obligation = self
+            .services
+            .runtime()
+            .await
+            .map_err(respond)?
+            .apply_obligation_operation(
+                &run.id,
+                ObligationOperation::Update {
+                    packet: Box::new(arguments.packet),
+                    resolved_issues: arguments.resolved_issues,
+                },
+                &OperationReceiptKey::parse(arguments.idempotency_key).map_err(respond)?,
+                &source_id,
+            )
+            .await
+            .map_err(|error| {
+                super::bound_read_error(respond(error), call.response_byte_budget(900))
+            })?;
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::ObligationUpdated {
                 project_id: obligation.value.project_id.clone(),
@@ -120,7 +123,7 @@ impl ObligationUpdateTool {
                 revision: obligation.revision,
             });
         }
-        bounded_json_output(
+        let output = bounded_json_output(
             &call,
             json!({
                 "obligationId": obligation.id,
@@ -128,7 +131,11 @@ impl ObligationUpdateTool {
                 "revision": obligation.revision,
                 "recorded": true,
             }),
-        )
+        )?;
+        if model_next {
+            self.turn_progress.record(&call.turn_id, &run.id);
+        }
+        Ok(output)
     }
 }
 
@@ -152,7 +159,8 @@ impl<'call> ToolExecutor<ToolCall<'call>> for ObligationUpdateTool {
                 "type": "object",
                 "properties": {
                     "idempotencyKey": {"type": "string"},
-                    "packet": obligation_packet_schema()
+                    "packet": obligation_packet_schema(),
+                    "resolvedIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "Only this field resolves host-retained issues; name their raw or prefixed text."}
                 },
                 "required": ["idempotencyKey", "packet"],
                 "additionalProperties": false

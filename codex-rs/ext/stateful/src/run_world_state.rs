@@ -44,6 +44,7 @@ const COLLABORATIVE_COMPLETION: &str = "This Collaborative run stays open across
 /// Autonomous and Socratic completion, hashed with the packet so a wording change reaches
 /// runs whose earlier packet is retained in history.
 const RUN_COMPLETION: &str = "Completion, the final Stateful mutation, is one stateful_run_update with expectedRevision, status completed and openIssues (any entry or recorded blocker ends the run blocked), plus exactly completionDisposition noReusableLearning and result if the run learned nothing reusable, otherwise, after recording the reusable findings and all other warranted durable writes, durableLearning with completionIdempotencyKey, finalObligation, result, rootRevision and materialRootFindings.";
+const AUTONOMOUS_COMPLETION: &str = "Use completed only for declared acceptance criteria, as the final Stateful mutation with the fields in stateful_run_update. Open issues or blockers end your final answer partial; resolve retained issues with obligation_update resolvedIssues.";
 const TRUNCATION_MARKER: &str = "\n[Stateful run state truncated; call stateful_run_read (goal or obligation) or steering_query before relying on omitted detail.]";
 
 pub(super) enum RunWorldStateStatus {
@@ -83,6 +84,7 @@ impl RunWorldStateStatus {
         // A changed mode policy must reach runs whose earlier packet is retained in history.
         hash(&mut hasher, COLLABORATIVE_COMPLETION);
         hash(&mut hasher, RUN_COMPLETION);
+        hash(&mut hasher, AUTONOMOUS_COMPLETION);
         hash(&mut hasher, DELIVERABLE_RULE);
         hash(&mut hasher, self.project_id());
         match self {
@@ -223,7 +225,12 @@ impl RunWorldStateStatus {
                     WorkflowMode::Autonomous | WorkflowMode::Socratic => line(
                         &mut output,
                         &format!(
-                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} {RUN_COMPLETION}"
+                            "Semantic progress: while work remains, call obligation_update only when learning, strategy, uncertainty, blockers, or next work materially change; explain meaning, not activity. {REUSABLE_LEARNING_RULE} {WRITE_TOOLS_ARE_DIRECT} {}",
+                            match run.value.mode {
+                                WorkflowMode::Autonomous => AUTONOMOUS_COMPLETION,
+                                WorkflowMode::Socratic => RUN_COMPLETION,
+                                WorkflowMode::Collaborative => unreachable!("handled above"),
+                            }
                         ),
                     ),
                 }

@@ -186,6 +186,7 @@ async fn an_aborted_finalizer_leaves_the_run_its_warning() {
         visible_root: Default::default(),
         run_activity: Default::default(),
         run_commits: Default::default(),
+        turn_progress: Default::default(),
     };
     let (session_store, thread_store) = (ExtensionData::new("s"), ExtensionData::new("thread-1"));
     thread_store.insert(crate::SelectedThread::new("thread-1"));

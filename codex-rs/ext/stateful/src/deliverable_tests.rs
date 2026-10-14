@@ -149,10 +149,12 @@ async fn receipts_end_with_their_turn_and_bind_to_their_run() {
         visible_root: Default::default(),
         run_activity: Default::default(),
         run_commits: Default::default(),
+        turn_progress: Default::default(),
     };
     let commits = &extension.run_commits;
     for turn in ["stop", "abort", "error", "kept", "other"] {
         commits.record(turn, &run);
+        extension.turn_progress.record(turn, &run.id);
     }
     commits.record("kept", &later);
     let (session, thread) = (ExtensionData::new("session"), ExtensionData::new("thread"));
@@ -187,6 +189,10 @@ async fn receipts_end_with_their_turn_and_bind_to_their_run() {
     );
     let revision = |turn: &str| commits.take(turn).map(|receipt| receipt.revision);
     let ended = ["stop", "abort", "error", "kept"].map(revision);
+    assert_eq!(
+        ["stop", "abort", "error", "kept"].map(|turn| extension.turn_progress.take(turn)),
+        [None, None, None, Some(run.id.clone())]
+    );
     for turn in 0..=64 {
         commits.record(&format!("turn-{turn}"), &run);
     }

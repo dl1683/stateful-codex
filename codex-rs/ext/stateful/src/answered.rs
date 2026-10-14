@@ -1,16 +1,10 @@
 //! "Answered, unverified": an Autonomous run that ends with the agent's final answer.
 //!
-//! When a turn bound to a running Autonomous run ends with a final answer whose last lines are
-//! the outcome block below, the run ends as Answered: a truthful label for "the agent
-//! answered; the host verified nothing". It is neither Completed nor Blocked, satisfies no
-//! acceptance criterion, and asserts nothing about what the turn did, so it needs no
-//! observation of tools, hooks or other work. A run that did work and then answers is
-//! labelled the same way: its work stays unverified.
-//!
-//! Only a genuine final answer qualifies: the block must end the turn's final assistant
-//! message, that message must not be commentary, and real answer text must precede the block.
-//! The run's terminal write happens inside the answering task through the host's commit
-//! gate; see the runtime's `end_run_answered`.
+//! A genuine substantive final of a running Autonomous run ends Answered or Partial through
+//! the host's commit gate. Neither outcome certifies work or satisfies acceptance criteria.
+//! The shared classification keeps status-only replies, explicit continuation and this
+//! turn's model-recorded next work on their ordinary route; a valid answer trailer overrides
+//! the progress guard. The runtime collects open and not-certified items transactionally.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -31,18 +25,16 @@ use codex_stateful_runtime::StatefulRunStoreError;
 use codex_stateful_runtime::partial_result_items;
 
 use crate::StatefulEventSink;
+use crate::final_reply::FinalReply;
+use crate::final_reply::ModelProgress;
 
-const OUTCOME_START: &str = "[stateful-outcome]";
-const OUTCOME_END: &str = "[/stateful-outcome]";
-const MAX_OUTCOME_BLOCK_BYTES: usize = 4 * 1024;
-const MAX_OPEN_ISSUES: usize = 16;
 /// Cap of the partial-outcome disclosure (the status-only diagnostic's cap).
 const MAX_DISCLOSURE_BYTES: usize = 1_200;
 const PARTIAL_DISCLOSURE: &str = "Stateful: this run ended partial; it is not certified by this terminal answer path. Open or not certified: ";
 const UNREAD_ENDING: &str = "The Stateful run ended with this answer; how it ended could not be re-read. Read the run before relying on it.";
 
 /// Model guidance for the outcome block, part of the Autonomous mode obligation.
-pub(crate) const ANSWER_OUTCOME_GUIDANCE: &str = "A complete answer needing no further work may instead end the final message with four lines: [stateful-outcome], disposition: answer, open-issues: none, [/stateful-outcome]; the run then ends answered, not verified.";
+pub(crate) const ANSWER_OUTCOME_GUIDANCE: &str = "Your final message ends the run as answered, not verified. While work remains, keep working, or record next work with obligation_update; end with [stateful-outcome]/disposition: continue/open-issues: none/[/stateful-outcome] to be continued. List unfinished items under open-issues and the run ends partial. Resolve a retained issue only with obligation_update resolvedIssues.";
 
 /// The last assistant message the turn completed, as the host emitted it.
 #[derive(Debug, PartialEq, Eq)]
@@ -66,86 +58,6 @@ impl LastAgentMessage {
     }
 }
 
-/// The readiness the model declared at the end of its final message.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Readiness<'a> {
-    /// `disposition: answer` with `open-issues: none`, after this answer text.
-    Answered(&'a str),
-    /// Anything else: a missing or malformed block, `continue`, `blocked`, open issues, text
-    /// after the block, or no answer before it.
-    NotAnswered(&'static str),
-}
-
-/// Parses the outcome block that must end `message`.
-pub(crate) fn readiness(message: &str) -> Readiness<'_> {
-    use Readiness::NotAnswered;
-    let body = message.trim_end();
-    let Some(start) = body.rfind(OUTCOME_START) else {
-        return NotAnswered("the final message has no outcome block");
-    };
-    let answer = &body[..start];
-    if answer.contains(OUTCOME_START) {
-        return NotAnswered("the final message has more than one outcome block");
-    }
-    if answer.trim().is_empty() {
-        return NotAnswered("no answer precedes the outcome block");
-    }
-    if !answer.ends_with('\n') {
-        return NotAnswered("the outcome block does not start on its own line");
-    }
-    let block = &body[start..];
-    if block.len() > MAX_OUTCOME_BLOCK_BYTES {
-        return NotAnswered("the outcome block is too long");
-    }
-    let mut lines = block.lines().map(str::trim_end);
-    let (Some(OUTCOME_START), Some(disposition)) = (lines.next(), lines.next()) else {
-        return NotAnswered("the outcome block is malformed");
-    };
-    let Some(disposition) = disposition.strip_prefix("disposition: ") else {
-        return NotAnswered("the outcome block has no disposition line");
-    };
-    let mut issues = 0;
-    let mut closed = false;
-    match lines.next() {
-        Some("open-issues: none") => {}
-        Some("open-issues:") => {
-            for line in lines.by_ref() {
-                if line == OUTCOME_END {
-                    closed = true;
-                    break;
-                }
-                if line
-                    .strip_prefix("- ")
-                    .is_none_or(|issue| issue.trim().is_empty())
-                {
-                    return NotAnswered("an open issue line is malformed");
-                }
-                issues += 1;
-                if issues > MAX_OPEN_ISSUES {
-                    return NotAnswered("the outcome block lists too many open issues");
-                }
-            }
-            if issues == 0 {
-                return NotAnswered("open-issues lists no issue");
-            }
-        }
-        _ => return NotAnswered("the outcome block has no open-issues line"),
-    }
-    if !closed && lines.next() != Some(OUTCOME_END) {
-        return NotAnswered("the outcome block is not closed");
-    }
-    if lines.next().is_some() {
-        return NotAnswered("text follows the outcome block");
-    }
-    match (disposition, issues) {
-        ("answer", 0) => Readiness::Answered(answer.trim()),
-        ("answer", _) => NotAnswered("the answer declares open issues"),
-        ("continue", _) => NotAnswered("the model declared that work continues"),
-        ("blocked", _) => NotAnswered("the model declared that it is blocked"),
-        _ => NotAnswered("the outcome block has an unknown disposition"),
-    }
-}
-
 /// Whether the finalized message is the turn's last assistant message and not commentary.
 pub(crate) fn genuine_final(input: &TurnFinalizeInput<'_>) -> bool {
     input
@@ -162,16 +74,18 @@ pub(crate) async fn finalize(
     run_id: StatefulRunId,
     thread_id: &str,
     input: &TurnFinalizeInput<'_>,
+    progress: ModelProgress,
 ) -> TurnFinalizeOutcome {
     if !genuine_final(input) {
         return TurnFinalizeOutcome::NotHandled;
     }
-    let result = match readiness(input.last_agent_message) {
-        Readiness::Answered(result) => result,
-        Readiness::NotAnswered(reason) => {
+    let (result, issues) = match crate::final_reply::classify(input.last_agent_message, progress) {
+        FinalReply::Deliver { body, issues } => (body, issues),
+        FinalReply::KeepRunning(reason) => {
             tracing::debug!(turn_id = input.turn_id, reason, "the run keeps its route");
             return TurnFinalizeOutcome::NotHandled;
         }
+        FinalReply::StatusOnly(_) => return TurnFinalizeOutcome::NotHandled,
     };
     let commit = AnsweredRunCommit {
         run_id,
@@ -179,7 +93,7 @@ pub(crate) async fn finalize(
         turn_id: input.turn_id.to_string(),
         answer: input.last_agent_message.to_string(),
         result: result.to_string(),
-        trailer_issues: Vec::new(),
+        trailer_issues: issues,
     };
     let authorized = AtomicBool::new(false);
     let authorize = || {
@@ -238,13 +152,7 @@ pub(crate) async fn resolve(
                 crate::autonomy::emit_run_updated(event_sink, &run);
                 outcome_disclosure(&run, &record)
             }
-            // The record alone establishes an answered ending; a partial one needs its items.
-            Ok(None) | Err(_) => match record.outcome() {
-                HostAnswerOutcome::Answered => TurnFinalizeOutcome::Recorded,
-                HostAnswerOutcome::Partial => {
-                    TurnFinalizeOutcome::Warning(UNREAD_ENDING.to_string())
-                }
-            },
+            Ok(None) | Err(_) => TurnFinalizeOutcome::Warning(UNREAD_ENDING.to_string()),
         },
         Err(message) => TurnFinalizeOutcome::Warning(message),
     }

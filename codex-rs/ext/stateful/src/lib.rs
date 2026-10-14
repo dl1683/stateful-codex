@@ -191,6 +191,7 @@ struct StatefulExtension {
     visible_root: visible_root::VisibleRootRegistry,
     run_activity: checkpoint::RunActivityRegistry,
     run_commits: deliverable::TurnRunCommits,
+    turn_progress: turn_progress::TurnProgress,
 }
 
 impl ContextContributor for StatefulExtension {
@@ -658,6 +659,7 @@ impl ToolContributor for StatefulExtension {
             self.event_sink.clone(),
             self.visible_root.clone(),
             self.run_commits.clone(),
+            self.turn_progress.clone(),
             run_tools,
         )
     }
@@ -680,6 +682,7 @@ pub fn install<C: Sync>(
         visible_root: visible_root::VisibleRootRegistry::default(),
         run_activity: checkpoint::RunActivityRegistry::default(),
         run_commits: deliverable::TurnRunCommits::default(),
+        turn_progress: turn_progress::TurnProgress::default(),
     });
     registry.prompt_contributor(extension.clone());
     registry.tool_contributor(extension.clone());

@@ -15,7 +15,7 @@ use codex_stateful_runtime::StatefulRunId;
 use codex_stateful_runtime::StatefulRunStatus;
 use codex_stateful_runtime::StatefulRunStore;
 
-use crate::answered::Readiness;
+use crate::final_reply::FinalReply;
 use crate::run_world_state::status_name;
 
 /// Caps: the warning, its quoted status line, an existing warning; receipts kept (oldest out).
@@ -140,11 +140,10 @@ pub(crate) fn status_only_reply<'a>(input: &TurnFinalizeInput<'a>) -> Option<&'a
     if !crate::answered::genuine_final(input) {
         return None;
     }
-    let text = match crate::answered::readiness(input.last_agent_message) {
-        Readiness::Answered(body) => body,
-        Readiness::NotAnswered(_) => input.last_agent_message.trim(),
-    };
-    is_status_only(text).then_some(text)
+    match crate::final_reply::final_reply(input.last_agent_message) {
+        FinalReply::StatusOnly(body) => Some(body),
+        FinalReply::Deliver { .. } | FinalReply::KeepRunning(_) => None,
+    }
 }
 
 /// At finalize: no receipt for the bound run, the run still at the receipt's revision and

@@ -56,7 +56,7 @@ struct Arguments {
     completion_idempotency_key: Option<String>,
     final_obligation: Option<ObligationPacket>,
     /// Required with `completed`: every unresolved doubt, known discrepancy, failing check or
-    /// open blocker the agent knows of; any entry ends the run blocked, not completed.
+    /// open blocker the agent knows of; Autonomous retains them for a Partial final answer.
     open_issues: Option<Vec<String>>,
     #[serde(default)]
     completion_disposition: CompletionDisposition,
@@ -165,7 +165,7 @@ impl StatefulRunUpdateTool {
         let runtime = self.services.runtime().await.map_err(respond)?;
         let mut validated_obligation_sequence = None;
         if status == StatefulRunStatus::Completed {
-            let (open_issues, sequence) = run_acceptance::declared_open_issues(
+            let (display, retained, sequence) = run_acceptance::declared_open_issues(
                 open_issues.as_deref(),
                 final_obligation.as_ref(),
                 runtime,
@@ -173,14 +173,28 @@ impl StatefulRunUpdateTool {
             )
             .await?;
             validated_obligation_sequence = sequence;
-            if !open_issues.is_empty() {
+            if current.value.mode == codex_stateful_runtime::WorkflowMode::Autonomous
+                && let Some(output) = self
+                    .autonomous_completion_redirect(
+                        &call,
+                        &current,
+                        expected_revision,
+                        open_issues.as_deref().unwrap_or_default(),
+                        &display,
+                        &retained,
+                    )
+                    .await?
+            {
+                return Ok(output);
+            }
+            if !display.is_empty() {
                 let run = self
                     .block_with_open_issues(
                         &current,
                         expected_revision,
                         result.as_deref(),
                         current.strategy.as_deref(),
-                        &open_issues,
+                        &display,
                     )
                     .await?;
                 return self.blocked_output(
@@ -563,7 +577,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
                     "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."},
-                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed or blocked: open doubts, discrepancies, failing checks, blockers ([] if none); any entry blocks the run."}
+                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed or blocked: unresolved issues ([] if none); Autonomous completed retains them for a partial final answer; other modes and explicit blocked stop the run."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false
@@ -615,6 +629,9 @@ mod guard;
 
 #[path = "run_acceptance.rs"]
 mod run_acceptance;
+
+#[path = "run_redirect.rs"]
+mod run_redirect;
 
 #[cfg(test)]
 #[path = "run_tests.rs"]
