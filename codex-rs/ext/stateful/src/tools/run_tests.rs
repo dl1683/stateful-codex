@@ -445,3 +445,380 @@ async fn explicit_blockers_enforce_bounds_and_allowed_statuses() {
     }
     assert_eq!(retrieved, stored);
 }
+
+#[derive(Default)]
+struct EventCount(std::sync::atomic::AtomicUsize);
+
+impl crate::StatefulEventSink for EventCount {
+    fn emit(&self, _event: crate::StatefulEvent) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+async fn redirect(f: &Fixture, arguments: &Value) -> Value {
+    let output = f
+        .tool
+        .handle_guided(call(arguments))
+        .await
+        .expect("redirect");
+    let output: Value = serde_json::from_str(&output.log_output()).unwrap();
+    assert_eq!(output["status"], json!("running"));
+    assert_eq!(stored_run(f).await, f.run);
+    output
+}
+
+async fn obligations(f: &Fixture) -> Vec<codex_stateful_runtime::StatefulObligation> {
+    f.services
+        .runtime()
+        .await
+        .unwrap()
+        .list_obligations(
+            &f.run.id, /*after_sequence*/ None, /*max_results*/ 100,
+        )
+        .await
+        .unwrap()
+}
+
+async fn finish(f: &Fixture) -> codex_stateful_runtime::HostAnswerRecord {
+    let outcome = f
+        .services
+        .runtime()
+        .await
+        .unwrap()
+        .end_run_answered(
+            &codex_stateful_runtime::AnsweredRunCommit {
+                run_id: f.run.id.clone(),
+                thread_id: THREAD_ID.into(),
+                turn_id: "final-turn".into(),
+                answer: RESULT.into(),
+                result: RESULT.into(),
+                trailer_issues: vec![],
+            },
+            &|| true,
+        )
+        .await
+        .unwrap();
+    let codex_stateful_runtime::AnsweredRunOutcome::Answered(run, record) = outcome else {
+        panic!("eligible final must end answered");
+    };
+    assert_eq!(run.status, StatefulRunStatus::Answered);
+    *record
+}
+
+#[tokio::test]
+async fn omitted_issues_clean_final() {
+    let f = fixture_for("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let mut args = lookup_completion(f.run.revision);
+    args.as_object_mut().unwrap().remove("openIssues");
+    redirect(&f, &args).await;
+    assert_eq!(obligations(&f).await, vec![]);
+    let record = finish(&f).await;
+    assert_eq!(
+        record.outcome(),
+        codex_stateful_runtime::HostAnswerOutcome::Answered
+    );
+    assert_eq!(
+        record.basis,
+        codex_stateful_runtime::ANSWERED_UNVERIFIED_BASIS
+    );
+}
+
+#[tokio::test]
+async fn empty_redirect_retry_equivalence() {
+    let mut f = fixture_for("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let events = Arc::new(EventCount::default());
+    f.tool.event_sink = Some(events.clone());
+    let runtime = f.services.runtime().await.unwrap();
+    runtime
+        .append_obligation(
+            "latest".into(),
+            codex_stateful_runtime::NewObligation {
+                project_id: PROJECT_ID.into(),
+                run_id: f.run.id.clone(),
+                packet: codex_stateful_runtime::ObligationPacket {
+                    blockers: vec!["host blocker".into()],
+                    ..Default::default()
+                },
+                provenance_source_id: "host".into(),
+            },
+        )
+        .await
+        .unwrap();
+    runtime.note_rejected_completion(&f.run.id).await.unwrap();
+    let ledger = runtime.acceptance_ledger(&f.run.id).await.unwrap();
+    let rows = obligations(&f).await;
+    // All six orders exercise the same identity without claiming a receipt.
+    for order in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        for variant in order {
+            let mut args = lookup_completion(f.run.revision);
+            if variant == 0 {
+                args.as_object_mut().unwrap().remove("openIssues");
+            }
+            if variant == 1 {
+                args["openIssues"] = Value::Null;
+            }
+            if variant == 2 {
+                args["finalObligation"] = json!({"blockers": []});
+            }
+            redirect(&f, &args).await;
+            assert_eq!(obligations(&f).await, rows);
+            assert_eq!(runtime.acceptance_ledger(&f.run.id).await.unwrap(), ledger);
+        }
+    }
+    assert_eq!(events.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let record = finish(&f).await;
+    assert_eq!(
+        record.outcome(),
+        codex_stateful_runtime::HostAnswerOutcome::Partial
+    );
+    assert!(
+        stored_run(&f)
+            .await
+            .result
+            .unwrap()
+            .contains("host blocker")
+    );
+}
+
+#[tokio::test]
+async fn nonempty_after_empty_identity() {
+    let mut f = fixture_for("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let events = Arc::new(EventCount::default());
+    f.tool.event_sink = Some(events.clone());
+    let mut args = lookup_completion(f.run.revision);
+    args.as_object_mut().unwrap().remove("openIssues");
+    redirect(&f, &args).await;
+    args["openIssues"] = json!([" x ", "y"]);
+    let first = redirect(&f, &args).await;
+    let rows = obligations(&f).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        first["retainedIssues"],
+        json!(["Open issue (retained): x", "Open issue (retained): y"])
+    );
+    args["openIssues"] = json!(["x", "y"]);
+    args["finalObligation"] = json!({"blockers": []});
+    assert_eq!(redirect(&f, &args).await, first);
+    let ledger = f
+        .services
+        .runtime()
+        .await
+        .unwrap()
+        .acceptance_ledger(&f.run.id)
+        .await
+        .unwrap();
+    for issues in [json!(["changed"]), json!(["y", "x"])] {
+        args["openIssues"] = issues;
+        assert!(f.tool.handle_guided(call(&args)).await.is_err());
+    }
+    args["openIssues"] = json!([]);
+    assert_eq!(redirect(&f, &args).await, first);
+    assert_eq!(obligations(&f).await, rows);
+    assert_eq!(
+        f.services
+            .runtime()
+            .await
+            .unwrap()
+            .acceptance_ledger(&f.run.id)
+            .await
+            .unwrap(),
+        ledger
+    );
+    assert_eq!(events.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn redirect_retry_after_resolution() {
+    let mut f = fixture_for("Answer a lookup.", WorkflowMode::Autonomous).await;
+    let mut args = lookup_completion(f.run.revision);
+    args["openIssues"] = json!(["x"]);
+    redirect(&f, &args).await;
+    let obligation_tool = super::super::obligation::ObligationUpdateTool::new(
+        PROJECT_ID.into(),
+        THREAD_ID.into(),
+        f.services.clone(),
+        /*event_sink*/ None,
+        crate::turn_progress::TurnProgress::default(),
+    );
+    let mut resolution =
+        call(&json!({"idempotencyKey": "resolve-x", "packet": {}, "resolvedIssues": ["x"]}));
+    resolution.tool_name = ToolName::plain("obligation_update");
+    obligation_tool
+        .handle(resolution)
+        .await
+        .expect("resolve through tool");
+    let rows = obligations(&f).await;
+    // Reopen services from the same durable database, then replay the original tool identity.
+    f.services = ProjectIntelligenceServices::new(f.services.sqlite().clone());
+    f.tool.services = f.services.clone();
+    let replay = redirect(&f, &args).await;
+    assert_eq!(replay["retainedIssues"], json!([]));
+    assert_eq!(obligations(&f).await, rows);
+    let record = finish(&f).await;
+    assert_eq!(
+        record.outcome(),
+        codex_stateful_runtime::HostAnswerOutcome::Answered
+    );
+}
+
+#[tokio::test]
+async fn redirect_retry_after_terminal() {
+    for initial in [json!([]), json!(["x"])] {
+        let f = fixture_for("Answer a lookup.", WorkflowMode::Autonomous).await;
+        let mut args = lookup_completion(f.run.revision);
+        args["openIssues"] = initial;
+        redirect(&f, &args).await;
+        let record = finish(&f).await;
+        let terminal = stored_run(&f).await;
+        let rows = obligations(&f).await;
+        let runtime = f.services.runtime().await.unwrap();
+        let ledger = runtime.acceptance_ledger(&f.run.id).await.unwrap();
+        for revision in [f.run.revision, terminal.revision] {
+            args["expectedRevision"] = json!(revision);
+            for issues in [Value::Null, json!([]), json!(["x"]), json!(["new"])] {
+                args["openIssues"] = issues;
+                assert!(f.tool.handle_guided(call(&args)).await.is_err());
+                assert_eq!(stored_run(&f).await, terminal);
+                assert_eq!(obligations(&f).await, rows);
+                assert_eq!(runtime.acceptance_ledger(&f.run.id).await.unwrap(), ledger);
+                assert_eq!(
+                    runtime.host_answer(&f.run.id).await.unwrap(),
+                    Some(record.clone())
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn omission_preserves_blocker_union() {
+    use codex_stateful_runtime::AcceptanceChange;
+    use codex_stateful_runtime::AcceptanceKind;
+    use codex_stateful_runtime::AcceptanceOrigin;
+    use codex_stateful_runtime::CriterionTerms;
+    use codex_stateful_runtime::NewObligation;
+    use codex_stateful_runtime::ObligationOperation;
+    use codex_stateful_runtime::ObligationPacket;
+    use codex_stateful_runtime::OperationReceiptKey;
+    for contract in [false, true] {
+        for declaration in [Value::Null, json!([]), json!({})] {
+            for final_blockers in [vec![], vec!["final".to_string(), "latest".to_string()]] {
+                let mut f = fixture_for("Answer a lookup.", WorkflowMode::Autonomous).await;
+                let runtime = f.services.runtime().await.unwrap();
+                if contract {
+                    runtime
+                        .revise_acceptance(
+                            &f.run.id,
+                            /*expected_revision*/ 0,
+                            vec![AcceptanceChange::Add {
+                                origin: AcceptanceOrigin::Derived,
+                                kind: AcceptanceKind::Manual,
+                                statement: "Lookup answered.".into(),
+                                request_span: None,
+                                terms: CriterionTerms {
+                                    required: true,
+                                    ..Default::default()
+                                },
+                            }],
+                            "contract",
+                            /*project_root*/ None,
+                        )
+                        .await
+                        .unwrap();
+                }
+                runtime
+                    .append_obligation(
+                        "host".into(),
+                        NewObligation {
+                            project_id: PROJECT_ID.into(),
+                            run_id: f.run.id.clone(),
+                            packet: ObligationPacket {
+                                blockers: vec!["latest".into()],
+                                ..Default::default()
+                            },
+                            provenance_source_id: "host".into(),
+                        },
+                    )
+                    .await
+                    .unwrap();
+                runtime
+                    .apply_obligation_operation(
+                        &f.run.id,
+                        ObligationOperation::Retain {
+                            issues: vec!["retained".into()],
+                        },
+                        &OperationReceiptKey::parse("retain").unwrap(),
+                        "host",
+                    )
+                    .await
+                    .unwrap();
+                let packet = ObligationPacket {
+                    blockers: final_blockers.clone(),
+                    ..Default::default()
+                };
+                let (display, retained, sequence) = super::run_acceptance::declared_open_issues(
+                    /*open_issues*/ None,
+                    Some(&packet),
+                    runtime,
+                    &f.run,
+                )
+                .await
+                .unwrap();
+                let mut expected = vec![
+                    "Recorded blocker: latest",
+                    "Recorded blocker: Open issue (retained): retained",
+                ];
+                if !final_blockers.is_empty() {
+                    expected.push("Recorded blocker: final");
+                }
+                assert_eq!(display, expected);
+                assert_eq!(retained, vec!["Open issue (retained): retained"]);
+                assert_eq!(sequence, Some(2));
+                let mut args = lookup_completion(f.run.revision);
+                args.as_object_mut().unwrap().remove("openIssues");
+                if !declaration.is_object() {
+                    args["openIssues"] = declaration.clone();
+                }
+                args["finalObligation"] = json!(packet);
+                redirect(&f, &args).await;
+                let rows = obligations(&f).await;
+                assert!(
+                    !serde_json::to_string(&rows)
+                        .unwrap()
+                        .contains("Recorded blocker:")
+                );
+                let reopened = codex_stateful_runtime::StatefulRunStore::open(f.services.sqlite())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    reopened.latest_obligation(&f.run.id).await.unwrap(),
+                    rows.last().cloned()
+                );
+                f.services = ProjectIntelligenceServices::new(f.services.sqlite().clone());
+                f.tool.services = f.services.clone();
+                let record = finish(&f).await;
+                assert_eq!(
+                    record.outcome(),
+                    codex_stateful_runtime::HostAnswerOutcome::Partial
+                );
+                let result = stored_run(&f).await.result.unwrap();
+                for blocker in ["latest", "retained"]
+                    .into_iter()
+                    .chain(final_blockers.iter().map(String::as_str))
+                {
+                    assert!(result.contains(blocker), "{result}");
+                }
+                args["expectedRevision"] = json!(stored_run(&f).await.revision);
+                assert!(f.tool.handle_guided(call(&args)).await.is_err());
+                assert_eq!(obligations(&f).await, rows);
+            }
+        }
+    }
+}

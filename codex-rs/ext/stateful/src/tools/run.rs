@@ -55,7 +55,7 @@ struct Arguments {
     material_historical_findings: Option<Vec<Value>>,
     completion_idempotency_key: Option<String>,
     final_obligation: Option<ObligationPacket>,
-    /// Required with `completed`: every unresolved doubt, known discrepancy, failing check or
+    /// Optional disclosure with `completed`: every unresolved doubt, discrepancy, failing check or
     /// open blocker the agent knows of; Autonomous retains them for a Partial final answer.
     open_issues: Option<Vec<String>>,
     #[serde(default)]
@@ -568,7 +568,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
         );
         ToolSpec::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: format!("Change the active Stateful run's strategy or status, or complete it. Every completion passes openIssues. noReusableLearning completion (answer from existing knowledge, a narrow citation, or cheap to recompute): exactly expectedRevision, status completed, completionDisposition noReusableLearning, result. durableLearning completion (default), after every other durable write: expectedRevision, status completed, completionIdempotencyKey, finalObligation, result, rootRevision, materialRootFindings (at most {MAX_MATERIAL_ROOT_FINDINGS} E aliases), selecting a finding that preserves any finalObligation.learning. Rejected while steering is unresolved or a revision changed. Cannot begin a pending Socratic run, pause, or cancel."),
+            description: format!("Update strategy/status. completed requests verified Completion: admitted contract and current receipts required. Autonomous: give a substantive final answer; an eligible final ends Answered or Partial. noReusableLearning: expectedRevision, status completed, completionDisposition noReusableLearning, result; only if no project knowledge was written. durableLearning (default): also completionIdempotencyKey, finalObligation, rootRevision, materialRootFindings (up to {MAX_MATERIAL_ROOT_FINDINGS} current E aliases preserving learning). Cannot start pending Socratic, pause or cancel."),
             strict: false,
             defer_loading: None,
             parameters: parse_tool_input_schema(&json!({
@@ -583,7 +583,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
                     "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."},
-                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed or blocked: unresolved issues ([] if none); Autonomous completed ends partial, other cases block the run."}
+                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed/blocked: disclose unresolved issues. Omission adds none; host blockers still apply. Autonomous issues require an eligible Partial final."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false

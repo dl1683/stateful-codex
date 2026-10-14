@@ -238,21 +238,15 @@ impl StatefulRunUpdateTool {
 const MAX_OPEN_ISSUES: usize = 16;
 const MAX_OPEN_ISSUE_BYTES: usize = 1_024;
 
-/// Every agent-admitted open issue for a completion: the declared `openIssues`, plus the
-/// blockers of the final obligation (durable completion) or, without one, of the latest
-/// recorded obligation. Read from structured fields only, never from narrative text; recorded
-/// uncertainty that does not undermine a criterion stays allowed in a completed result.
+/// Deduplicated submitted issues and all latest/final blockers, plus retained identities and
+/// the latest sequence for terminal transaction checking. Omission never resolves an issue.
 pub(super) async fn declared_open_issues(
     open_issues: Option<&[String]>,
     final_obligation: Option<&ObligationPacket>,
     runtime: &StatefulRunStore,
     run: &StatefulRun,
 ) -> Result<(Vec<String>, Vec<String>, Option<u64>), FunctionCallError> {
-    let Some(declared) = open_issues else {
-        return Err(FunctionCallError::RespondToModel(
-            "completed requires openIssues: list every unresolved doubt, known discrepancy, failing check or open blocker that affects the result, or pass [] when there is none. An Autonomous final answer ends partial while issues remain; other modes end blocked with a partial result instead of completed".to_string(),
-        ));
-    };
+    let declared = open_issues.unwrap_or_default();
     validate_open_issues(declared)?;
     let latest = runtime.latest_obligation(&run.id).await.map_err(respond)?;
     let sequence = latest.as_ref().map(|obligation| obligation.sequence);
@@ -262,30 +256,29 @@ pub(super) async fn declared_open_issues(
         .filter(|blocker| blocker.starts_with(codex_stateful_runtime::RETAINED_ISSUE_PREFIX))
         .cloned()
         .collect();
-    let mut blockers = match final_obligation {
-        Some(packet) => packet.blockers.clone(),
-        None => latest
-            .map(|obligation| obligation.value.packet.blockers)
-            .unwrap_or_default(),
-    };
-    for issue in &retained {
-        if !blockers.contains(issue) {
-            blockers.push(issue.clone());
+    let mut identities = Vec::new();
+    let mut display = Vec::new();
+    for (entry, recorded) in declared.iter().map(|entry| (entry, false)).chain(
+        latest
+            .iter()
+            .flat_map(|row| &row.value.packet.blockers)
+            .chain(final_obligation.iter().flat_map(|packet| &packet.blockers))
+            .map(|entry| (entry, true)),
+    ) {
+        let raw = entry.trim();
+        let raw = raw
+            .strip_prefix(codex_stateful_runtime::RETAINED_ISSUE_PREFIX)
+            .unwrap_or(raw);
+        if !identities.contains(&raw) {
+            identities.push(raw);
+            display.push(if recorded {
+                format!("Recorded blocker: {entry}")
+            } else {
+                raw.to_string()
+            });
         }
     }
-    Ok((
-        declared
-            .iter()
-            .map(|issue| issue.trim().to_string())
-            .chain(
-                blockers
-                    .into_iter()
-                    .map(|blocker| format!("Recorded blocker: {blocker}")),
-            )
-            .collect(),
-        retained,
-        sequence,
-    ))
+    Ok((display, retained, sequence))
 }
 
 /// Shared bounds for declared blockers on completed and explicitly blocked updates.

@@ -897,11 +897,8 @@ async fn an_admitted_open_issue_ends_the_run_blocked_not_completed() {
             "result": "The answer is 42.",
         }))
         .await
-        .expect_err("openIssues is required with completed");
-    assert!(
-        missing.contains("completed requires openIssues"),
-        "{missing}"
-    );
+        .expect_err("omission still requires verified acceptance");
+    assert!(missing.contains("completion refused"), "{missing}");
     assert_eq!(
         fixture.stored_run().await.status,
         StatefulRunStatus::Running

@@ -204,6 +204,39 @@ async fn completion_blockers_alone_replay_without_resurrecting_resolved_issues()
     );
     assert_eq!(all_obligations(&store, &run_id).await, before);
     assert_eq!(latest_packet(&store, &run_id).await, resolved.value.packet);
+    let outcome = store
+        .end_run_answered(
+            &crate::AnsweredRunCommit {
+                run_id: run_id.clone(),
+                thread_id: "thread-1".into(),
+                turn_id: "final".into(),
+                answer: "The parser is fixed.".into(),
+                result: "The parser is fixed.".into(),
+                trailer_issues: vec![],
+            },
+            &|| true,
+        )
+        .await
+        .expect("terminal answer");
+    let run = store.get_run(&run_id).await.unwrap();
+    assert_eq!(
+        store
+            .apply_obligation_operation(
+                &run_id,
+                ObligationOperation::RetainCompletion {
+                    issues: Vec::new(),
+                    blockers: strings(&["x"])
+                },
+                &receipt,
+                SOURCE
+            )
+            .await
+            .expect("terminal receipt replay"),
+        original
+    );
+    assert_eq!(all_obligations(&store, &run_id).await, before);
+    assert_eq!(store.get_run(&run_id).await.unwrap(), run);
+    assert!(matches!(outcome, crate::AnsweredRunOutcome::Answered(..)));
 }
 
 /// Empty retention operations refuse atomically; an issue-free redirect skips the operation.

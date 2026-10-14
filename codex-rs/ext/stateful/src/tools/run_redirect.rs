@@ -86,6 +86,11 @@ impl StatefulRunUpdateTool {
         let retained = if issues.is_empty() && final_blockers.is_empty() {
             retained.to_vec()
         } else {
+            let previous_sequence = runtime
+                .latest_obligation(&current.id)
+                .await
+                .map_err(respond)?
+                .map(|row| row.sequence);
             let source = provenance_source_id(call)?;
             let operation = if final_blockers.is_empty() {
                 ObligationOperation::Retain { issues }
@@ -104,7 +109,9 @@ impl StatefulRunUpdateTool {
                 )
                 .await
                 .map_err(respond)?;
-            if let Some(sink) = &self.event_sink {
+            if previous_sequence.is_none_or(|sequence| obligation.sequence > sequence)
+                && let Some(sink) = &self.event_sink
+            {
                 sink.emit(crate::StatefulEvent::ObligationUpdated {
                     project_id: obligation.value.project_id.clone(),
                     run_id: current.id.to_string(),
@@ -112,11 +119,13 @@ impl StatefulRunUpdateTool {
                     revision: obligation.revision,
                 });
             }
-            obligation
-                .value
-                .packet
-                .blockers
+            // A receipt replay returns its historical row. Display only live issues.
+            runtime
+                .latest_obligation(&current.id)
+                .await
+                .map_err(respond)?
                 .into_iter()
+                .flat_map(|row| row.value.packet.blockers)
                 .filter(|issue| issue.starts_with(RETAINED_ISSUE_PREFIX))
                 .collect()
         };
