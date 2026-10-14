@@ -342,16 +342,28 @@ impl StatefulRunUpdateTool {
                 revision: run.revision,
             });
         }
-        bounded_json_output(
-            call,
-            json!({
+        let result = run.result.as_deref().unwrap_or_default();
+        let cursor = super::super::run_read::submitted_result_cursor(run, result);
+        let output = super::super::run_read::read_page(
+            result,
+            /*offset*/ 0,
+            call.response_byte_budget(super::super::MAX_RESPONSE_BYTES),
+            |_| None,
+            |preview, _| json!({
                 "runId": run.id.to_string(),
                 "status": "blocked",
                 "revision": run.revision,
-                "partialResult": run.result,
-                "instruction": instruction,
+                "partialResult": preview,
+                "partialResultTruncated": preview.len() < result.len(),
+                "partialResultCursor": cursor,
+                "instruction": format!("{instruction} The full stored partial result is retrievable with stateful_run_read section \"submittedResult\", cursor partialResultCursor; follow nextCursor until null."),
             }),
-        )
+        ).unwrap_or_else(|| json!({
+            "runId": run.id.to_string(), "status": "blocked", "revision": run.revision,
+            "partialResultCursor": cursor,
+            "instruction": "Read the full stored partial result with stateful_run_read section submittedResult, cursor partialResultCursor; follow nextCursor until null.",
+        }));
+        bounded_json_output(call, output)
     }
 }
 

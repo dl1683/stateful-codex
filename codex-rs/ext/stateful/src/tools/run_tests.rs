@@ -5,6 +5,7 @@ use codex_extension_api::FunctionCallError;
 use codex_extension_api::NoopTurnItemEmitter;
 use codex_extension_api::ToolCall;
 use codex_extension_api::ToolCallSource;
+use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolPayload;
 use codex_state::SqliteConfig;
@@ -413,6 +414,36 @@ async fn explicit_blockers_enforce_bounds_and_allowed_statuses() {
         })))
         .await
         .expect("bounded partial result");
-    assert!(!output.log_output().is_empty());
-    assert!(stored_run(&fixture).await.result.unwrap().len() <= 32 * 1024);
+    let budget = call(&json!({})).response_byte_budget(super::super::MAX_RESPONSE_BYTES);
+    assert!(output.log_output().len() <= budget);
+    let response: Value = serde_json::from_str(&output.log_output()).unwrap();
+    let stored = stored_run(&fixture).await.result.unwrap();
+    assert!(stored.len() <= 32 * 1024);
+    assert_eq!(
+        stored
+            .matches(&format!("\n- {}", "x".repeat(/*n*/ 1024)))
+            .count(),
+        16
+    );
+    let reader = super::super::run_read::StatefulRunReadTool::new(
+        PROJECT_ID.to_string(),
+        THREAD_ID.to_string(),
+        fixture.services.clone(),
+    );
+    let mut cursor = response["partialResultCursor"].clone();
+    let mut retrieved = String::new();
+    loop {
+        let mut read_call = call(&json!({"section": "submittedResult", "cursor": cursor}));
+        read_call.tool_name = ToolName::plain("stateful_run_read");
+        let page = reader.handle(read_call).await.expect("exact result page");
+        assert!(page.log_output().len() <= budget);
+        let page: Value = serde_json::from_str(&page.log_output()).unwrap();
+        assert_eq!(page["offset"], json!(retrieved.len()));
+        retrieved.push_str(page["content"].as_str().unwrap());
+        cursor = page["nextCursor"].clone();
+        if cursor.is_null() {
+            break;
+        }
+    }
+    assert_eq!(retrieved, stored);
 }

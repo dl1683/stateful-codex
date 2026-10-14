@@ -186,13 +186,19 @@ fn acceptance_text(ledger: &AcceptanceLedger) -> Result<SectionText, FunctionCal
     })
 }
 
-/// The first `length` bytes of a completed run's stored result: the result the model
+/// The first `length` bytes of a terminal run's stored result: the result the model
 /// submitted, without any suffix completion appended for durability.
 fn submitted_result_text(run: &StatefulRun, length: usize) -> Option<SectionText> {
-    if run.status != StatefulRunStatus::Completed {
+    if !matches!(
+        run.status,
+        StatefulRunStatus::Completed | StatefulRunStatus::Blocked
+    ) {
         return None;
     }
     let stored = run.result.as_deref()?;
+    if run.status == StatefulRunStatus::Blocked && length != stored.len() {
+        return None;
+    }
     Some(SectionText {
         identity: format!("submittedResult@{}", run.revision),
         text: stored.get(..length)?.to_string(),
