@@ -128,7 +128,6 @@ struct StoredHostAnswer {
 }
 
 /// The published shape of an answer record; the size bound is measured on its encoding.
-/// `outcome` is absent from the shape published today and present once it is on the wire.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PublishedAnswer<'a> {
@@ -136,37 +135,19 @@ struct PublishedAnswer<'a> {
     answer: &'a str,
     basis: &'a str,
     committed_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    outcome: Option<HostAnswerOutcome>,
+    outcome: HostAnswerOutcome,
 }
 
 /// The bytes the answer record of `answer` takes once serialized with `outcome` and its basis,
 /// escapes and envelope included (with the widest possible timestamp), in the shape that
 /// publishes the outcome.
 pub fn serialized_answer_bytes(turn_id: &str, answer: &str, outcome: HostAnswerOutcome) -> usize {
-    published_bytes(turn_id, answer, outcome, Some(outcome))
-}
-
-/// The bytes the live admission bound measures: today's published shape, without the outcome
-/// field, with the selected basis. For an answered record this is exactly the size measured
-/// before the outcome existed; the activation step moves admission to
-/// [`serialized_answer_bytes`].
-fn admitted_answer_bytes(turn_id: &str, answer: &str, outcome: HostAnswerOutcome) -> usize {
-    published_bytes(turn_id, answer, outcome, /*published_outcome*/ None)
-}
-
-fn published_bytes(
-    turn_id: &str,
-    answer: &str,
-    outcome: HostAnswerOutcome,
-    published_outcome: Option<HostAnswerOutcome>,
-) -> usize {
     serde_json::to_vec(&PublishedAnswer {
         turn_id,
         answer,
         basis: outcome.basis(),
         committed_at: i64::MIN,
-        outcome: published_outcome,
+        outcome,
     })
     .map_or(usize::MAX, |encoded| encoded.len())
 }
@@ -223,16 +204,21 @@ impl StatefulRunStore {
                 "steering for this run is still waiting to be applied".to_string(),
             ));
         }
-        let (outcome, result) = if commit.trailer_issues.is_empty() {
+        let mut items = commit.trailer_issues.clone();
+        items.extend(unverified_items(&mut transaction, &commit.run_id).await?);
+        let (outcome, result) = if items.is_empty() {
             (HostAnswerOutcome::Answered, commit.result.clone())
         } else {
-            let Some(result) = compose_partial(&commit.trailer_issues, &commit.result) else {
+            let Some(result) = compose_partial(&items, &commit.result) else {
                 return Ok(AnsweredRunOutcome::Refused(format!(
                     "the answer and its list of open or not-certified items do not fit the {MAX_RESULT_BYTES}-byte result limit"
                 )));
             };
             (HostAnswerOutcome::Partial, result)
         };
+        if let Some(reason) = answer_violation(commit, outcome) {
+            return Ok(AnsweredRunOutcome::Refused(reason));
+        }
         let now = unix_timestamp_millis()?;
         sqlx::query(
             "INSERT INTO stateful_host_answers (
@@ -302,7 +288,7 @@ fn answer_violation(commit: &AnsweredRunCommit, outcome: HostAnswerOutcome) -> O
     {
         return Some("the answer is empty or malformed".to_string());
     }
-    let bytes = admitted_answer_bytes(&commit.turn_id, &commit.answer, outcome);
+    let bytes = serialized_answer_bytes(&commit.turn_id, &commit.answer, outcome);
     (bytes > MAX_RESULT_BYTES).then(|| {
         format!(
             "the answer takes {bytes} bytes once recorded, over the {MAX_RESULT_BYTES}-byte limit"
@@ -388,8 +374,6 @@ pub fn partial_result_items(result: &str) -> Option<PartialResultItems> {
 /// The items a terminal answer leaves open or not certified, read on the transaction's
 /// connection: each Active, required criterion (User, Derived, or an accepted Omission), then
 /// every blocker of the latest obligation. Untouched omission proposals are not listed.
-// The activation step wires this into `end_run_answered`; until then only tests call it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) async fn unverified_items(
     connection: &mut SqliteConnection,
     run_id: &StatefulRunId,

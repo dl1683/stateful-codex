@@ -580,7 +580,7 @@ fn plan_status(
     let command = criterion.check_command.as_deref().unwrap_or_default();
     let Some(plan) = &criterion.plan else {
         return Err(format!(
-            "`{command}` passed, but a passing exit only shows what ran; it settles the criterion only after the host admits its check plan (stateful_acceptance_update admit). Without an admitted plan, end the run blocked with a partial result"
+            "`{command}` passed, but a passing exit only shows what ran; it settles the criterion only after the host admits its check plan (stateful_acceptance_update admit). Without an admitted plan, report it as not certified: in an Autonomous run your final answer ends it partial; in other modes set the run blocked with a partial result that names it"
         ));
     };
     if plan.criterion_revision != criterion.revision {
@@ -611,7 +611,7 @@ fn plan_status(
 fn unverified(criterion: &AcceptanceCriterion, reason: String) -> CriterionVerdict {
     if criterion.required {
         CriterionVerdict::Unmet(format!(
-            "required but unverified ({reason}); required work cannot complete unverified. Repair it or obtain an approved check; otherwise set the run blocked with a partial result that names it"
+            "required but unverified ({reason}); required work cannot complete unverified. Repair it or obtain an approved check; otherwise report it as not certified: in an Autonomous run your final answer ends it partial; in other modes set the run blocked with a partial result that names it"
         ))
     } else {
         CriterionVerdict::DisclosedUnverified(reason)

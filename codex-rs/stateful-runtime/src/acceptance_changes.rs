@@ -214,7 +214,7 @@ pub(crate) async fn apply_change(
             let criterion = existing(ordinal)?;
             if criterion.is_user_bound() {
                 return Err(refused(format!(
-                    "C{ordinal} comes from the user's words and cannot be retired; if it cannot be met or verified, set the run blocked with a partial result that names it"
+                    "C{ordinal} comes from the user's words and cannot be retired; if it cannot be met or verified, report it as not certified: in an Autonomous run your final answer ends it partial; in other modes set the run blocked with a partial result that names it"
                 )));
             }
             if criterion.state != AcceptanceState::Active {
