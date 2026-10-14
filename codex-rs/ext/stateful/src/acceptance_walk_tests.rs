@@ -2,6 +2,9 @@ use super::super::*;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
+#[path = "acceptance_walk_platform_tests.rs"]
+mod platform;
+
 fn snapshot(root: &Path) -> Result<Manifest, IdentityGap> {
     let root = root.canonicalize().unwrap();
     identify(&[root], LIMITS, Instant::now() + LIMITS.budget)

@@ -40,6 +40,9 @@ use super::observe_item;
 use super::runs_check;
 use crate::services::ProjectIntelligenceServices;
 
+#[path = "acceptance_walk_observation_tests.rs"]
+mod walk_witnesses;
+
 fn file_uri(path: &Path) -> String {
     let path = path.to_string_lossy().replace('\\', "/");
     if path.starts_with('/') {
