@@ -14,10 +14,16 @@ async fn w11_missing_second_root_is_not_dropped() {
     let project = repository();
     let mut roots = roots(project.path());
     roots.push(project.path().join("missing").display().to_string());
-    assert_eq!(crate::acceptance_workspace::workspace_manifest(&roots).await, Err(IdentityGap::Roots));
+    assert_eq!(
+        crate::acceptance_workspace::workspace_manifest(&roots).await,
+        Err(IdentityGap::Roots)
+    );
     roots.pop();
     roots.push(project.path().join("README.md").display().to_string());
-    assert_eq!(crate::acceptance_workspace::workspace_manifest(&roots).await, Err(IdentityGap::Roots));
+    assert_eq!(
+        crate::acceptance_workspace::workspace_manifest(&roots).await,
+        Err(IdentityGap::Roots)
+    );
 }
 
 #[test]
@@ -46,7 +52,10 @@ fn w12_refs_and_symbolic_head_are_identity() {
     let retarget = differs(&alias, &snapshot(root), root);
     git(root, &["checkout", "--quiet", "--detach"]);
     let detached = differs(&before_move, &snapshot(root), root);
-    assert_eq!([creation, deletion, symbolic, movement, detached, retarget], [true; 6]);
+    assert_eq!(
+        [creation, deletion, symbolic, movement, detached, retarget],
+        [true; 6]
+    );
 }
 
 #[test]
@@ -78,10 +87,17 @@ fn w18_dangling_ancestor_is_not_absence() {
         eprintln!("not run (preflight): dangling directory symlink: {error}");
         return;
     }
-    assert_eq!(crate::acceptance_workspace::identify(&canonical(root), LIMITS, std::time::Instant::now() + LIMITS.budget), Err(IdentityGap::Entry {
-        path: root.canonicalize().unwrap().join("src"),
-        kind: crate::acceptance_identity_reason::EntryKind::Reparse,
-    }));
+    assert_eq!(
+        crate::acceptance_workspace::identify(
+            &canonical(root),
+            LIMITS,
+            std::time::Instant::now() + LIMITS.budget
+        ),
+        Err(IdentityGap::Entry {
+            path: root.canonicalize().unwrap().join("src"),
+            kind: crate::acceptance_identity_reason::EntryKind::Reparse,
+        })
+    );
 }
 
 #[test]
@@ -115,7 +131,10 @@ fn w7_w8_links_are_contained_and_include_target_content() {
     let before = snapshot(root);
     std::fs::write(root.join("README.md"), "changed").expect("target");
     let after = snapshot(root);
-    let target_content = before.files.get(&root.canonicalize().unwrap().join("alias")) != after.files.get(&root.canonicalize().unwrap().join("alias"));
+    let target_content = before
+        .files
+        .get(&root.canonicalize().unwrap().join("alias"))
+        != after.files.get(&root.canonicalize().unwrap().join("alias"));
     std::fs::remove_file(&link).expect("remove link");
     let outside = TempDir::new().expect("outside");
     std::fs::write(outside.path().join("data"), "outside").expect("outside file");
@@ -162,32 +181,53 @@ fn w7_unreadable_file_is_refused_after_preflight() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(/*mode*/ 0o000)).unwrap();
     }
     #[cfg(windows)]
     {
         let user = std::env::var("USERNAME").unwrap();
-        assert!(Command::new("icacls").arg(&path).args(["/deny", &format!("{user}:(R)")]).status().unwrap().success());
+        assert!(
+            Command::new("icacls")
+                .arg(&path)
+                .args(["/deny", &format!("{user}:(R)")])
+                .status()
+                .unwrap()
+                .success()
+        );
     }
     let denied = std::fs::File::open(&path).is_err();
-    let identity = crate::acceptance_workspace::identify(&canonical(project.path()), LIMITS, std::time::Instant::now() + LIMITS.budget);
+    let identity = crate::acceptance_workspace::identify(
+        &canonical(project.path()),
+        LIMITS,
+        std::time::Instant::now() + LIMITS.budget,
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(/*mode*/ 0o644)).unwrap();
     }
     #[cfg(windows)]
     {
-        assert!(Command::new("icacls").arg(&path).args(["/remove:d", &std::env::var("USERNAME").unwrap()]).status().unwrap().success());
+        assert!(
+            Command::new("icacls")
+                .arg(&path)
+                .args(["/remove:d", &std::env::var("USERNAME").unwrap()])
+                .status()
+                .unwrap()
+                .success()
+        );
     }
     if !denied {
         eprintln!("not run (preflight): read denial does not take effect");
         return;
     }
-    assert_eq!(identity, Err(IdentityGap::Entry {
-        path: path.canonicalize().unwrap(),
-        kind: crate::acceptance_identity_reason::EntryKind::Unreadable,
-    }));
+    assert_eq!(
+        identity,
+        Err(IdentityGap::Entry {
+            path: path.canonicalize().unwrap(),
+            kind: crate::acceptance_identity_reason::EntryKind::Unreadable,
+        })
+    );
 }
 
 #[cfg(windows)]
@@ -200,10 +240,22 @@ fn w7_escaping_junction_is_refused_after_preflight() {
     std::fs::remove_dir_all(root.join("src")).expect("remove src");
     let outside = TempDir::new().expect("outside");
     std::fs::write(outside.path().join("data"), "outside").expect("outside");
-    let status = Command::new("cmd").args(["/C", "mklink", "/J"]).arg(root.join("src")).arg(outside.path()).status().expect("junction preflight");
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(root.join("src"))
+        .arg(outside.path())
+        .status()
+        .expect("junction preflight");
     assert!(status.success(), "junction preflight");
-    assert_eq!(crate::acceptance_workspace::identify(&canonical(root), LIMITS, std::time::Instant::now() + LIMITS.budget), Err(IdentityGap::Entry {
-        path: root.canonicalize().unwrap().join("src"),
-        kind: crate::acceptance_identity_reason::EntryKind::Reparse,
-    }));
+    assert_eq!(
+        crate::acceptance_workspace::identify(
+            &canonical(root),
+            LIMITS,
+            std::time::Instant::now() + LIMITS.budget
+        ),
+        Err(IdentityGap::Entry {
+            path: root.canonicalize().unwrap().join("src"),
+            kind: crate::acceptance_identity_reason::EntryKind::Reparse,
+        })
+    );
 }

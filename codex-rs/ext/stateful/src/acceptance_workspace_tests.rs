@@ -37,7 +37,8 @@ fn changed_unpinned(
         ledger,
         start.ok_or(&IdentityGap::Roots),
         end.ok_or(&IdentityGap::Roots),
-    ).is_some()
+    )
+    .is_some()
 }
 
 fn roots(root: &Path) -> Vec<String> {
