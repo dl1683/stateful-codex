@@ -2,6 +2,7 @@
 
 mod acceptance_observation;
 mod acceptance_identity_content;
+mod acceptance_identity_process;
 mod acceptance_identity_reason;
 mod acceptance_identity_worker;
 #[cfg(test)]

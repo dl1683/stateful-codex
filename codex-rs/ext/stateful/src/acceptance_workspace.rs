@@ -5,7 +5,7 @@
 //!
 //! Every project root must be inside a git work tree. The listed files are those git tracks or
 //! would track (untracked files that `.gitignore` does not exclude), and the repository state
-//! (the commit `HEAD` names, or a verified unborn `HEAD`, and the staged index) is a separate
+//! (symbolic or detached `HEAD`, the staged index, and framed refs) is a separate
 //! typed part of the identity that no file pin excludes. Outside git, or on any git failure,
 //! the identity is unavailable, which fails the check closed. It is also unavailable for
 //! anything it cannot represent exactly: submodules (gitlinks), nested repositories or other
@@ -23,13 +23,9 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-use std::process::Stdio;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -40,6 +36,7 @@ use sha2::Sha256;
 
 use crate::acceptance_identity_content::content_digest;
 use crate::acceptance_identity_content::retain;
+use crate::acceptance_identity_process::records;
 use crate::acceptance_identity_reason::IdentityChange;
 use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::Bound;
@@ -52,7 +49,7 @@ use crate::acceptance_identity_worker::read_identity;
 pub(crate) struct Manifest {
     /// Content digest of every listed path.
     files: BTreeMap<PathBuf, String>,
-    /// State of every git repository a root belongs to, by root.
+    /// State keyed by the captured canonical roots.
     roots: BTreeMap<PathBuf, RootState>,
     first_root: PathBuf,
 }
@@ -64,7 +61,7 @@ enum RootState {
     Walk,
 }
 
-/// The commit `HEAD` names and the digest of the staged index.
+/// Symbolic/object HEAD and the digests of the staged index and refs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RepositoryState {
     head: HeadState,
@@ -195,7 +192,7 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> 
 }
 
 /// The repository state and the tracked and untracked non-ignored paths under `root`,
-/// relative to it; `None` outside a git work tree or when the listing cannot be taken exactly
+/// relative to it; a gap outside a git work tree or when the listing cannot be taken exactly
 /// (a git failure, a submodule, an inexact name, or a bound exceeded).
 fn git_listing(
     root: &Path,
@@ -291,7 +288,7 @@ fn add_path(root: &Path, paths: &mut BTreeSet<PathBuf>, name: &[u8], already_lis
     Ok(())
 }
 
-/// The path git names with these bytes; `None` when this platform cannot represent it exactly.
+/// The path git names with these bytes, without lossy identity conversion.
 fn exact_path(name: &[u8]) -> Result<PathBuf, IdentityGap> {
     if name.is_empty() {
         return Err(IdentityGap::Entry { path: PathBuf::new(), kind: EntryKind::NotContained });
@@ -309,8 +306,8 @@ fn exact_path(name: &[u8]) -> Result<PathBuf, IdentityGap> {
 }
 
 /// Streams the `terminator`-separated records of a read-only git query in `root` to
-/// `on_record`, within the output-byte bound and the deadline, and returns whether git
-/// succeeded; `None` when git cannot run, the callback refuses a record, or a bound is
+/// `on_record`, within the output-byte bound and the deadline, and returns its exit code.
+/// A gap means git cannot run, the callback refuses a record, or a bound is
 /// exceeded (the process is then killed).
 /// Repository configuration cannot start helper programs: the file-system monitor is disabled
 /// and optional locks are off.
@@ -320,47 +317,18 @@ fn git_records(
     terminator: u8,
     limits: Limits,
     deadline: Instant,
-    mut on_record: impl FnMut(&[u8]) -> Result<(), IdentityGap>,
+    on_record: impl FnMut(&[u8]) -> Result<(), IdentityGap>,
 ) -> Result<i32, IdentityGap> {
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-c")
         .arg("core.fsmonitor=false")
         .arg("-c")
         .arg("core.untrackedCache=false")
         .args(arguments)
         .current_dir(root)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| IdentityGap::Git)?;
-    let streamed = (|| {
-        let stdout = child.stdout.take().ok_or(IdentityGap::Git)?;
-        let mut reader = BufReader::new(stdout.take(limits.git_output + 1));
-        let mut record = Vec::new();
-        let mut total = 0_u64;
-        loop {
-            record.clear();
-            let read = reader.read_until(terminator, &mut record).map_err(|_| IdentityGap::Git)?;
-            if read == 0 {
-                return Ok(());
-            }
-            total += read as u64;
-            if total > limits.git_output { return Err(IdentityGap::Bound(Bound::GitOutput)); }
-            if Instant::now() >= deadline { return Err(IdentityGap::Time); }
-            if record.last() == Some(&terminator) {
-                record.pop();
-            }
-            on_record(&record)?;
-        }
-    })();
-    if streamed.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-        streamed?;
-    }
-    child.wait().map_err(|_| IdentityGap::Git)?.code().ok_or(IdentityGap::Git)
+        .env("GIT_OPTIONAL_LOCKS", "0");
+    records(command, terminator, limits.git_output, deadline, on_record)
 }
 
 #[cfg(test)]

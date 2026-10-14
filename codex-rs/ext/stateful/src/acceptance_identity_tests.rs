@@ -39,9 +39,14 @@ fn w12_refs_and_symbolic_head_are_identity() {
     let before_move = snapshot(root);
     git(root, &["branch", "-f", "other", "HEAD"]);
     let movement = differs(&before_move, &snapshot(root), root);
+    git(root, &["symbolic-ref", "refs/alias", "refs/heads/other"]);
+    let alias = snapshot(root);
+    let active = git(root, &["symbolic-ref", "HEAD"]);
+    git(root, &["symbolic-ref", "refs/alias", &active]);
+    let retarget = differs(&alias, &snapshot(root), root);
     git(root, &["checkout", "--quiet", "--detach"]);
     let detached = differs(&before_move, &snapshot(root), root);
-    assert_eq!([creation, deletion, symbolic, movement, detached], [true; 5]);
+    assert_eq!([creation, deletion, symbolic, movement, detached, retarget], [true; 6]);
 }
 
 #[test]
@@ -58,6 +63,25 @@ fn w18_stable_absence_and_both_transitions() {
     std::fs::remove_dir_all(root.join("src")).expect("missing ancestor");
     let absent = snapshot(root);
     assert!(!differs(&absent, &snapshot(root), root), "missing ancestor");
+}
+
+#[test]
+fn w18_dangling_ancestor_is_not_absence() {
+    let project = repository();
+    let root = project.path();
+    std::fs::remove_dir_all(root.join("src")).unwrap();
+    #[cfg(unix)]
+    let result = std::os::unix::fs::symlink("missing", root.join("src"));
+    #[cfg(windows)]
+    let result = std::os::windows::fs::symlink_dir("missing", root.join("src"));
+    if let Err(error) = result {
+        eprintln!("not run (preflight): dangling directory symlink: {error}");
+        return;
+    }
+    assert_eq!(crate::acceptance_workspace::identify(&canonical(root), LIMITS, std::time::Instant::now() + LIMITS.budget), Err(IdentityGap::Entry {
+        path: root.canonicalize().unwrap().join("src"),
+        kind: crate::acceptance_identity_reason::EntryKind::Reparse,
+    }));
 }
 
 #[test]
@@ -146,7 +170,7 @@ fn w7_unreadable_file_is_refused_after_preflight() {
         assert!(Command::new("icacls").arg(&path).args(["/deny", &format!("{user}:(R)")]).status().unwrap().success());
     }
     let denied = std::fs::File::open(&path).is_err();
-    let identity = identify(&canonical(project.path()), LIMITS);
+    let identity = crate::acceptance_workspace::identify(&canonical(project.path()), LIMITS, std::time::Instant::now() + LIMITS.budget);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -160,7 +184,10 @@ fn w7_unreadable_file_is_refused_after_preflight() {
         eprintln!("not run (preflight): read denial does not take effect");
         return;
     }
-    assert!(identity.is_none());
+    assert_eq!(identity, Err(IdentityGap::Entry {
+        path: path.canonicalize().unwrap(),
+        kind: crate::acceptance_identity_reason::EntryKind::Unreadable,
+    }));
 }
 
 #[cfg(windows)]
@@ -175,5 +202,8 @@ fn w7_escaping_junction_is_refused_after_preflight() {
     std::fs::write(outside.path().join("data"), "outside").expect("outside");
     let status = Command::new("cmd").args(["/C", "mklink", "/J"]).arg(root.join("src")).arg(outside.path()).status().expect("junction preflight");
     assert!(status.success(), "junction preflight");
-    assert!(identify(&canonical(root), LIMITS).is_none(), "escaping junction");
+    assert_eq!(crate::acceptance_workspace::identify(&canonical(root), LIMITS, std::time::Instant::now() + LIMITS.budget), Err(IdentityGap::Entry {
+        path: root.canonicalize().unwrap().join("src"),
+        kind: crate::acceptance_identity_reason::EntryKind::Reparse,
+    }));
 }
