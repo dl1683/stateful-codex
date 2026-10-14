@@ -555,7 +555,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                 "type": "object",
                 "properties": {
                     "expectedRevision": {"type": "integer", "minimum": 1, "description": "The run revision from <stateful_run>, not rootRevision."},
-                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "completed only after all other durable writes; blocked may include openIssues with a partial result."},
+                    "status": {"type": "string", "enum": ["running", "blocked", "completed", "failed"], "description": "completed only after all other durable writes."},
                     "strategy": {"type": "string"},
                     "result": {"type": "string", "description": "For completed, the concise final evidence-grounded narrative."},
                     "rootRevision": {"type": "integer", "minimum": 0, "description": "durableLearning only; the root blackboard's project intelligence revision."},
@@ -563,7 +563,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for StatefulRunUpdateTool {
                     "completionIdempotencyKey": {"type": "string", "description": "durableLearning only; reuse only for an identical retry."},
                     "finalObligation": final_obligation,
                     "completionDisposition": {"type": "string", "enum": ["durableLearning", "noReusableLearning"], "description": "Defaults to durableLearning."},
-                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed (required) or blocked (optional): open doubts, discrepancies, failing checks, blockers ([] if none); any entry keeps the run blocked."}
+                    "openIssues": {"type": "array", "items": {"type": "string"}, "maxItems": 16, "description": "completed or blocked: open doubts, discrepancies, failing checks, blockers ([] if none); any entry blocks the run."}
                 },
                 "required": ["expectedRevision", "status"],
                 "additionalProperties": false
