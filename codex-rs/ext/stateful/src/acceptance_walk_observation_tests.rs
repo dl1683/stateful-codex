@@ -122,6 +122,7 @@ async fn w6_an_excluded_pin_remains_governed() {
                 },
             }],
             "excluded-pin",
+            /*project_root*/ None,
         )
         .await
         .unwrap();
