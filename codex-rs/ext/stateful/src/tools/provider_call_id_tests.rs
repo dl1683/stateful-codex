@@ -199,13 +199,13 @@ fn counts(output: &Value) -> (Value, Value, Value, Value) {
 #[test]
 fn provenance_is_bounded_deterministic_and_uses_the_whole_id() {
     let source = |raw: &str| crate::call_source::call_source(raw).expect("nonempty");
-    for raw in ["c".repeat(/*n*/ 512), "ÃƒÂ©".repeat(/*n*/ 256)] {
+    for raw in ["c".repeat(/*n*/ 512), "é".repeat(/*n*/ 256)] {
         assert_eq!(source(&raw), raw);
     }
     for raw in [
         "c".repeat(/*n*/ 513),
-        format!("{}x", "ÃƒÂ©".repeat(/*n*/ 256)),
-        "ÃƒÂ©".repeat(/*n*/ 257),
+        format!("{}x", "é".repeat(/*n*/ 256)),
+        "é".repeat(/*n*/ 257),
         bridged_call_id(),
         "call\n1".to_string(),
         " padded ".to_string(),
@@ -579,6 +579,229 @@ async fn invalid_raw_fallbacks_preserve_identity_conflicts() {
         assert_eq!(
             (fixture.findings().await, fixture.obligation_sources().await),
             before
+        );
+    }
+}
+
+#[tokio::test]
+async fn durable_completion_stores_digest_sources_for_large_call_ids() {
+    use codex_stateful_runtime::AcceptanceChange;
+    use codex_stateful_runtime::AcceptanceKind;
+    use codex_stateful_runtime::AcceptanceOrigin;
+    use codex_stateful_runtime::CriterionTerms;
+    use codex_stateful_runtime::RequestSpan;
+    use codex_stateful_runtime::StatefulRunStatus;
+    use codex_thread_store::LocalThreadStore;
+    use codex_thread_store::LocalThreadStoreConfig;
+
+    for size in [539, 67_222] {
+        let home = TempDir::new().expect("state home");
+        let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+        let state = codex_state::StateRuntime::init(sqlite.clone(), "test".to_string())
+            .await
+            .expect("state DB");
+        std::fs::write(home.path().join("verify.sh"), "checker").unwrap();
+        std::fs::write(home.path().join("out.txt"), "verified output").unwrap();
+        let project = state
+            .create_project(
+                "Calculator".to_string(),
+                vec![codex_state::ProjectRoot {
+                    path: home.path().to_string_lossy().into_owned(),
+                }],
+                Default::default(),
+                &[],
+                "project",
+            )
+            .await
+            .expect("project")
+            .project;
+        let projects = Arc::new(LocalThreadStore::new(
+            LocalThreadStoreConfig {
+                codex_home: home.path().to_path_buf(),
+                sqlite: sqlite.clone(),
+                default_model_provider_id: "test".to_string(),
+            },
+            Some(state),
+        ));
+        let services = ProjectIntelligenceServices::new(sqlite);
+        let runtime = services.runtime().await.expect("runtime");
+        let goal = "Investigate calc.add.";
+        let run = runtime
+            .create_run(
+                StatefulRunId::parse("completion-run").unwrap(),
+                NewStatefulRun {
+                    project_id: project.id.clone(),
+                    thread_ids: vec![THREAD_ID.to_string()],
+                    goal: goal.to_string(),
+                    mode: WorkflowMode::Collaborative,
+                    budget: RunBudget {
+                        max_continuations: 1,
+                        max_elapsed_seconds: 3600,
+                    },
+                },
+            )
+            .await
+            .expect("run");
+        // Stage the admitted plan and passing receipt as in the runtime completion fixture;
+        // completion re-reads the pinned files and runs the normal acceptance gate.
+        runtime
+            .revise_acceptance(
+                &run.id,
+                /*expected_revision*/ 0,
+                vec![AcceptanceChange::Add {
+                    origin: AcceptanceOrigin::User,
+                    kind: AcceptanceKind::Check,
+                    statement: goal.to_string(),
+                    request_span: Some(RequestSpan {
+                        start: 0,
+                        end: goal.len(),
+                    }),
+                    terms: CriterionTerms {
+                        required: true,
+                        artifacts: vec!["out.txt".to_string()],
+                        checker: vec!["verify.sh".to_string()],
+                        check_command: Some("sh verify.sh".to_string()),
+                        expected_observation: Some("verified output".to_string()),
+                        ..Default::default()
+                    },
+                }],
+                "acceptance-call",
+                /*project_root*/ None,
+            )
+            .await
+            .expect("acceptance staged");
+        let ledger = runtime.acceptance_ledger(&run.id).await.unwrap();
+        let roots = vec![home.path().to_string_lossy().into_owned()];
+        let (artifacts, checkers) =
+            crate::acceptance_observation::ledger_file_states(&roots, &ledger).await;
+        let digest =
+            |states: &std::collections::BTreeMap<u32, codex_stateful_runtime::ArtifactState>| {
+                match &states[&1] {
+                    codex_stateful_runtime::ArtifactState::Observed { digest, missing }
+                        if missing.is_empty() =>
+                    {
+                        digest.clone()
+                    }
+                    state => panic!("fixture files unavailable: {state:?}"),
+                }
+            };
+        let artifact_digest = digest(&artifacts);
+        let checker_digest = digest(&checkers);
+        let ledger = runtime
+            .revise_acceptance(
+                &run.id,
+                ledger.revision,
+                vec![AcceptanceChange::Admit {
+                    ordinal: 1,
+                    checker_digest: Some(checker_digest.clone()),
+                }],
+                "admit-call",
+                Some(home.path().canonicalize().unwrap()),
+            )
+            .await
+            .expect("admitted plan");
+        runtime
+            .record_command_evidence(
+                &run.id,
+                vec![codex_stateful_runtime::CommandEvidence {
+                    ordinal: 1,
+                    criterion_revision: ledger.criteria[0].revision,
+                    outcome: codex_stateful_runtime::EvidenceOutcome::Passed,
+                    command: "sh verify.sh".to_string(),
+                    exit_code: Some(0),
+                    output_tail: "ok".to_string(),
+                    output_digest: "sha256:output".to_string(),
+                    artifact_digest: Some(artifact_digest),
+                    checker_digest: Some(checker_digest),
+                    detail: None,
+                    start_generation: ledger.workspace_generation,
+                    source_id: "checker-call".to_string(),
+                }],
+            )
+            .await
+            .expect("passing receipt");
+        let records = BlackboardBatchRecordTool::new(
+            project.id.clone(),
+            THREAD_ID.to_string(),
+            services.clone(),
+            projects.clone(),
+            /*event_sink*/ None,
+            VisibleRootRegistry::default(),
+        );
+        let mut root_finding = finding("final");
+        root_finding["rootPromotion"] = json!("promoted");
+        records
+            .handle(with_call_id(
+                "blackboard_record_batch",
+                json!({"records": [root_finding]}),
+                "finding-call",
+            ))
+            .await
+            .expect("durable learning recorded");
+        let (root_revision, aliases) =
+            crate::completion::completion_root(&services, &project.id, THREAD_ID)
+                .await
+                .expect("completion root");
+        assert_eq!(aliases, 1);
+        let tool = super::run::StatefulRunUpdateTool::new(
+            project.id.clone(),
+            THREAD_ID.to_string(),
+            services.clone(),
+            projects,
+            /*event_sink*/ None,
+            VisibleRootRegistry::default(),
+            crate::deliverable::TurnRunCommits::default(),
+        );
+        let raw = "x".repeat(size);
+        let packet = codex_stateful_runtime::ObligationPacket {
+            learning: vec!["calc.add finding final.".to_string()],
+            ..Default::default()
+        };
+        let mut completion_call = with_call_id(
+            "stateful_run_update",
+            json!({
+                "expectedRevision": run.revision, "status": "completed",
+                "completionDisposition": "durableLearning", "openIssues": [],
+                "rootRevision": root_revision, "materialRootFindings": ["E1"],
+                "completionIdempotencyKey": "completion", "finalObligation": packet,
+                "result": "calc.add finding final."
+            }),
+            &raw,
+        );
+        let sandbox = codex_file_system::FileSystemSandboxContext::from_legacy_sandbox_policy(
+            codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
+            home.path().abs().into(),
+        )
+        .unwrap();
+        completion_call.environments = vec![codex_extension_api::ToolEnvironment {
+            environment_id: "local".to_string(),
+            cwd: sandbox.cwd.clone(),
+            file_system: Arc::new(codex_exec_server::LocalFileSystem::unsandboxed()),
+            file_system_sandbox_context: sandbox,
+            _lifetime: std::marker::PhantomData,
+        }];
+        let output = tool
+            .handle(completion_call)
+            .await
+            .expect("durable completion through extension");
+        let output: Value = serde_json::from_str(&output.log_output()).unwrap();
+        assert_eq!(output["status"], json!("completed"));
+        let completed = runtime.get_run(&run.id).await.unwrap().unwrap();
+        let obligation = runtime.latest_obligation(&run.id).await.unwrap().unwrap();
+        let source = crate::call_source::call_source(&raw).unwrap();
+        assert_eq!(source.len(), 88);
+        assert!(source.starts_with("stateful:call:v1:sha256:"));
+        assert_eq!(
+            (completed.status, obligation.value),
+            (
+                StatefulRunStatus::Completed,
+                codex_stateful_runtime::NewObligation {
+                    project_id: project.id,
+                    run_id: run.id,
+                    packet,
+                    provenance_source_id: source,
+                },
+            )
         );
     }
 }

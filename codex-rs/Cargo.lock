@@ -4661,7 +4661,9 @@ dependencies = [
 name = "codex-stateful-extension"
 version = "0.159.2"
 dependencies = [
+ "codex-exec-server",
  "codex-extension-api",
+ "codex-file-system",
  "codex-git-utils",
  "codex-project-intelligence",
  "codex-protocol",
