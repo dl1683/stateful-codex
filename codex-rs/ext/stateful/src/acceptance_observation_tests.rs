@@ -25,6 +25,9 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
 
+#[path = "acceptance_check_cwd_tests.rs"]
+mod check_cwd;
+
 use super::MAX_OUTSTANDING_READERS;
 use super::OUTSTANDING_READERS;
 use super::artifact_states;
