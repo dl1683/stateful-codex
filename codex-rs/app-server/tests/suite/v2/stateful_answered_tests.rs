@@ -51,6 +51,9 @@ const ANSWER: &str = "parse_config returns Result<Config, Error>.";
 const BLOCK: &str =
     "[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]";
 
+#[path = "stateful_answered_activation_tests.rs"]
+mod activation;
+
 fn ready() -> String {
     format!("{ANSWER}\n\n{BLOCK}")
 }
