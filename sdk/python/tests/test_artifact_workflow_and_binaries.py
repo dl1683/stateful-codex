@@ -1446,3 +1446,39 @@ def test_sdk_release_matches_runtime(
         ],
     }
     assert (script.sdk_root() / "pyproject.toml").read_text() == source_pyproject
+
+
+@pytest.mark.parametrize("outcome", [None, "answered", "partial"])
+def test_generated_host_answer_has_non_null_enum_with_legacy_default(outcome: str | None) -> None:
+    from openai_codex.generated.v2_all import StatefulHostAnswer, StatefulHostAnswerOutcome
+
+    payload = {"answer": "An answer.", "basis": "unverified", "committedAt": 0, "turnId": "t"}
+    if outcome is not None:
+        payload["outcome"] = outcome
+    answer = StatefulHostAnswer.model_validate(payload)
+    assert answer.outcome is StatefulHostAnswerOutcome(outcome or "answered")
+    assert answer.model_dump(mode="json", by_alias=True) == {
+        **payload,
+        "outcome": outcome or "answered",
+    }
+    with pytest.raises(ValidationError):
+        StatefulHostAnswer.model_validate({**payload, "outcome": None})
+
+
+def test_host_answer_codegen_repair_is_scoped_and_idempotent(tmp_path: Path) -> None:
+    script = _load_update_script_module()
+    out = tmp_path / "generated.py"
+    original = (
+        "class StatefulHostAnswer(BaseModel):\n"
+        '    outcome: StatefulHostAnswerOutcome | None = "answered"\n'
+        "\n\nclass Other(BaseModel):\n"
+        '    outcome: str | None = "answered"\n'
+    )
+    out.write_text(original)
+    expected = original.replace(
+        'outcome: StatefulHostAnswerOutcome | None = "answered"',
+        "outcome: StatefulHostAnswerOutcome = StatefulHostAnswerOutcome.answered",
+    )
+    for _ in range(2):
+        script._preserve_host_answer_outcome(out)
+        assert out.read_text() == expected

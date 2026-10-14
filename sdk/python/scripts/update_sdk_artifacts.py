@@ -583,7 +583,28 @@ def generate_v2_all(schema_dir: Path) -> None:
     _preserve_reasoning_effort_enum(out_path)
     _preserve_thread_source_enum(out_path)
     _preserve_plan_type_enum(out_path)
+    _preserve_host_answer_outcome(out_path)
     _normalize_generated_timestamps(out_path)
+
+
+def _preserve_host_answer_outcome(out_path: Path) -> None:
+    """Keep the wire's non-null enum and legacy default despite codegen optionality."""
+    source = out_path.read_text()
+    class_start = source.find("class StatefulHostAnswer(BaseModel):")
+    if class_start == -1:
+        raise RuntimeError("Generated SDK is missing StatefulHostAnswer")
+    class_end = source.find("\n\nclass ", class_start)
+    if class_end == -1:
+        class_end = len(source)
+    class_source, count = re.subn(
+        r"(?m)^    outcome: StatefulHostAnswerOutcome(?: \| None)? = "
+        r'(?:"answered"|StatefulHostAnswerOutcome\.answered)$',
+        "    outcome: StatefulHostAnswerOutcome = StatefulHostAnswerOutcome.answered",
+        source[class_start:class_end],
+    )
+    if count != 1:
+        raise RuntimeError("Generated StatefulHostAnswer has an unexpected outcome field")
+    out_path.write_text(source[:class_start] + class_source + source[class_end:])
 
 
 def _preserve_inline_image_class_names(out_path: Path) -> None:

@@ -10400,7 +10400,7 @@ class StatefulHostAnswer(BaseModel):
         str, Field(description="States that neither the answer nor the run's work was verified.")
     ]
     committed_at: Annotated[int, Field(alias="committedAt")]
-    outcome: StatefulHostAnswerOutcome | None = "answered"
+    outcome: StatefulHostAnswerOutcome = StatefulHostAnswerOutcome.answered
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
