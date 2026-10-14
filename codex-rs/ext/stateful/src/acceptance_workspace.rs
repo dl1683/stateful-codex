@@ -41,6 +41,8 @@ use crate::acceptance_observation::hash_bounded;
 use crate::acceptance_observation::open_nonblocking;
 use crate::acceptance_identity_reason::IdentityChange;
 use crate::acceptance_identity_reason::IdentityGap;
+use crate::acceptance_identity_reason::Bound;
+use crate::acceptance_identity_reason::EntryKind;
 use crate::acceptance_identity_reason::Side;
 use crate::acceptance_identity_worker::read_identity;
 
@@ -64,8 +66,15 @@ enum RootState {
 /// The commit `HEAD` names and the digest of the staged index.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RepositoryState {
-    head: String,
+    head: HeadState,
     index: String,
+    refs: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum HeadState {
+    Branch { name: String, object: Option<String> },
+    Detached { object: String },
 }
 
 /// Bounds of one identity.
@@ -160,11 +169,7 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> 
         return Err(IdentityGap::Time);
     }
     if roots.is_empty() { return Err(IdentityGap::Roots); }
-    identify_legacy(roots, limits, deadline).ok_or(IdentityGap::Git)
-}
-
-fn identify_legacy(roots: &[PathBuf], limits: Limits, deadline: Instant) -> Option<Manifest> {
-    let mut manifest = Manifest { first_root: roots.first()?.clone(), ..Manifest::default() };
+    let mut manifest = Manifest { first_root: roots[0].clone(), ..Manifest::default() };
     let mut hashed = 0_u64;
     // Directories below a root already known to hold no `.git` entry, with all their ancestors.
     let mut outside_embedded = HashSet::new();
@@ -172,9 +177,8 @@ fn identify_legacy(roots: &[PathBuf], limits: Limits, deadline: Instant) -> Opti
         let (state, listed) = git_listing(root, limits, deadline)?;
         manifest.roots.insert(root.clone(), RootState::Git(state));
         for relative in listed {
-            if manifest.files.len() >= limits.entries || Instant::now() >= deadline {
-                return None;
-            }
+            if manifest.files.len() >= limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
+            if Instant::now() >= deadline { return Err(IdentityGap::Time); }
             // Deepest first: once a directory is known, so are all of its ancestors.
             for directory in relative.ancestors().skip(1) {
                 if directory.as_os_str().is_empty() {
@@ -185,23 +189,23 @@ fn identify_legacy(roots: &[PathBuf], limits: Limits, deadline: Instant) -> Opti
                     break;
                 }
                 if Instant::now() >= deadline {
-                    return None;
+                    return Err(IdentityGap::Time);
                 }
                 let absent = matches!(
                     std::fs::symlink_metadata(directory.join(".git")),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound
                 );
                 if !absent {
-                    return None;
+                    return Err(IdentityGap::Entry { path: directory, kind: EntryKind::EmbeddedRepository });
                 }
                 outside_embedded.insert(directory);
             }
             let path = root.join(relative);
-            let digest = content_digest(&path, &mut hashed, limits, deadline)?;
+            let digest = content_digest(&path, &mut hashed, limits, deadline).ok_or_else(|| IdentityGap::Entry { path: path.clone(), kind: EntryKind::Unreadable })?;
             manifest.files.insert(path.components().collect(), digest);
         }
     }
-    Some(manifest)
+    Ok(manifest)
 }
 
 /// The repository state and the tracked and untracked non-ignored paths under `root`,
@@ -211,35 +215,44 @@ fn git_listing(
     root: &Path,
     limits: Limits,
     deadline: Instant,
-) -> Option<(RepositoryState, BTreeSet<PathBuf>)> {
+) -> Result<(RepositoryState, BTreeSet<PathBuf>), IdentityGap> {
     let collect = |arguments: &[&str]| {
         let mut output = Vec::new();
         let succeeded = git_records(root, arguments, b'\n', limits, deadline, |record| {
             output.extend_from_slice(record);
-            Some(())
+            Ok(())
         })?;
-        Some((succeeded, output))
+        Ok::<_, IdentityGap>((succeeded, output))
     };
-    if collect(&["rev-parse", "--is-inside-work-tree"])? != (true, b"true".to_vec()) {
-        return None;
+    if collect(&["rev-parse", "--is-inside-work-tree"])? != (0, b"true".to_vec()) {
+        return Err(IdentityGap::Git);
     }
-    let head = match collect(&["rev-parse", "--verify", "--quiet", "HEAD"])? {
-        (true, head) if !head.is_empty() => String::from_utf8(head).ok()?,
-        // `HEAD` names no commit: qualified only when it is a branch that does not exist yet.
-        (false, _) => {
-            let (symbolic, branch) = collect(&["symbolic-ref", "--quiet", "HEAD"])?;
-            if !symbolic || branch.is_empty() {
-                return None;
-            }
-            let branch = String::from_utf8(branch).ok()?;
-            let (exists, _) = collect(&["show-ref", "--verify", "--quiet", &branch])?;
-            if exists {
-                return None;
-            }
-            format!("unborn:{branch}")
-        }
-        (true, _) => return None,
+    let symbolic = collect(&["symbolic-ref", "--quiet", "HEAD"])?;
+    let (resolved, object) = collect(&["rev-parse", "--verify", "--quiet", "HEAD"])?;
+    let object = if resolved == 0 && !object.is_empty() {
+        Some(String::from_utf8(object).map_err(|_| IdentityGap::Git)?)
+    } else if resolved == 1 && object.is_empty() {
+        None
+    } else {
+        return Err(IdentityGap::Git);
     };
+    let head = match symbolic {
+        (0, branch) if branch.starts_with(b"refs/heads/") => {
+            let name = String::from_utf8(branch).map_err(|_| IdentityGap::Git)?;
+            if object.is_none() && collect(&["show-ref", "--verify", "--quiet", &name])?.0 != 1 {
+                return Err(IdentityGap::Git);
+            }
+            HeadState::Branch { name, object }
+        }
+        (1, branch) if branch.is_empty() => HeadState::Detached { object: object.ok_or(IdentityGap::Git)? },
+        _ => return Err(IdentityGap::Git),
+    };
+    let mut refs = Sha256::new();
+    if git_records(root, &["for-each-ref", "--format=%(objectname) %(objecttype) %(refname) %(symref)"], b'\n', limits, deadline, |record| {
+        refs.update((record.len() as u64).to_be_bytes());
+        refs.update(record);
+        Ok(())
+    })? != 0 { return Err(IdentityGap::Git); }
     let mut index = Sha256::new();
     let mut paths = BTreeSet::new();
     let staged = git_records(
@@ -251,9 +264,9 @@ fn git_listing(
         |record| {
             index.update((record.len() as u64).to_be_bytes());
             index.update(record);
-            let (entry, path) = record.split_at(record.iter().position(|byte| *byte == b'\t')?);
+            let (entry, path) = record.split_at(record.iter().position(|byte| *byte == b'\t').ok_or(IdentityGap::Git)?);
             if entry.starts_with(GITLINK_MODE) {
-                return None;
+                return Err(IdentityGap::Entry { path: root.join(exact_path(&path[1..])?), kind: EntryKind::Submodule });
             }
             add_path(&mut paths, &path[1..], limits)
         },
@@ -266,38 +279,40 @@ fn git_listing(
         deadline,
         |record| add_path(&mut paths, record, limits),
     )?;
-    if !staged || !untracked {
-        return None;
+    if staged != 0 || untracked != 0 {
+        return Err(IdentityGap::Git);
     }
-    Some((
+    Ok((
         RepositoryState {
             head,
             index: format!("sha256:{:x}", index.finalize()),
+            refs: format!("sha256:{:x}", refs.finalize()),
         },
         paths,
     ))
 }
 
 /// Adds one git path, exactly as git names it, within the entry bound.
-fn add_path(paths: &mut BTreeSet<PathBuf>, name: &[u8], limits: Limits) -> Option<()> {
+fn add_path(paths: &mut BTreeSet<PathBuf>, name: &[u8], limits: Limits) -> Result<(), IdentityGap> {
     paths.insert(exact_path(name)?);
-    (paths.len() <= limits.entries).then_some(())
+    if paths.len() > limits.entries { return Err(IdentityGap::Bound(Bound::Entries)); }
+    Ok(())
 }
 
 /// The path git names with these bytes; `None` when this platform cannot represent it exactly.
-fn exact_path(name: &[u8]) -> Option<PathBuf> {
+fn exact_path(name: &[u8]) -> Result<PathBuf, IdentityGap> {
     if name.is_empty() {
-        return None;
+        return Err(IdentityGap::Entry { path: PathBuf::new(), kind: EntryKind::NotContained });
     }
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStringExt;
-        Some(PathBuf::from(OsString::from_vec(name.to_vec())))
+        Ok(PathBuf::from(OsString::from_vec(name.to_vec())))
     }
     #[cfg(not(unix))]
     {
-        let name = std::str::from_utf8(name).ok()?;
-        Some(PathBuf::from(OsString::from(name)))
+        let exact = std::str::from_utf8(name).map_err(|_| IdentityGap::Entry { path: PathBuf::from(String::from_utf8_lossy(name).into_owned()), kind: EntryKind::InexactName })?;
+        Ok(PathBuf::from(OsString::from(exact)))
     }
 }
 
@@ -313,8 +328,8 @@ fn git_records(
     terminator: u8,
     limits: Limits,
     deadline: Instant,
-    mut on_record: impl FnMut(&[u8]) -> Option<()>,
-) -> Option<bool> {
+    mut on_record: impl FnMut(&[u8]) -> Result<(), IdentityGap>,
+) -> Result<i32, IdentityGap> {
     let mut child = Command::new("git")
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -327,34 +342,33 @@ fn git_records(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+        .map_err(|_| IdentityGap::Git)?;
     let streamed = (|| {
-        let stdout = child.stdout.take()?;
+        let stdout = child.stdout.take().ok_or(IdentityGap::Git)?;
         let mut reader = BufReader::new(stdout.take(limits.git_output + 1));
         let mut record = Vec::new();
         let mut total = 0_u64;
         loop {
             record.clear();
-            let read = reader.read_until(terminator, &mut record).ok()?;
+            let read = reader.read_until(terminator, &mut record).map_err(|_| IdentityGap::Git)?;
             if read == 0 {
-                return Some(());
+                return Ok(());
             }
             total += read as u64;
-            if total > limits.git_output || Instant::now() >= deadline {
-                return None;
-            }
+            if total > limits.git_output { return Err(IdentityGap::Bound(Bound::GitOutput)); }
+            if Instant::now() >= deadline { return Err(IdentityGap::Time); }
             if record.last() == Some(&terminator) {
                 record.pop();
             }
             on_record(&record)?;
         }
     })();
-    if streamed.is_none() {
+    if streamed.is_err() {
         let _ = child.kill();
         let _ = child.wait();
-        return None;
+        streamed?;
     }
-    Some(child.wait().ok()?.success())
+    child.wait().map_err(|_| IdentityGap::Git)?.code().ok_or(IdentityGap::Git)
 }
 
 /// The content digest of one listed path: file bytes, a link's target, or a marker for an
