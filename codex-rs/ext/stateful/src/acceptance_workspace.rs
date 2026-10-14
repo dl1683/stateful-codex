@@ -29,7 +29,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -38,13 +37,12 @@ use codex_stateful_runtime::AcceptanceState;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::acceptance_observation::MAX_OUTSTANDING_READERS;
-use crate::acceptance_observation::OUTSTANDING_READERS;
 use crate::acceptance_observation::hash_bounded;
 use crate::acceptance_observation::open_nonblocking;
 use crate::acceptance_identity_reason::IdentityChange;
 use crate::acceptance_identity_reason::IdentityGap;
 use crate::acceptance_identity_reason::Side;
+use crate::acceptance_identity_worker::read_identity;
 
 /// Content identity of the workspace.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -139,30 +137,21 @@ pub(crate) fn changed_unpinned(
         .map(IdentityChange::Path)
 }
 
-/// The workspace's content identity, or `None` when it cannot be taken within the bounds or
-/// no reader slot is free.
+/// Take a slot before any filesystem call, and use one deadline for the entire worker.
 pub(crate) async fn workspace_manifest(roots: &[String]) -> Result<Manifest, IdentityGap> {
-    let roots = roots
-        .iter()
-        .filter_map(|root| std::fs::canonicalize(root).ok())
-        .collect::<Vec<_>>();
-    if roots.is_empty() {
-        return Err(IdentityGap::Roots);
-    }
-    if OUTSTANDING_READERS.fetch_add(1, Ordering::SeqCst) >= MAX_OUTSTANDING_READERS {
-        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
-        return Err(IdentityGap::Slots);
-    }
-    let deadline = Instant::now() + LIMITS.budget;
-    let worker = tokio::task::spawn_blocking(move || {
-        let manifest = identify(&roots, LIMITS, deadline);
-        OUTSTANDING_READERS.fetch_sub(1, Ordering::SeqCst);
-        manifest
-    });
-    tokio::time::timeout(LIMITS.budget, worker)
-        .await
-        .map_err(|_| IdentityGap::Time)?
-        .map_err(|_| IdentityGap::Worker)?
+    let roots = roots.to_vec();
+    read_identity(LIMITS.budget, move |deadline| {
+        let mut canonical = Vec::with_capacity(roots.len());
+        for root in roots {
+            if Instant::now() >= deadline { return Err(IdentityGap::Time); }
+            let root = std::fs::canonicalize(root).map_err(|_| IdentityGap::Roots)?;
+            if !std::fs::metadata(&root).map_err(|_| IdentityGap::Roots)?.is_dir() {
+                return Err(IdentityGap::Roots);
+            }
+            canonical.push(root);
+        }
+        identify(&canonical, LIMITS, deadline)
+    }).await
 }
 
 /// Takes the identity of canonical roots using the caller's single deadline.
@@ -170,6 +159,7 @@ pub(crate) fn identify(roots: &[PathBuf], limits: Limits, deadline: Instant) -> 
     if Instant::now() >= deadline {
         return Err(IdentityGap::Time);
     }
+    if roots.is_empty() { return Err(IdentityGap::Roots); }
     identify_legacy(roots, limits, deadline).ok_or(IdentityGap::Git)
 }
 

@@ -2,6 +2,7 @@
 
 mod acceptance_observation;
 mod acceptance_identity_reason;
+mod acceptance_identity_worker;
 mod acceptance_policy;
 mod acceptance_render;
 mod acceptance_workspace;

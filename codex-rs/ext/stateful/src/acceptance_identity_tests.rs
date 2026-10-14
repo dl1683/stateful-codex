@@ -14,7 +14,10 @@ async fn w11_missing_second_root_is_not_dropped() {
     let project = repository();
     let mut roots = roots(project.path());
     roots.push(project.path().join("missing").display().to_string());
-    assert!(workspace_manifest(&roots).await.is_none());
+    assert_eq!(crate::acceptance_workspace::workspace_manifest(&roots).await, Err(IdentityGap::Roots));
+    roots.pop();
+    roots.push(project.path().join("README.md").display().to_string());
+    assert_eq!(crate::acceptance_workspace::workspace_manifest(&roots).await, Err(IdentityGap::Roots));
 }
 
 #[test]
