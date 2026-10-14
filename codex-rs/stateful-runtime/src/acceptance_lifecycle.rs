@@ -26,7 +26,9 @@ impl StatefulRunStore {
         run_id: &StatefulRunId,
         call_id: &str,
     ) -> Result<(), StatefulRunStoreError> {
-        crate::run::validate_source_id(call_id)?;
+        let call_id =
+            crate::call_source(call_id).ok_or(crate::run::StatefulRunError::InvalidProvenance)?;
+
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let Some(run) = load_run(&mut transaction, run_id).await? else {
             return Ok(());
@@ -40,7 +42,7 @@ impl StatefulRunStore {
              VALUES (?, ?, ?)",
         )
         .bind(run_id.as_str())
-        .bind(call_id)
+        .bind(&call_id)
         .bind(unix_timestamp_millis()?)
         .execute(&mut *transaction)
         .await?;
@@ -55,9 +57,11 @@ impl StatefulRunStore {
         run_id: &StatefulRunId,
         call_id: &str,
     ) -> Result<(), StatefulRunStoreError> {
+        let call_id =
+            crate::call_source(call_id).ok_or(crate::run::StatefulRunError::InvalidProvenance)?;
         sqlx::query("DELETE FROM stateful_acceptance_pending WHERE run_id = ? AND call_id = ?")
             .bind(run_id.as_str())
-            .bind(call_id)
+            .bind(&call_id)
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -69,11 +73,13 @@ impl StatefulRunStore {
         run_id: &StatefulRunId,
         call_id: &str,
     ) -> Result<bool, StatefulRunStoreError> {
+        let call_id =
+            crate::call_source(call_id).ok_or(crate::run::StatefulRunError::InvalidProvenance)?;
         Ok(sqlx::query_scalar::<_, i64>(
             "SELECT 1 FROM stateful_acceptance_pending WHERE run_id = ? AND call_id = ?",
         )
         .bind(run_id.as_str())
-        .bind(call_id)
+        .bind(&call_id)
         .fetch_optional(&self.pool)
         .await?
         .is_some())
@@ -88,11 +94,13 @@ impl StatefulRunStore {
         run_id: &StatefulRunId,
         call_id: &str,
     ) -> Result<bool, StatefulRunStoreError> {
+        let call_id =
+            crate::call_source(call_id).ok_or(crate::run::StatefulRunError::InvalidProvenance)?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let removed =
             sqlx::query("DELETE FROM stateful_acceptance_pending WHERE run_id = ? AND call_id = ?")
                 .bind(run_id.as_str())
-                .bind(call_id)
+                .bind(&call_id)
                 .execute(&mut *transaction)
                 .await?
                 .rows_affected()

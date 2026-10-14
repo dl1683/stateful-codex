@@ -234,6 +234,8 @@ impl StatefulRunStore {
             } else {
                 (observed.outcome, observed.detail.as_deref())
             };
+            let source_id = crate::call_source(&observed.source_id)
+                .ok_or(crate::run::StatefulRunError::InvalidProvenance)?;
             insert_evidence(
                 &mut transaction,
                 run_id,
@@ -249,7 +251,7 @@ impl StatefulRunStore {
                     checker_digest: observed.checker_digest.as_deref(),
                     detail,
                     workspace_generation: observed.start_generation,
-                    source_id: &observed.source_id,
+                    source_id: &source_id,
                 },
                 now,
             )

@@ -10,6 +10,7 @@ mod acceptance_request;
 mod acceptance_storage;
 #[cfg(test)]
 mod acceptance_test_support;
+mod call_source;
 mod host_answer;
 mod measurement;
 mod measurement_storage;
@@ -52,6 +53,7 @@ pub use acceptance::unmet_criteria;
 pub use acceptance_coverage::MAX_OMISSION_PROPOSALS;
 pub use acceptance_coverage::sentences;
 pub use acceptance_coverage::uncovered_sentences;
+pub use call_source::call_source;
 pub use host_answer::ANSWERED_UNVERIFIED_BASIS;
 pub use host_answer::AnsweredRunCommit;
 pub use host_answer::AnsweredRunOutcome;

@@ -865,3 +865,72 @@ async fn a_fifo_artifact_is_refused_without_blocking_a_reader() {
         0
     );
 }
+
+#[tokio::test]
+async fn oversized_commands_end_forget_and_expire_with_bounded_evidence() {
+    let fixture = fixture("run-oversized-commands").await;
+    let root = fixture.project.path().to_path_buf();
+    let raw = "x".repeat(/*n*/ 67_222);
+    fixture
+        .start(&raw, "pytest -q tests/test_parse.py", &root)
+        .await;
+    assert_eq!(fixture.pending().await, 1);
+    assert!(
+        fixture
+            .store
+            .command_pending(&fixture.run_id, &raw)
+            .await
+            .expect("pending")
+    );
+    fixture
+        .finish(
+            &raw,
+            "pytest -q tests/test_parse.py",
+            &root,
+            "completed",
+            /*exit_code*/ 0,
+            "unknown",
+        )
+        .await;
+    let ledger = fixture
+        .store
+        .acceptance_ledger(&fixture.run_id)
+        .await
+        .expect("ledger");
+    assert_eq!(
+        (
+            fixture.pending().await,
+            ledger
+                .criterion(/*ordinal*/ 1)
+                .unwrap()
+                .evidence
+                .as_ref()
+                .unwrap()
+                .source_id
+                .clone()
+        ),
+        (0, crate::call_source::call_source(&raw).unwrap())
+    );
+    fixture.start(&raw, "make", &root).await;
+    forget_command(&fixture.services, &fixture.turn, &raw).await;
+    assert_eq!(fixture.pending().await, 0);
+    fixture.start(&raw, "make", &root).await;
+    command_exited(
+        &fixture.services,
+        &fixture.run_id,
+        &raw,
+        std::time::Duration::ZERO,
+    )
+    .await;
+    assert_eq!(
+        (
+            fixture.pending().await,
+            fixture
+                .store
+                .command_pending(&fixture.run_id, &raw)
+                .await
+                .expect("pending")
+        ),
+        (0, false)
+    );
+}

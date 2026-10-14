@@ -745,3 +745,143 @@ async fn identical_labelled_evidence_is_not_progress() {
         assert_eq!(again.revision, ledger.revision);
     }
 }
+
+#[tokio::test]
+async fn oversized_pending_commands_fence_completion_until_accounted() {
+    let (_home, store, id) = store(GOAL, WorkflowMode::Autonomous).await;
+    let ledger = store
+        .revise_acceptance(
+            &id,
+            /*expected_revision*/ 0,
+            vec![
+                checked("sh verify.sh", &["verify.sh"]),
+                admit(/*ordinal*/ 1),
+            ],
+            "call-1",
+            Some(_home.path().canonicalize().expect("root")),
+        )
+        .await
+        .expect("admitted");
+    let raw = "x".repeat(/*n*/ 67_222);
+    let mut evidence = receipt(&ledger, /*exit_code*/ 0, Some(CHECKER));
+    evidence.source_id = raw.clone();
+    store
+        .record_command_evidence(&id, vec![evidence])
+        .await
+        .expect("receipt");
+    let recorded = store.acceptance_ledger(&id).await.expect("ledger");
+    assert_eq!(
+        recorded
+            .criterion(/*ordinal*/ 1)
+            .unwrap()
+            .evidence
+            .as_ref()
+            .unwrap()
+            .source_id,
+        crate::call_source(&raw).unwrap()
+    );
+    store.begin_command(&id, &raw).await.expect("started");
+    let error = complete(&store, &id, state(CHECKER))
+        .await
+        .expect_err("pending fences completion");
+    assert!(error.to_string().contains("have not finished"), "{error}");
+    store.finish_command(&id, &raw).await.expect("finished");
+    assert_eq!(
+        store
+            .acceptance_ledger(&id)
+            .await
+            .expect("ledger")
+            .pending_commands,
+        0
+    );
+    assert_eq!(
+        complete(&store, &id, state(CHECKER))
+            .await
+            .expect("verified")
+            .status,
+        StatefulRunStatus::Completed
+    );
+}
+
+#[tokio::test]
+async fn completion_persists_bounded_final_sources_for_large_call_ids() {
+    for size in [539, 67_222] {
+        let (_home, store, id) = store(GOAL, WorkflowMode::Autonomous).await;
+        let ledger = store
+            .revise_acceptance(
+                &id,
+                /*expected_revision*/ 0,
+                vec![
+                    checked("sh verify.sh", &["verify.sh"]),
+                    admit(/*ordinal*/ 1),
+                ],
+                "call-1",
+                Some(_home.path().canonicalize().expect("root")),
+            )
+            .await
+            .expect("admitted");
+        store
+            .record_command_evidence(&id, vec![receipt(&ledger, /*exit_code*/ 0, Some(CHECKER))])
+            .await
+            .expect("receipt");
+        let run = store.get_run(&id).await.unwrap().unwrap();
+        let attempt = store
+            .begin_verification(&id, "owner", /*lease_ms*/ 60_000)
+            .await
+            .unwrap();
+        let ledger = store.acceptance_ledger(&id).await.unwrap();
+        let source = crate::call_source(&"x".repeat(size)).unwrap();
+        let (completed, obligation) = store
+            .complete_run_with_acceptance(
+                &id,
+                StatefulRunUpdate {
+                    expected_revision: run.revision,
+                    status: StatefulRunStatus::Completed,
+                    strategy: run.strategy,
+                    result: Some("Done.".to_string()),
+                },
+                &AcceptanceCommit {
+                    ledger_revision: ledger.revision,
+                    workspace_generation: ledger.workspace_generation,
+                    artifacts: state(PINNED),
+                    checkers: state(CHECKER),
+                    verification: VerificationClaim {
+                        owner: "owner".to_string(),
+                        attempt,
+                    },
+                    validated_obligation_sequence: None,
+                },
+                Some((
+                    "final-obligation".to_string(),
+                    crate::NewObligation {
+                        project_id: "project-1".to_string(),
+                        run_id: id.clone(),
+                        packet: crate::ObligationPacket {
+                            learning: vec!["Verified output.".to_string()],
+                            ..Default::default()
+                        },
+                        provenance_source_id: source.clone(),
+                    },
+                )),
+            )
+            .await
+            .expect("completion accepts bounded final provenance");
+        assert_eq!(
+            (
+                completed.status,
+                obligation.unwrap().value.provenance_source_id
+            ),
+            (StatefulRunStatus::Completed, source.clone())
+        );
+        assert_eq!(
+            store
+                .latest_obligation(&id)
+                .await
+                .unwrap()
+                .unwrap()
+                .value
+                .provenance_source_id,
+            source
+        );
+    }
+}
