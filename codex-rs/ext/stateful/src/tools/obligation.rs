@@ -91,22 +91,21 @@ impl ObligationUpdateTool {
                 "cannot update obligations for a terminal run".to_string(),
             ));
         }
-        let obligation = self
-            .services
-            .runtime()
-            .await
-            .map_err(respond)?
-            .append_obligation(
-                stable_id("obligation", &self.project_id, &arguments.idempotency_key),
-                NewObligation {
-                    project_id: self.project_id.clone(),
-                    run_id: run.id,
-                    packet: arguments.packet,
-                    provenance_source_id: source_id,
-                },
-            )
-            .await
-            .map_err(respond)?;
+        let store = self.services.runtime().await.map_err(respond)?;
+        let id = stable_id("obligation", &self.project_id, &arguments.idempotency_key);
+        let mut value = NewObligation {
+            project_id: self.project_id.clone(),
+            run_id: run.id,
+            packet: arguments.packet,
+            provenance_source_id: source_id,
+        };
+        let obligation = match store.append_obligation(id.clone(), value.clone()).await {
+            Err(codex_stateful_runtime::StatefulRunStoreError::ObligationIdentityConflict(_)) => {
+                value.provenance_source_id = call.call_id.clone();
+                store.append_obligation(id, value).await.map_err(respond)?
+            }
+            result => result.map_err(respond)?,
+        };
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::ObligationUpdated {
                 project_id: obligation.value.project_id.clone(),

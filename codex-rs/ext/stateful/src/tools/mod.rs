@@ -329,30 +329,10 @@ fn fits_response(value: &serde_json::Value, byte_budget: usize) -> bool {
     serde_json::to_vec(value).is_ok_and(|serialized| serialized.len() <= byte_budget)
 }
 
-/// Provenance source limit shared by the blackboard and run stores.
-const MAX_PROVENANCE_SOURCE_BYTES: usize = 512;
-
-/// The provenance source recorded for one tool call: the call ID, verbatim, exactly as
-/// before. A call ID that no store could accept (empty, containing control characters, or
-/// over the stores' limit) is refused up front with an explicit reason instead of failing
-/// each write separately; every ID a store accepted before is passed through unchanged, and
-/// each store still applies its own validation. Some provider bridges carry opaque reasoning
-/// state inside call IDs (LiteLLM appends Gemini thought signatures as
-/// `call_<id>__thought__<signature>`); recording those needs a stored raw/digest source
-/// discriminator, which is not available yet.
+/// Adapts the bounded provenance mapping to the existing tool refusal for an empty ID.
 fn provenance_source_id(call: &ToolCall<'_>) -> Result<String, FunctionCallError> {
-    let call_id = call.call_id.as_str();
-    let refusal = if call_id.is_empty() || call_id.chars().any(char::is_control) {
-        "nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded".to_string()
-    } else if call_id.len() > MAX_PROVENANCE_SOURCE_BYTES {
-        format!(
-            "nothing was written: this tool call's ID is {} bytes, over the {MAX_PROVENANCE_SOURCE_BYTES}-byte provenance limit, so Stateful cannot record its source. The model provider or its bridge issues oversized call IDs, which Stateful does not support yet; retrying the same call will not help.",
-            call_id.len()
-        )
-    } else {
-        return Ok(call_id.to_string());
-    };
-    Err(bounded_respond(call, &refusal))
+    crate::call_source::call_source(&call.call_id).ok_or_else(|| bounded_respond(call,
+        "nothing was written: this tool call has no usable call ID (it is empty or contains control characters), so its provenance cannot be recorded"))
 }
 
 fn stable_id(prefix: &str, project_id: &str, idempotency_key: &str) -> String {

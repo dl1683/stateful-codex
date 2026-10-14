@@ -193,7 +193,8 @@ impl BlackboardRecorder {
         }
         let provenance = BlackboardProvenance {
             kind: BlackboardProvenanceKind::Agent,
-            source_id: source_id.to_string(),
+            source_id: crate::call_source::call_source(source_id)
+                .ok_or_else(|| respond("empty call ID"))?,
         };
         let (evidence, inferred_node_id) = resolve_evidence(
             &self.project_id,
@@ -214,7 +215,7 @@ impl BlackboardRecorder {
         };
         let id = BlackboardEntryId::parse(stable_id("entry", &self.project_id, &idempotency_key))
             .map_err(respond)?;
-        let value = NewBlackboardEntry {
+        let mut value = NewBlackboardEntry {
             project_id: self.project_id.clone(),
             node_id,
             kind,
@@ -230,6 +231,15 @@ impl BlackboardRecorder {
             provenance,
         };
         let store = self.services.blackboard().await.map_err(respond)?;
+        // Preserve historical raw provenance before the full-value replay comparison.
+        if let Some(existing) = store
+            .get_entry(&self.project_id, &id)
+            .await
+            .map_err(respond)?
+            && existing.value.provenance.source_id == source_id
+        {
+            value.provenance.source_id = source_id.to_string();
+        }
         let retried = if supersedes.is_empty() {
             None
         } else {
@@ -434,7 +444,7 @@ impl BlackboardBatchRecordTool {
                     .collect::<Vec<_>>(),
             }),
         )?;
-        let source_id = provenance_source_id(&call)?;
+        provenance_source_id(&call)?;
         let mut results = Vec::with_capacity(records.len());
         let mut entry_ids = HashMap::with_capacity(records.len());
         let mut recorded = 0usize;
@@ -450,7 +460,7 @@ impl BlackboardBatchRecordTool {
             let record_key = record.idempotency_key.clone();
             match self
                 .recorder
-                .record(record, &call.turn_id, &source_id, &project_roots)
+                .record(record, &call.turn_id, &call.call_id, &project_roots)
                 .await
             {
                 Ok(entry) => {
@@ -507,7 +517,7 @@ impl BlackboardBatchRecordTool {
                 note: relation.note,
                 confidence_basis_points: relation.confidence_basis_points,
             };
-            match self.relator.relate(arguments, &source_id).await {
+            match self.relator.relate(arguments, &call.call_id).await {
                 Ok(created) => {
                     relations_recorded += 1;
                     relation_results.push(json!({
@@ -682,8 +692,8 @@ impl BlackboardRelateTool {
         call: ToolCall<'_>,
     ) -> Result<Box<dyn codex_extension_api::ToolOutput>, FunctionCallError> {
         let arguments: RelateArguments = parse_arguments(&call, RELATE_EXAMPLE)?;
-        let source_id = provenance_source_id(&call)?;
-        let relation = self.relate(arguments, &source_id).await?;
+        provenance_source_id(&call)?;
+        let relation = self.relate(arguments, &call.call_id).await?;
         bounded_json_output(
             &call,
             json!({
@@ -705,33 +715,28 @@ impl BlackboardRelateTool {
             &arguments.idempotency_key,
         ))
         .map_err(respond)?;
-        let relation = self
-            .services
-            .blackboard()
-            .await
-            .map_err(respond)?
-            .create_relation(
-                id,
-                NewBlackboardRelation {
-                    project_id: self.project_id.clone(),
-                    from_entry_id: BlackboardEntryId::parse(arguments.from_entry_id)
-                        .map_err(respond)?,
-                    to_entry_id: BlackboardEntryId::parse(arguments.to_entry_id)
-                        .map_err(respond)?,
-                    kind: arguments.kind,
-                    note: arguments.note,
-                    confidence: ConfidenceScore::from_basis_points(
-                        arguments.confidence_basis_points,
-                    )
-                    .map_err(respond)?,
-                    provenance: BlackboardProvenance {
-                        kind: BlackboardProvenanceKind::Agent,
-                        source_id: source_id.to_string(),
-                    },
-                },
-            )
-            .await
-            .map_err(respond)?;
+        let mut value = NewBlackboardRelation {
+            project_id: self.project_id.clone(),
+            from_entry_id: BlackboardEntryId::parse(arguments.from_entry_id).map_err(respond)?,
+            to_entry_id: BlackboardEntryId::parse(arguments.to_entry_id).map_err(respond)?,
+            kind: arguments.kind,
+            note: arguments.note,
+            confidence: ConfidenceScore::from_basis_points(arguments.confidence_basis_points)
+                .map_err(respond)?,
+            provenance: BlackboardProvenance {
+                kind: BlackboardProvenanceKind::Agent,
+                source_id: crate::call_source::call_source(source_id)
+                    .ok_or_else(|| respond("empty call ID"))?,
+            },
+        };
+        let store = self.services.blackboard().await.map_err(respond)?;
+        let relation = match store.create_relation(id.clone(), value.clone()).await {
+            Err(codex_project_intelligence::BlackboardStoreError::RelationIdentityConflict(_)) => {
+                value.provenance.source_id = source_id.to_string();
+                store.create_relation(id, value).await.map_err(respond)?
+            }
+            result => result.map_err(respond)?,
+        };
         if let Some(event_sink) = &self.event_sink {
             event_sink.emit(StatefulEvent::BlackboardUpdated {
                 project_id: relation.value.project_id.clone(),
