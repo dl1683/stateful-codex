@@ -156,10 +156,15 @@ impl AcceptanceUpdateTool {
         // A manual observation is pinned to the content of the criterion's artifacts, and a
         // plan admission to the checker bytes, both read by the host now; outside the local
         // executor nothing can be pinned.
+        let mut project_root = None;
         if changes.iter().any(|change| {
             matches!(
                 change,
-                AcceptanceChange::Observe { .. } | AcceptanceChange::Admit { .. }
+                AcceptanceChange::Add { .. }
+                    | AcceptanceChange::Refine { .. }
+                    | AcceptanceChange::Accept { .. }
+                    | AcceptanceChange::Observe { .. }
+                    | AcceptanceChange::Admit { .. }
             )
         }) {
             let ledger = runtime.acceptance_ledger(&run.id).await.map_err(respond)?;
@@ -171,6 +176,11 @@ impl AcceptanceUpdateTool {
             } else {
                 Vec::new()
             };
+            project_root = roots.first().and_then(|root: &String| {
+                std::fs::canonicalize(root)
+                    .ok()
+                    .filter(|root| root.is_dir())
+            });
             let pinned = |state: Option<&ArtifactState>| match state {
                 Some(ArtifactState::Observed { digest, missing }) if missing.is_empty() => {
                     Some(digest.clone())
@@ -208,6 +218,7 @@ impl AcceptanceUpdateTool {
                 arguments.expected_ledger_revision,
                 changes,
                 &source_id,
+                project_root,
             )
             .await
             .map_err(|error| {
@@ -256,6 +267,10 @@ fn convert(
             .collect::<Vec<_>>();
         if present.is_empty() {
             Ok(())
+        } else if change.action == Action::Admit && present.contains(&"checkCwd") {
+            Err(FunctionCallError::RespondToModel(
+                "nothing changed: checkCwd is declared with update, not admit".to_string(),
+            ))
         } else {
             Err(FunctionCallError::RespondToModel(format!(
                 "nothing changed: changes[{index}] does not take {} for this action",
@@ -420,6 +435,7 @@ fn convert(
             unexpected(&[
                 ("text", change.text.is_some()),
                 ("steeringId", change.steering_id.is_some()),
+                ("checkCwd", change.check_cwd.is_some()),
             ])?;
             Ok(AcceptanceChange::Admit {
                 ordinal: ordinal()?,

@@ -50,6 +50,7 @@ pub(crate) struct ChangeContext<'a> {
     pub(crate) ledger: &'a AcceptanceLedger,
     pub(crate) ledger_revision: u64,
     pub(crate) source_id: &'a str,
+    pub(crate) project_root: Option<&'a std::path::Path>,
     pub(crate) now: i64,
 }
 

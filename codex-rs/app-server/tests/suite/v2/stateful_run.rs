@@ -1496,8 +1496,13 @@ async fn oversized_completion_commits_once_and_pages_the_result_exactly() -> Res
             },
         })
         .await?;
-    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
-        .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(
+        codex_home.path(),
+        &started.run.id,
+        &[],
+        project_root.path(),
+    )
+    .await?;
     let result = "The \"indemnity\" cap is 15%; the DOE renewal is unresolved.\n"
         .repeat(300)
         .trim_end()
@@ -1707,8 +1712,13 @@ async fn oversized_durable_completion_pages_result_and_final_obligation_exactly(
             },
         })
         .await?;
-    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
-        .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(
+        codex_home.path(),
+        &started.run.id,
+        &[],
+        project_root.path(),
+    )
+    .await?;
     let result =
         "The \"indemnity\" cap is 15%; the DOE renewal remains unresolved. “Priority 1.”\n"
             .repeat(150)
@@ -1925,8 +1935,13 @@ async fn completion_fence_fixture(
             },
         })
         .await?;
-    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
-        .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(
+        codex_home.path(),
+        &started.run.id,
+        &[],
+        &project_root,
+    )
+    .await?;
     responses::mount_sse_sequence(
         responses_server,
         vec![

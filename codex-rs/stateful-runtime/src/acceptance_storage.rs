@@ -53,12 +53,14 @@ impl StatefulRunStore {
     }
 
     /// Applies criterion changes and labelled evidence as one ledger revision.
+    /// `project_root` is the host-attested canonical first root of the local executor.
     pub async fn revise_acceptance(
         &self,
         run_id: &StatefulRunId,
         expected_revision: u64,
         changes: Vec<AcceptanceChange>,
         source_id: &str,
+        project_root: Option<std::path::PathBuf>,
     ) -> Result<AcceptanceLedger, StatefulRunStoreError> {
         if changes.is_empty() || changes.len() > MAX_ACCEPTANCE_CHANGES {
             return Err(AcceptanceError::InvalidChangeCount.into());
@@ -90,6 +92,7 @@ impl StatefulRunStore {
                 ledger: &ledger,
                 ledger_revision: expected_revision + 1,
                 source_id,
+                project_root: project_root.as_deref(),
                 now,
             };
             changed |= apply_change(&mut transaction, &context, change).await?;
@@ -133,6 +136,7 @@ impl StatefulRunStore {
             ledger: &ledger,
             ledger_revision: ledger.revision + 1,
             source_id: "host-omission-check",
+            project_root: None,
             now,
         };
         let mut added = 0;

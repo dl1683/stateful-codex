@@ -92,7 +92,7 @@ async fn model_cannot_complete_a_run_with_unresolved_user_steering() -> Result<(
             },
         })
         .await?;
-    seed_admitted_plan(codex_home.path(), &started.run.id, &[]).await?;
+    seed_admitted_plan(codex_home.path(), &started.run.id, &[], project_root.path()).await?;
     let submitted: SteeringSubmitResponse = server
         .request(|request_id| ClientRequest::SteeringSubmit {
             request_id,
@@ -545,7 +545,7 @@ async fn complete_lookup_after_recording(
             },
         })
         .await?;
-    seed_admitted_plan(codex_home.path(), &started.run.id, &[]).await?;
+    seed_admitted_plan(codex_home.path(), &started.run.id, &[], project_root.path()).await?;
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![
@@ -839,7 +839,21 @@ async fn start_lookup_run(
             },
         })
         .await?;
-    seed_admitted_plan(codex_home, &started.run.id, &[]).await?;
+    let project: codex_app_server_protocol::ProjectReadResponse = server
+        .request(|request_id| ClientRequest::ProjectRead {
+            request_id,
+            params: codex_app_server_protocol::ProjectReadParams {
+                project_id: project_id.to_string(),
+            },
+        })
+        .await?;
+    seed_admitted_plan(
+        codex_home,
+        &started.run.id,
+        &[],
+        project.project.roots[0].path.as_path(),
+    )
+    .await?;
     Ok((thread.thread.id, started.run.id, started.run.revision))
 }
 

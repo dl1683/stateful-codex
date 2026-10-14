@@ -68,8 +68,13 @@ async fn autonomous_run_continues_after_idle_until_the_model_completes_it() -> R
             },
         })
         .await?;
-    super::stateful_acceptance_support::seed_admitted_plan(codex_home.path(), &started.run.id, &[])
-        .await?;
+    super::stateful_acceptance_support::seed_admitted_plan(
+        codex_home.path(),
+        &started.run.id,
+        &[],
+        project_root.path(),
+    )
+    .await?;
     let response_log = responses::mount_sse_sequence(
         &responses_server,
         vec![

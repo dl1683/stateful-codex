@@ -134,6 +134,7 @@ async fn orientation_findings_and_conversation_reach_a_fresh_thread() -> Result<
         codex_home.path(),
         &started.run.id,
         &["README.md"],
+        project_root.path(),
     )
     .await?;
 

@@ -242,6 +242,24 @@ async fn user_criteria_link_to_exact_goal_spans() {
 }
 
 #[tokio::test]
+async fn admit_cannot_silently_drop_check_cwd() {
+    let fixture = fixture("All tests must pass.", WorkflowMode::Autonomous).await;
+    let before = fixture.ledger().await;
+    let refused = fixture
+        .update(
+            /*revision*/ 0,
+            json!([{"action": "admit", "criterion": "C1", "checkCwd": "."}]),
+        )
+        .await
+        .expect_err("admit cannot replace terms");
+    assert!(
+        refused.contains("checkCwd is declared with update, not admit"),
+        "{refused}"
+    );
+    assert_eq!(fixture.ledger().await, before);
+}
+
+#[tokio::test]
 async fn completion_runs_the_omission_check_refuses_unmet_gates_and_blocks_after_stalls() {
     let fixture = fixture(
         "Fix the parser. Write the summary to out/report.json. All tests must pass.",

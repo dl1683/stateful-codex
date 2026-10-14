@@ -71,6 +71,7 @@ async fn c2cut_historical_completion_refuses_without_mutation_and_current_root_c
         home.path(),
         &started.run.id,
         &[],
+        &acceptance_root,
     )
     .await?;
     let recorded = model_call(

@@ -218,6 +218,7 @@ async fn acceptance_ledger_persists_across_restart_with_spans_and_evidence() {
                 report_deliverable(),
             ],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criteria recorded");
@@ -291,6 +292,7 @@ async fn user_criteria_cannot_be_weakened_and_revisions_conflict() {
                 report_deliverable(),
             ],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criteria recorded");
@@ -300,7 +302,8 @@ async fn user_criteria_cannot_be_weakened_and_revisions_conflict() {
                 &id,
                 0,
                 vec![user_check("Fix the parser.", "pytest -q tests")],
-                "call-2"
+                "call-2",
+                /*project_root*/ None,
             )
             .await,
         Err(StatefulRunStoreError::AcceptanceRevisionConflict {
@@ -366,7 +369,13 @@ async fn user_criteria_cannot_be_weakened_and_revisions_conflict() {
         },
     ] {
         let error = store
-            .revise_acceptance(&id, before.revision, vec![change], "call-3")
+            .revise_acceptance(
+                &id,
+                before.revision,
+                vec![change],
+                "call-3",
+                /*project_root*/ None,
+            )
             .await
             .expect_err("weakening refused");
         assert!(
@@ -387,7 +396,8 @@ async fn user_criteria_cannot_be_weakened_and_revisions_conflict() {
                 &id,
                 before.revision,
                 vec![user_check("Fix the parser.", "pytest\nrm -rf out")],
-                "call-4"
+                "call-4",
+                /*project_root*/ None,
             )
             .await,
         Err(StatefulRunStoreError::Acceptance(
@@ -412,6 +422,7 @@ async fn only_a_covering_user_criterion_dismisses_a_proposal() {
                 receipt: DismissalReceipt::CoveredBy(1),
             }],
             "call-forged",
+            /*project_root*/ None,
         )
         .await
         .expect_err("a proposal is no cover");
@@ -433,6 +444,7 @@ async fn only_a_covering_user_criterion_dismisses_a_proposal() {
             ledger.revision,
             vec![report_deliverable()],
             "call-cover",
+            /*project_root*/ None,
         )
         .await
         .expect("covering criterion");
@@ -446,6 +458,7 @@ async fn only_a_covering_user_criterion_dismisses_a_proposal() {
                 receipt: DismissalReceipt::CoveredBy(4),
             }],
             "call-receipt",
+            /*project_root*/ None,
         )
         .await
         .expect("covered dismissal");
@@ -512,6 +525,7 @@ async fn a_full_ledger_keeps_the_remaining_sentences_uncovered() {
                 revision,
                 (0..8).map(|index| derived(batch * 8 + index)).collect(),
                 "call-fill",
+                /*project_root*/ None,
             )
             .await
             .expect("filled")
@@ -553,6 +567,7 @@ async fn manual_assertions_and_file_presence_do_not_settle_requirements() {
                 },
             ],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criteria recorded");
@@ -568,6 +583,7 @@ async fn manual_assertions_and_file_presence_do_not_settle_requirements() {
                     artifact_digest: None,
                 }],
                 "call-assert",
+                /*project_root*/ None,
             )
             .await,
         Err(StatefulRunStoreError::Acceptance(AcceptanceError::Refused(
@@ -604,6 +620,7 @@ async fn receipts_are_bound_to_start_state_pinned_content_and_reentry() {
                 },
             }],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criterion");
@@ -671,6 +688,7 @@ async fn manual_observations_are_pinned_to_the_inspected_content() {
                 },
             }],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criterion");
@@ -684,6 +702,7 @@ async fn manual_observations_are_pinned_to_the_inspected_content() {
                 artifact_digest: Some(DIGEST.to_string()),
             }],
             "call-2",
+            /*project_root*/ None,
         )
         .await
         .expect("observation");
@@ -815,7 +834,7 @@ async fn dependency_vectors_are_bounded_and_unique() {
         terms: CriterionTerms::default(),
     };
     let ledger = store
-        .revise_acceptance(&id, 0, vec![first], "call-1")
+        .revise_acceptance(&id, 0, vec![first], "call-1", /*project_root*/ None)
         .await
         .expect("C1");
     for depends_on in [vec![1; 2], vec![1; 10_000]] {
@@ -834,6 +853,7 @@ async fn dependency_vectors_are_bounded_and_unique() {
                     },
                 }],
                 "call-2",
+                /*project_root*/ None,
             )
             .await
             .expect_err("duplicates and oversized vectors refused");
@@ -854,6 +874,7 @@ async fn a_no_op_refinement_is_not_progress() {
             0,
             vec![user_check("All tests must pass.", "pytest -q")],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criterion");
@@ -872,6 +893,7 @@ async fn a_no_op_refinement_is_not_progress() {
                 terms: TermsUpdate::default(),
             }],
             "call-noop",
+            /*project_root*/ None,
         )
         .await
         .expect("no-op accepted");
@@ -943,6 +965,7 @@ async fn socratic_runs_record_no_evidence_before_execution() {
             0,
             vec![user_check("All tests must pass.", "pytest -q")],
             "call-1",
+            /*project_root*/ None,
         )
         .await
         .expect("criteria can be agreed while pending");

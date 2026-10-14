@@ -39,6 +39,9 @@ const CHECKER: &str = "sha256:checker";
 
 async fn store(goal: &str, mode: WorkflowMode) -> (TempDir, StatefulRunStore, StatefulRunId) {
     let home = TempDir::new().expect("tempdir");
+    for checker in ["verify.sh", "verify2.sh", "fixtures.csv"] {
+        std::fs::write(home.path().join(checker), "checker").expect("checker exists");
+    }
     let store = StatefulRunStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await
         .expect("store opens");
@@ -171,6 +174,11 @@ async fn complete(
 
 #[test]
 fn only_an_execution_of_a_declared_checker_is_admissible() {
+    let root = TempDir::new().expect("root");
+    std::fs::create_dir(root.path().join("tests")).expect("tests");
+    for path in ["verify.sh", "tests/test_out.py"] {
+        std::fs::write(root.path().join(path), "checker").expect("checker");
+    }
     let checker = ["verify.sh".to_string(), "tests/test_out.py".to_string()];
     for (command, cwd) in [
         ("sh verify.sh", None),
@@ -205,7 +213,12 @@ fn only_an_execution_of_a_declared_checker_is_admissible() {
         "pytest tests/test_out.py",
     ] {
         assert!(
-            crate::acceptance_plan::executed_checker(command, None, &checker).is_err(),
+            crate::acceptance_plan::executed_checker(
+                command,
+                /*check_cwd*/ None,
+                &checker
+            )
+            .is_err(),
             "{command}"
         );
     }
@@ -220,6 +233,7 @@ async fn the_host_admits_only_plans_that_execute_a_declared_checker() {
             0,
             vec![checked("echo suite-ok", &["verify.sh"])],
             "call-1",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("criterion");
@@ -234,7 +248,13 @@ async fn the_host_admits_only_plans_that_execute_a_declared_checker() {
         ),
     ] {
         let error = store
-            .revise_acceptance(&id, ledger.revision, vec![change], "call-admit")
+            .revise_acceptance(
+                &id,
+                ledger.revision,
+                vec![change],
+                "call-admit",
+                Some(_home.path().canonicalize().expect("root")),
+            )
             .await
             .expect_err(why);
         assert!(
@@ -251,7 +271,8 @@ async fn the_host_admits_only_plans_that_execute_a_declared_checker() {
                 &id,
                 ledger.revision,
                 vec![checked("sh verify.sh", &["out.txt"])],
-                "call-overlap"
+                "call-overlap",
+                Some(_home.path().canonicalize().expect("root")),
             )
             .await,
         Err(StatefulRunStoreError::Acceptance(
@@ -275,6 +296,7 @@ async fn the_host_admits_only_plans_that_execute_a_declared_checker() {
                 admit(1),
             ],
             "call-admit",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("a check naming its checker is admitted");
@@ -294,6 +316,7 @@ async fn an_admitted_plan_settles_unattended_autonomous_work_without_steering() 
             0,
             vec![checked("sh verify.sh", &["verify.sh"]), admit(1)],
             "call-1",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("admitted");
@@ -339,6 +362,7 @@ async fn changing_the_plan_or_receipts_of_other_bytes_need_readmission() {
             0,
             vec![checked("sh verify.sh", &["verify.sh"]), admit(1)],
             "call-1",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("admitted");
@@ -366,6 +390,7 @@ async fn changing_the_plan_or_receipts_of_other_bytes_need_readmission() {
                 },
             }],
             "call-scope",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("dependencies grew");
@@ -393,6 +418,7 @@ async fn applied_steering_blocks_until_reconciled_and_withdraws_admissions() {
             0,
             vec![checked("sh verify.sh", &["verify.sh"]), admit(1)],
             "call-1",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("admitted");
@@ -467,6 +493,7 @@ async fn applied_steering_blocks_until_reconciled_and_withdraws_admissions() {
                 reason: "Adds out2.txt; covered by a new criterion.".to_string(),
             }],
             "call-reconcile",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect_err("a claimed criterion that does not exist incorporates nothing");
@@ -514,6 +541,7 @@ async fn applied_steering_blocks_until_reconciled_and_withdraws_admissions() {
                 },
             ],
             "call-reconcile",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("incorporated and reconciled");
@@ -525,6 +553,7 @@ async fn applied_steering_blocks_until_reconciled_and_withdraws_admissions() {
             reconciled.revision,
             vec![admit(1), admit(2)],
             "call-readmit",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("readmitted");
@@ -597,6 +626,7 @@ async fn an_exited_command_without_an_end_closes_as_terminated_unknown() {
             0,
             vec![checked("sh verify.sh", &["verify.sh"]), admit(1)],
             "call-1",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("admitted");
@@ -675,6 +705,7 @@ async fn identical_labelled_evidence_is_not_progress() {
                 },
             }],
             "call-1",
+            Some(_home.path().canonicalize().expect("root")),
         )
         .await
         .expect("criterion");
@@ -683,7 +714,13 @@ async fn identical_labelled_evidence_is_not_progress() {
         reason: "No checker exists.".to_string(),
     };
     let ledger = store
-        .revise_acceptance(&id, ledger.revision, vec![no_check()], "call-2")
+        .revise_acceptance(
+            &id,
+            ledger.revision,
+            vec![no_check()],
+            "call-2",
+            Some(_home.path().canonicalize().expect("root")),
+        )
         .await
         .expect("first");
     for attempt in 1..=3 {
@@ -692,7 +729,13 @@ async fn identical_labelled_evidence_is_not_progress() {
             attempt
         );
         let again = store
-            .revise_acceptance(&id, ledger.revision, vec![no_check()], "call-again")
+            .revise_acceptance(
+                &id,
+                ledger.revision,
+                vec![no_check()],
+                "call-again",
+                Some(_home.path().canonicalize().expect("root")),
+            )
             .await
             .expect("identical restatement");
         assert_eq!(again.revision, ledger.revision);

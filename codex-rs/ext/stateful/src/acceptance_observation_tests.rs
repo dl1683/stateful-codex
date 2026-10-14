@@ -143,6 +143,7 @@ async fn fixture(run: &str) -> Fixture {
                 },
             }],
             "call-add",
+            /*project_root*/ None,
         )
         .await
         .expect("criterion added");
@@ -233,6 +234,7 @@ impl Fixture {
                     },
                 }],
                 "call-c2",
+                /*project_root*/ None,
             )
             .await
             .expect("C2");
@@ -611,6 +613,7 @@ async fn a_declared_check_that_mutates_governing_files_invalidates_earlier_evide
                 },
             }],
             "call-c2",
+            /*project_root*/ None,
         )
         .await
         .expect("C2");

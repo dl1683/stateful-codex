@@ -66,6 +66,8 @@ pub(crate) async fn settled_commit(
 
 /// C1 quotes the whole request; its plan is admitted and a passing receipt recorded.
 async fn settle(store: &StatefulRunStore, run_id: &StatefulRunId) {
+    let project = tempfile::TempDir::new().expect("project");
+    std::fs::write(project.path().join("verify.sh"), "checker").expect("checker");
     let ordinal = 1;
     let request = store.acceptance_request(run_id).await.expect("request");
     let ledger = store.acceptance_ledger(run_id).await.expect("ledger");
@@ -97,6 +99,7 @@ async fn settle(store: &StatefulRunStore, run_id: &StatefulRunId) {
                 },
             ],
             "call-settle",
+            Some(project.path().canonicalize().expect("root")),
         )
         .await
         .expect("criterion admitted");

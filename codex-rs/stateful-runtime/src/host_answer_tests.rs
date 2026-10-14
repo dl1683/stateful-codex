@@ -493,11 +493,18 @@ async fn retired_optional_and_proposed_criteria_are_not_listed() {
                 derived(&long, true),
             ],
             "call-add",
+            /*project_root*/ None,
         )
         .await
         .expect("criteria added");
     store
-        .revise_acceptance(&listed.id, ledger.revision, vec![retire(2)], "call-retire")
+        .revise_acceptance(
+            &listed.id,
+            ledger.revision,
+            vec![retire(2)],
+            "call-retire",
+            /*project_root*/ None,
+        )
         .await
         .expect("retired");
     store.propose_uncovered(&listed.id).await.expect("proposed");
@@ -538,11 +545,18 @@ async fn retired_optional_and_proposed_criteria_are_not_listed() {
             /*expected_revision*/ 0,
             vec![derived("Retire me.", true)],
             "call-add",
+            /*project_root*/ None,
         )
         .await
         .expect("criterion added");
     store
-        .revise_acceptance(&retired.id, ledger.revision, vec![retire(1)], "call-retire")
+        .revise_acceptance(
+            &retired.id,
+            ledger.revision,
+            vec![retire(1)],
+            "call-retire",
+            /*project_root*/ None,
+        )
         .await
         .expect("retired");
     assert_eq!(

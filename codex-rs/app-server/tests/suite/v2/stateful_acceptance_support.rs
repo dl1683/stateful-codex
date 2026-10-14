@@ -65,6 +65,7 @@ pub(super) async fn seed_admitted_plan(
     codex_home: &Path,
     run_id: &str,
     other_files: &[&str],
+    project_root: &Path,
 ) -> Result<()> {
     let store = StatefulRunStore::open(&SqliteConfig::new_for_testing(codex_home.abs())).await?;
     let run_id = StatefulRunId::parse(run_id)?;
@@ -95,6 +96,7 @@ pub(super) async fn seed_admitted_plan(
                 },
             }],
             "seed-acceptance",
+            Some(project_root.canonicalize()?),
         )
         .await?;
     store
@@ -106,6 +108,7 @@ pub(super) async fn seed_admitted_plan(
                 checker_digest: Some(checker_digest()),
             }],
             "seed-admission",
+            Some(project_root.canonicalize()?),
         )
         .await?;
     Ok(())
@@ -150,6 +153,8 @@ pub(super) async fn seeded_commit(
     const SEEDED_ARTIFACT: &str = "sha256:seeded-artifact";
     const SEEDED_CHECKER: &str = "sha256:seeded-checker";
     if store.acceptance_ledger(run_id).await?.criteria.is_empty() {
+        let project = tempfile::TempDir::new()?;
+        std::fs::write(project.path().join(CHECKER), CHECKER_SCRIPT)?;
         let request = store.acceptance_request(run_id).await?;
         let ledger = store.acceptance_ledger(run_id).await?;
         let ledger = store
@@ -180,6 +185,7 @@ pub(super) async fn seeded_commit(
                     },
                 ],
                 "seed-acceptance",
+                Some(project.path().canonicalize()?),
             )
             .await?;
         let criterion = ledger.criterion(1).expect("seeded criterion");

@@ -531,7 +531,13 @@ async fn status_only_after_commit_warns_per_route() -> Result<()> {
         let mut harness = harness().await?;
         let run = harness.start_run(COLLABORATIVE).await?;
         let home = harness.codex_home.path();
-        super::stateful_acceptance_support::seed_admitted_plan(home, &run.id, &[]).await?;
+        super::stateful_acceptance_support::seed_admitted_plan(
+            home,
+            &run.id,
+            &[],
+            harness.project_root.path(),
+        )
+        .await?;
         let root = harness.project_root.path();
         let mut script = match name {
             "R1" | "C1" => vec![
