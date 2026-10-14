@@ -3,10 +3,16 @@ use crate::acceptance_observation::checker_states;
 use codex_stateful_runtime::TermsUpdate;
 use pretty_assertions::assert_eq;
 
+#[cfg(windows)]
+const PYTHON: &str = "python";
+#[cfg(not(windows))]
+const PYTHON: &str = "python3";
+
 #[tokio::test]
 async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail() {
     let fixture = fixture("walk-python").await;
     let root = fixture.project.path();
+    let command = format!("{PYTHON} check.py");
     std::fs::write(root.join("check.py"), "print('OK')\n").unwrap();
     let ledger = fixture
         .store
@@ -19,7 +25,7 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
                 required: None,
                 terms: TermsUpdate {
                     checker: Some(vec!["check.py".to_string()]),
-                    check_command: Some("python check.py".to_string()),
+                    check_command: Some(command.clone()),
                     ..TermsUpdate::default()
                 },
             }],
@@ -47,8 +53,8 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
         .await
         .unwrap();
     assert!(!root.join(".git").exists());
-    fixture.start("python", "python check.py", root).await;
-    let output = std::process::Command::new("python")
+    fixture.start("python", &command, root).await;
+    let output = std::process::Command::new(PYTHON)
         .arg("check.py")
         .current_dir(root)
         .output()
@@ -57,7 +63,7 @@ async fn w1_an_admitted_python_check_in_a_plain_directory_passes_without_detail(
     fixture
         .finish(
             "python",
-            "python check.py",
+            &command,
             root,
             "completed",
             /*exit_code*/ 0,
