@@ -96,10 +96,18 @@ fn w18_dangling_ancestor_is_not_absence() {
         ),
         Err(IdentityGap::Entry {
             path: root.canonicalize().unwrap().join("src"),
-            kind: crate::acceptance_identity_reason::EntryKind::Reparse,
+            kind: DANGLING_LINK_KIND,
         })
     );
 }
+
+// D-7 refuses dangling links; the reported kind follows the platform's link model.
+#[cfg(unix)]
+const DANGLING_LINK_KIND: crate::acceptance_identity_reason::EntryKind =
+    crate::acceptance_identity_reason::EntryKind::EscapingLink;
+#[cfg(windows)]
+const DANGLING_LINK_KIND: crate::acceptance_identity_reason::EntryKind =
+    crate::acceptance_identity_reason::EntryKind::Reparse;
 
 #[test]
 fn w14_empty_git_root_is_identified() {
