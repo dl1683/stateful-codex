@@ -648,6 +648,7 @@ async fn answered_bodies_warn_only_when_status_only() -> Result<()> {
         let durable = read.run.expect("run");
         let host_answer = read.host_answer.expect("answer recorded");
         let expected_answer = codex_app_server_protocol::StatefulHostAnswer {
+            outcome: codex_app_server_protocol::StatefulHostAnswerOutcome::Answered,
             turn_id,
             answer,
             basis: ANSWERED_UNVERIFIED_BASIS.to_string(),
@@ -662,6 +663,45 @@ async fn answered_bodies_warn_only_when_status_only() -> Result<()> {
                 expected_answer,
             ),
             "{body}"
+        );
+    }
+    Ok(())
+}
+
+/// A11(iv), W1: the public encoding matches admission, and legacy JSON defaults to Answered.
+#[test]
+fn published_answer_size_and_legacy_outcome() -> Result<()> {
+    use codex_app_server_protocol::StatefulHostAnswer;
+    use codex_app_server_protocol::StatefulHostAnswerOutcome;
+    for (outcome, runtime_outcome) in [
+        (
+            StatefulHostAnswerOutcome::Answered,
+            runtime::HostAnswerOutcome::Answered,
+        ),
+        (
+            StatefulHostAnswerOutcome::Partial,
+            runtime::HostAnswerOutcome::Partial,
+        ),
+    ] {
+        let answer = StatefulHostAnswer {
+            turn_id: "turn-\"1".to_string(),
+            answer: "Quoted \"answer\"\nnext line".to_string(),
+            basis: runtime_outcome.basis().to_string(),
+            committed_at: i64::MIN,
+            outcome,
+        };
+        assert_eq!(
+            serde_json::to_vec(&answer)?.len(),
+            runtime::serialized_answer_bytes(&answer.turn_id, &answer.answer, runtime_outcome)
+        );
+        let mut legacy = serde_json::to_value(&answer)?;
+        legacy.as_object_mut().expect("object").remove("outcome");
+        assert_eq!(
+            serde_json::from_value::<StatefulHostAnswer>(legacy)?,
+            StatefulHostAnswer {
+                outcome: StatefulHostAnswerOutcome::Answered,
+                ..answer
+            }
         );
     }
     Ok(())

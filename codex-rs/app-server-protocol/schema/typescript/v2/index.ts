@@ -500,6 +500,7 @@ export type { StatefulAttributionCounters } from "./StatefulAttributionCounters"
 export type { StatefulAttributionStatus } from "./StatefulAttributionStatus";
 export type { StatefulCaptureOutcome } from "./StatefulCaptureOutcome";
 export type { StatefulHostAnswer } from "./StatefulHostAnswer";
+export type { StatefulHostAnswerOutcome } from "./StatefulHostAnswerOutcome";
 export type { StatefulKnowledgeCapturedNotification } from "./StatefulKnowledgeCapturedNotification";
 export type { StatefulKnowledgeCategory } from "./StatefulKnowledgeCategory";
 export type { StatefulMeasurementSummary } from "./StatefulMeasurementSummary";

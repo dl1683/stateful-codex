@@ -19335,6 +19335,14 @@
           "format": "int64",
           "type": "integer"
         },
+        "outcome": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StatefulHostAnswerOutcome"
+            }
+          ],
+          "default": "answered"
+        },
         "turnId": {
           "type": "string"
         }
@@ -19346,6 +19354,14 @@
         "turnId"
       ],
       "type": "object"
+    },
+    "StatefulHostAnswerOutcome": {
+      "description": "The answer a run ended with. The user, not the host, judges it.",
+      "enum": [
+        "answered",
+        "partial"
+      ],
+      "type": "string"
     },
     "StatefulKnowledgeCapturedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",

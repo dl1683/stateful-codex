@@ -5228,16 +5228,9 @@ class StatefulCaptureOutcome(Enum):
     already_stored = "alreadyStored"
 
 
-class StatefulHostAnswer(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    answer: Annotated[str, Field(description="The final answer exactly as the user received it.")]
-    basis: Annotated[
-        str, Field(description="States that neither the answer nor the run's work was verified.")
-    ]
-    committed_at: Annotated[int, Field(alias="committedAt")]
-    turn_id: Annotated[str, Field(alias="turnId")]
+class StatefulHostAnswerOutcome(Enum):
+    answered = "answered"
+    partial = "partial"
 
 
 class StatefulKnowledgeCategoryValue(Enum):
@@ -10395,6 +10388,19 @@ class StatefulAttributionCompletedNotification(BaseModel):
     project_id: Annotated[str, Field(alias="projectId")]
     status: StatefulAttributionStatus
     thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
+class StatefulHostAnswer(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    answer: Annotated[str, Field(description="The final answer exactly as the user received it.")]
+    basis: Annotated[
+        str, Field(description="States that neither the answer nor the run's work was verified.")
+    ]
+    committed_at: Annotated[int, Field(alias="committedAt")]
+    outcome: StatefulHostAnswerOutcome | None = "answered"
     turn_id: Annotated[str, Field(alias="turnId")]
 
 

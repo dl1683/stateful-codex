@@ -104,6 +104,16 @@ pub struct StatefulRunReadResponse {
 }
 
 /// The answer a run ended with. The user, not the host, judges it.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum StatefulHostAnswerOutcome {
+    #[default]
+    Answered,
+    Partial,
+}
+
+/// The answer a run ended with. The user, not the host, judges it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -115,6 +125,8 @@ pub struct StatefulHostAnswer {
     pub basis: String,
     #[ts(type = "number")]
     pub committed_at: i64,
+    #[serde(default)]
+    pub outcome: StatefulHostAnswerOutcome,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

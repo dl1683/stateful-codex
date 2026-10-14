@@ -165,6 +165,14 @@ impl StatefulRequestProcessor {
                 .await
                 .map_err(runtime_error)?
                 .map(|record| StatefulHostAnswer {
+                    outcome: match record.outcome() {
+                        codex_stateful_runtime::HostAnswerOutcome::Answered => {
+                            codex_app_server_protocol::StatefulHostAnswerOutcome::Answered
+                        }
+                        codex_stateful_runtime::HostAnswerOutcome::Partial => {
+                            codex_app_server_protocol::StatefulHostAnswerOutcome::Partial
+                        }
+                    },
                     turn_id: record.turn_id,
                     answer: record.answer,
                     basis: record.basis,
