@@ -15,6 +15,9 @@ use super::*;
 const BLOCK: &str =
     "[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]";
 
+#[path = "answered_activation_tests.rs"]
+mod activation;
+
 async fn store(home: &TempDir) -> StatefulRunStore {
     StatefulRunStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
         .await
