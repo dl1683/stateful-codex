@@ -18,7 +18,7 @@ use crate::tools::thread_run;
 /// claims nothing about state, because some rejections follow a committed update.
 const OVERSIZED_REJECTION: &str = "stateful_run_update was rejected with a message longer than this call's response allowance; read the run with stateful_run_read before retrying.";
 const ANSWER_FALLBACK: &str = "stateful_run_update was rejected; read the run. Give a substantive final answer; an eligible final ends Answered or Partial. Apply or settle pending steering first.";
-pub(super) const ANSWER_GUIDANCE: &str = "Give a substantive final answer; an eligible final ends Answered or Partial. Neither outcome certifies work; no completion call is required. If you recorded next work this turn, explicitly choose the answer with this trailing block on separate lines:\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]\nList unfinished items under open-issues instead of none. Apply or settle pending steering first; size, binding and authorization gates still apply.";
+pub(super) const ANSWER_GUIDANCE: &str = "Give a substantive final answer; an eligible final ends Answered or Partial. Neither certifies work; no completion call is required. After recorded next work, explicitly choose the answer with these trailer lines:\n[stateful-outcome]\ndisposition: answer\nopen-issues: none\n[/stateful-outcome]\nFor unfinished items, use open-issues: followed by separate lines starting with '- '. Apply or settle pending steering first; size, binding and authorization gates still apply.";
 
 #[derive(Clone, Copy)]
 enum RejectionRoute {

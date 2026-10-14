@@ -58,6 +58,63 @@ fn commit_error() -> Result<AnsweredRunOutcome, StatefulRunStoreError> {
     Err(StatefulRunStoreError::ConcurrentMutation)
 }
 
+/// A trailer-only issue must survive parsing, finalization and durable Partial disclosure.
+#[tokio::test]
+async fn advertised_nonempty_trailer_finalizes_partial() {
+    let home = TempDir::new().expect("tempdir");
+    let store = store(&home).await;
+    // Fresh Autonomous run: no criteria, blockers or steering; no progress is recorded.
+    let run = running_run(&store).await;
+    let answer = "It returns a Result, but verification remains unfinished.\n[stateful-outcome]\ndisposition: answer\nopen-issues:\n- verification remains unfinished\n[/stateful-outcome]";
+    let session = codex_extension_api::ExtensionData::new("session");
+    let thread = codex_extension_api::ExtensionData::new("thread-1");
+    let turn = codex_extension_api::ExtensionData::new("turn-1");
+    turn.insert(LastAgentMessage::from_item(&AgentMessageItem {
+        id: "final".into(),
+        content: vec![AgentMessageContent::Text {
+            text: answer.into(),
+        }],
+        phase: None,
+        memory_citation: None,
+        delivery: None,
+        questions: None,
+    }));
+    let outcome = finalize(
+        &store,
+        /*event_sink*/ None,
+        run.id.clone(),
+        "thread-1",
+        &TurnFinalizeInput {
+            turn_id: "turn-1",
+            last_agent_message: answer,
+            authorize_commit: &|| true,
+            session_store: &session,
+            thread_store: &thread,
+            turn_store: &turn,
+        },
+        ModelProgress::Absent,
+    )
+    .await;
+    let ended = store.get_run(&run.id).await.expect("read").expect("run");
+    let record = store
+        .host_answer(&run.id)
+        .await
+        .expect("read")
+        .expect("answer");
+    assert_eq!(
+        (ended.status, record.outcome(), outcome, ended.result),
+        (
+            StatefulRunStatus::Answered,
+            HostAnswerOutcome::Partial,
+            TurnFinalizeOutcome::Warning(
+                "Stateful: this run ended partial; it is not certified by this terminal answer path. Open or not certified: verification remains unfinished".into()
+            ),
+            Some(format!("{PARTIAL_RESULT_HEADER}- verification remains unfinished\n\nIt returns a Result, but verification remains unfinished.")),
+        )
+    );
+    assert!(!ANSWER_OUTCOME_GUIDANCE.contains("open-issues: none or unfinished items"));
+}
+
 /// An error after authorization leaves the COMMIT outcome unknown: the record is re-read, and
 /// the result is reported as answered, not saved, or unknown, never as a cancellation.
 #[tokio::test]
