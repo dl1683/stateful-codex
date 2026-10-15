@@ -94,6 +94,7 @@ members = [
     "ollama",
     "process-hardening",
     "project-intelligence",
+    "project-store",
     "stateful-runtime",
     "realtime-webrtc",
     "voice-host",
