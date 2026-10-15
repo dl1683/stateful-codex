@@ -7,6 +7,9 @@ use super::super::validate;
 use crate::SqliteConfig;
 use crate::migrations::STATE_MIGRATOR;
 
+#[path = "state_archive_tests.rs"]
+mod archive_tests;
+
 async fn legacy_fixture() -> (SqliteConfig, SqlitePool) {
     let home = crate::runtime::test_support::unique_temp_dir();
     tokio::fs::create_dir_all(&home).await.unwrap();

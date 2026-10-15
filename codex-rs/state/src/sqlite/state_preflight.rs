@@ -199,3 +199,6 @@ mod tests;
 
 #[path = "state_transfer.rs"]
 mod transfer;
+
+#[path = "state_archive.rs"]
+mod archive;
