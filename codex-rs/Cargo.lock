@@ -4262,6 +4262,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-project-store"
+version = "0.159.2"
+dependencies = [
+ "codex-utils-absolute-path",
+ "pretty_assertions",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "codex-prompts"
 version = "0.159.2"
 dependencies = [
