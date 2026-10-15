@@ -1,8 +1,8 @@
 //! Qualification prototype for state migration identities, isolated from startup.
 //!
-//! This is a ledger qualification prototype, not transfer authorization.
-//! Interrupted-repair prefix support and schema qualification remain incomplete;
-//! production activation requires the atomic coordinator and its full gates.
+//! This is a qualification preflight, not authorization to transfer legacy facts.
+//! Schema-backed restart qualification and atomic transfer must precede
+//! production activation.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -40,11 +40,11 @@ pub(super) async fn check(config: &SqliteConfig, path: &Path) -> anyhow::Result<
 
 /// Check the ledger within the caller's coherent SQLite snapshot.
 async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
-    let kind: Option<String> =
-        sqlx::query_scalar("SELECT type FROM sqlite_schema WHERE name = '_sqlx_migrations'")
-            .fetch_optional(&mut *connection)
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT type FROM sqlite_schema WHERE name = '_sqlx_migrations' COLLATE NOCASE ORDER BY type")
+            .fetch_all(&mut *connection)
             .await?;
-    if kind.is_none() {
+    if kinds.is_empty() {
         let populated: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*')",
         )
@@ -57,8 +57,8 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
         return Ok(());
     }
     ensure!(
-        kind.as_deref() == Some("table"),
-        "state migration ledger is not a table"
+        kinds == ["table"],
+        "state migration ledger identity is ambiguous or not a table"
     );
     let columns: Vec<(String, String, i64, Option<String>, i64)> = sqlx::query_as(
         "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_xinfo('_sqlx_migrations') ORDER BY cid",
@@ -179,18 +179,21 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
     let last = canonical.last().copied().unwrap_or_default();
     for version in 1..=last {
         ensure!(
-            canonical.contains(&version) || (version == 38 && legacy_recency),
+            canonical.contains(&version) || (version == 38 && canonical.contains(&39)),
             "state migration prefix missing version {version}"
         );
     }
     if owner {
-        let required = if seen.contains(&59) { 58 } else { 55 };
         ensure!(
-            last >= required,
+            last >= 55,
             "fork owner fact without required canonical prefix"
         );
     }
-    if opaque && (last != 60 || owner || binding || legacy_recency) {
+    ensure!(
+        !binding || (1..=58).all(|version| canonical.contains(&version)),
+        "fork binding fact without complete canonical prefix through 58"
+    );
+    if opaque && (canonical.len() != 60 || owner || binding || legacy_recency) {
         bail!(
             "opaque future state migrations require a complete canonical prefix without legacy transfer"
         );
@@ -204,7 +207,19 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
             "empty state migration ledger for nonempty database"
         );
     }
-    Ok(())
+    let fork = [(59, owner), (60, binding)]
+        .into_iter()
+        .filter_map(|(version, applied)| applied.then_some(version))
+        .collect();
+    super::state_schema::validate(
+        connection,
+        &super::state_schema::AppliedSchema {
+            canonical,
+            fork,
+            opaque_suffix: opaque,
+        },
+    )
+    .await
 }
 
 #[cfg(test)]

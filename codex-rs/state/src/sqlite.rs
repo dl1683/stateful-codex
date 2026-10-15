@@ -37,8 +37,7 @@ mod state_catalog;
 #[cfg(test)]
 mod state_preflight;
 #[cfg(test)]
-#[path = "sqlite/state_schema_tokens.rs"]
-mod state_schema_tokens;
+mod state_schema;
 
 const LOGS_DB_FILENAME: &str = "logs_2.sqlite";
 const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
