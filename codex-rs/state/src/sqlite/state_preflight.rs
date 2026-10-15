@@ -196,3 +196,6 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<LegacyHis
 #[cfg(test)]
 #[path = "state_preflight_tests.rs"]
 mod tests;
+
+#[path = "state_transfer.rs"]
+mod transfer;

@@ -9,6 +9,7 @@ codex_rust_crate(
         "migration_catalog/**",
         "migrations/**",
         "queue_migrations/**",
+        "stateful_migrations/**",
         "testdata/**",
         "thread_history_migrations/**",
     ]),
