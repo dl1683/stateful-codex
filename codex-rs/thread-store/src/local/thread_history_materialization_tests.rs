@@ -148,6 +148,7 @@ async fn split_homes_support_backfill_listing_and_paginated_history() {
     let runtime = codex_rollout::state_db::try_init(&rollout_config)
         .await
         .expect("backfill state from Codex home");
+    crate::local::test_support::wait_for_backfill(runtime.as_ref()).await;
     assert!(
         runtime
             .get_thread(thread_id)

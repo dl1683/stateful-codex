@@ -7,6 +7,9 @@
 //! Rollouts that background migration cannot finish are remembered so they do not hold the cursor
 //! back forever. Ordinary failures stay skipped until a manual migration retries them; busy
 //! rollouts are retried on later startups because the writer may have gone away.
+//!
+//! Incomplete metadata indexing defers the whole startup check without changing bookkeeping.
+//! A later startup invocation can retry after indexing completes.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -19,6 +22,7 @@ use chrono::NaiveDateTime;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::StateDbHandle;
+use codex_state::BackfillStatus;
 use codex_state::RolloutMigrationCursor;
 use codex_state::RolloutMigrationSkippedRollout;
 
@@ -62,6 +66,15 @@ pub(super) async fn migrate_rollouts_on_startup(store: &LocalThreadStore) -> Thr
     let Some(state_db) = store.state_db.as_ref() else {
         return Ok(());
     };
+    if state_db
+        .get_backfill_state()
+        .await
+        .map_err(migration_error)?
+        .status
+        != BackfillStatus::Complete
+    {
+        return Ok(());
+    }
     let paths = find_all_rollout_paths(&store.config.codex_home).await?;
     let mut skipped_rollouts = state_db
         .list_rollout_migration_skipped_rollouts(LEGACY_TO_PAGINATED_MIGRATION_ID)
@@ -410,3 +423,7 @@ async fn rollout_fingerprint(path: &Path) -> ThreadStoreResult<RolloutFingerprin
 #[cfg(test)]
 #[path = "startup_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "startup_readiness_tests.rs"]
+mod readiness_tests;

@@ -11,7 +11,6 @@ use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::UserMessageEvent;
-use codex_rollout::RolloutConfig;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutLine;
 use codex_rollout::RolloutRecorder;
@@ -26,7 +25,11 @@ use crate::local::test_support::test_config;
 
 const TIMESTAMP: &str = "2025-01-03T12:00:00Z";
 
-fn write_rollout(home: &Path, thread_id: ThreadId, history_mode: ThreadHistoryMode) -> PathBuf {
+pub(super) fn write_rollout(
+    home: &Path,
+    thread_id: ThreadId,
+    history_mode: ThreadHistoryMode,
+) -> PathBuf {
     let directory = home.join("sessions/2025/01/03");
     fs::create_dir_all(&directory).expect("create rollout directory");
     let path = directory.join(format!("rollout-2025-01-03T12-00-00-{thread_id}.jsonl"));
@@ -95,16 +98,7 @@ fn move_to_timestamp(
 
 async fn indexed_store(home: &Path) -> LocalThreadStore {
     let config = test_config(home);
-    let rollout_config = RolloutConfig {
-        codex_home: config.codex_home.clone(),
-        sqlite: config.sqlite.clone(),
-        cwd: home.to_path_buf(),
-        model_provider_id: config.default_model_provider_id.clone(),
-        generate_memories: false,
-    };
-    let state_db = codex_rollout::state_db::try_init(&rollout_config)
-        .await
-        .expect("backfill legacy thread metadata");
+    let state_db = crate::local::test_support::indexed_state_db(&config).await;
     LocalThreadStore::new(config, Some(state_db))
 }
 

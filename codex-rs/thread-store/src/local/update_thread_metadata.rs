@@ -990,17 +990,12 @@ mod tests {
     async fn section_moves_persist_in_sqlite_without_changing_the_rollout() {
         let home = TempDir::new().expect("temp dir");
         let config = test_config(home.path());
+        let runtime = crate::local::test_support::indexed_state_db(&config).await;
         let uuid = Uuid::from_u128(320);
         let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
         let rollout_path =
             write_session_file(home.path(), "2025-01-03T14-20-00", uuid).expect("session file");
         let original_rollout = std::fs::read_to_string(&rollout_path).expect("read rollout");
-        let runtime = codex_state::StateRuntime::init(
-            config.sqlite.clone(),
-            config.default_model_provider_id.clone(),
-        )
-        .await
-        .expect("state db should initialize");
         let store = LocalThreadStore::new(config, Some(runtime.clone()));
 
         codex_rollout::state_db::reconcile_rollout(
@@ -2237,12 +2232,7 @@ mod tests {
     async fn observed_metadata_normalizes_cwd_for_list_filters() {
         let home = TempDir::new().expect("temp dir");
         let config = test_config(home.path());
-        let runtime = codex_state::StateRuntime::init(
-            codex_state::SqliteConfig::new_for_testing(home.path().abs()),
-            config.default_model_provider_id.clone(),
-        )
-        .await
-        .expect("state db should initialize");
+        let runtime = crate::local::test_support::indexed_state_db(&config).await;
         let store = LocalThreadStore::new(config, Some(runtime.clone()));
         let uuid = Uuid::from_u128(316);
         let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");

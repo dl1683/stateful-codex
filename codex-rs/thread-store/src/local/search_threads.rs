@@ -7,6 +7,7 @@ use codex_rollout::RolloutConfig;
 use codex_rollout::first_rollout_content_match_snippet;
 use codex_rollout::parse_cursor;
 use codex_rollout::search_rollout_matches;
+use codex_state::BackfillStatus;
 use codex_utils_absolute_path::normalize_windows_device_path;
 
 use super::LocalThreadStore;
@@ -67,6 +68,20 @@ pub(super) async fn search_threads(
         SortDirection::Desc => codex_rollout::SortDirection::Desc,
     };
     let state_db = store.state_db().await;
+    if let Some(state_db) = state_db.as_ref()
+        && state_db
+            .get_backfill_state()
+            .await
+            .map_err(|error| ThreadStoreError::Internal {
+                message: format!("failed to read state DB readiness for thread search: {error}"),
+            })?
+            .status
+            != BackfillStatus::Complete
+    {
+        return Err(ThreadStoreError::Internal {
+            message: "state DB is not ready for thread search: historical metadata backfill is incomplete".into(),
+        });
+    }
     let rollout_config = RolloutConfig {
         codex_home: store.config.codex_home.clone(),
         sqlite: store.config.sqlite.clone(),

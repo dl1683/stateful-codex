@@ -18,6 +18,42 @@ pub(super) fn test_config(codex_home: &Path) -> LocalThreadStoreConfig {
     }
 }
 
+pub(super) async fn wait_for_backfill(runtime: &codex_state::StateRuntime) {
+    tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 10), async {
+        loop {
+            if runtime
+                .get_backfill_state()
+                .await
+                .expect("read fixture backfill state")
+                .status
+                == codex_state::BackfillStatus::Complete
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 10)).await;
+        }
+    })
+    .await
+    .expect("historical fixture backfill should complete");
+}
+
+pub(super) async fn indexed_state_db(
+    config: &LocalThreadStoreConfig,
+) -> codex_rollout::StateDbHandle {
+    let rollout_config = codex_rollout::RolloutConfig {
+        codex_home: config.codex_home.clone(),
+        sqlite: config.sqlite.clone(),
+        cwd: config.codex_home.clone(),
+        model_provider_id: config.default_model_provider_id.clone(),
+        generate_memories: false,
+    };
+    let runtime = codex_rollout::state_db::try_init(&rollout_config)
+        .await
+        .expect("initialize fixture metadata indexing");
+    wait_for_backfill(runtime.as_ref()).await;
+    runtime
+}
+
 pub(super) fn write_session_file(root: &Path, ts: &str, uuid: Uuid) -> std::io::Result<PathBuf> {
     write_session_file_with_history_mode(root, ts, uuid, ThreadHistoryMode::Legacy)
 }

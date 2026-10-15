@@ -45,7 +45,6 @@ use codex_protocol::protocol::UserMessageImageKind;
 use codex_protocol::user_input::UserInput;
 use codex_rollout::CompactedItem;
 use codex_rollout::RetainedContextEvent;
-use codex_rollout::RolloutConfig;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutLine;
 use pretty_assertions::assert_eq;
@@ -294,16 +293,18 @@ fn assert_failed_with_reason(
 
 async fn indexed_store(home: &Path) -> LocalThreadStore {
     let config = test_config(home);
-    let rollout_config = RolloutConfig {
-        codex_home: config.codex_home.clone(),
-        sqlite: config.sqlite.clone(),
-        cwd: home.to_path_buf(),
-        model_provider_id: config.default_model_provider_id.clone(),
-        generate_memories: false,
-    };
-    let state_db = codex_rollout::state_db::try_init(&rollout_config)
-        .await
-        .expect("backfill legacy thread metadata");
+    let state_db = crate::local::test_support::indexed_state_db(&config).await;
+    LocalThreadStore::new(config, Some(state_db))
+}
+
+async fn unindexed_store(home: &Path) -> LocalThreadStore {
+    let config = test_config(home);
+    let state_db = codex_state::StateRuntime::init(
+        config.sqlite.clone(),
+        config.default_model_provider_id.clone(),
+    )
+    .await
+    .expect("initialize without indexing an intentionally invalid rollout");
     LocalThreadStore::new(config, Some(state_db))
 }
 
@@ -2943,7 +2944,7 @@ async fn migration_skips_empty_rollout_files() {
     fs::create_dir_all(&directory).expect("create rollout directory");
     let path = directory.join(format!("rollout-2025-01-03T12-00-00-{thread_id}.jsonl"));
     fs::File::create(&path).expect("create empty rollout");
-    let store = indexed_store(home.path()).await;
+    let store = unindexed_store(home.path()).await;
 
     let report = store
         .migrate_rollouts(apply_options())
@@ -3005,7 +3006,7 @@ async fn migration_reports_invalid_session_metadata() {
     fs::create_dir_all(&directory).expect("create rollout directory");
     let path = directory.join(format!("rollout-2025-01-03T12-00-00-{thread_id}.jsonl"));
     fs::write(path, "not a rollout record\n").expect("write malformed rollout");
-    let store = indexed_store(home.path()).await;
+    let store = unindexed_store(home.path()).await;
 
     let report = store
         .migrate_rollouts(apply_options())
