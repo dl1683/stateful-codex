@@ -20,8 +20,6 @@ pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator =
 /// We intentionally ignore applied migration versions that are newer than the
 /// embedded migration set. Known migration versions are still validated by
 /// checksum, so this only relaxes the "database is ahead of me" case.
-/// State initialization additionally validates known lineage before writable
-/// hooks; opaque versions cannot justify transferring legacy fork facts.
 ///
 /// This does not make migration compatibility bidirectional. The legacy fork
 /// version-56 owner-token row is repaired to version 59 before migration; an

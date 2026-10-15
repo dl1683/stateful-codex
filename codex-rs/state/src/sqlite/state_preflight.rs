@@ -1,7 +1,8 @@
-//! Validate state migration identities before writable connection hooks run.
+//! Qualification prototype for state migration identities, isolated from startup.
 //!
-//! This is a ledger preflight, not authorization to transfer legacy facts. Schema
-//! qualification and atomic transfer belong to the namespace coordinator.
+//! This is a ledger preflight, not authorization to transfer legacy facts. Its
+//! prefix rules do not yet cover interrupted historical repairs. Schema evidence,
+//! restart qualification, and atomic transfer must precede production activation.
 
 use std::collections::BTreeSet;
 use std::path::Path;

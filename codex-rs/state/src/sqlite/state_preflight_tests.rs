@@ -133,7 +133,7 @@ async fn view_or_nonstandard_ledger_is_refused() {
 }
 
 #[tokio::test]
-async fn committed_wal_refusal_precedes_writable_hooks_and_preserves_error_boundary() {
+async fn qualification_reads_committed_wal_without_mutating_ledger() {
     let home = crate::runtime::test_support::unique_temp_dir();
     tokio::fs::create_dir_all(&home).await.unwrap();
     let _cleanup = scopeguard::guard(home.clone(), |home| {
@@ -159,11 +159,7 @@ async fn committed_wal_refusal_precedes_writable_hooks_and_preserves_error_bound
             > 0
     );
     let before = snapshot(&pool).await;
-    let error = config
-        .open_state_db(
-            &crate::migrations::runtime_state_migrator(),
-            /*telemetry_override*/ None,
-        )
+    let error = check(&config, &path)
         .await
         .expect_err("committed WAL-only invalid fact must refuse");
     assert!(
@@ -171,7 +167,6 @@ async fn committed_wal_refusal_precedes_writable_hooks_and_preserves_error_bound
             .to_string()
             .contains("unsuccessful state migration 60")
     );
-    assert!(error.to_string().contains(&path.display().to_string()));
     assert!(!crate::is_sqlite_corruption_error(&error));
     assert_eq!(crate::runtime_db_path_for_corruption_error(&error), None);
     assert_eq!(snapshot(&pool).await, before);
