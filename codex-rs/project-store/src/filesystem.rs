@@ -1,21 +1,24 @@
 use std::io;
 
-use crate::ProjectStoreLocation;
-use crate::opener::ProjectStoreOpenError;
+use codex_utils_absolute_path::AbsolutePathBuf;
+use thiserror::Error;
 
-/// Conservative filesystem admission, not discovery of arbitrary sync software.
+/// Qualify the exact existing file or directory, including its resolved filesystem.
+/// A project-root check does not qualify descendant mounts.
+/// Conservative admission is not discovery of arbitrary sync software.
 /// Callers must additionally establish that the selected project is unsynchronized.
-pub(super) fn qualify_filesystem(
-    location: &ProjectStoreLocation,
-) -> Result<(), ProjectStoreOpenError> {
-    let path = location.project_root().as_path();
+pub fn qualify_local_filesystem(
+    path: &AbsolutePathBuf,
+) -> Result<(), FilesystemQualificationError> {
+    let canonical = path.canonicalize()?;
+    let path = canonical.as_path();
     for component in path.components() {
         let name = component.as_os_str().to_string_lossy().to_ascii_lowercase();
         if name == "onedrive"
             || name.starts_with("onedrive - ")
             || matches!(name.as_str(), "dropbox" | "google drive" | "googledrive")
         {
-            return Err(ProjectStoreOpenError::UnsupportedFilesystem);
+            return Err(FilesystemQualificationError::UnsupportedFilesystem);
         }
     }
     #[cfg(windows)]
@@ -31,7 +34,7 @@ pub(super) fn qualify_filesystem(
             Some(Component::Prefix(prefix))
                 if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
         ) {
-            return Err(ProjectStoreOpenError::UnsupportedFilesystem);
+            return Err(FilesystemQualificationError::UnsupportedFilesystem);
         }
         let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
         let mut volume = vec![0_u16; 32_768];
@@ -48,7 +51,7 @@ pub(super) fn qualify_filesystem(
         }
         // DRIVE_FIXED. Network, removable and unknown volumes are unqualified.
         if unsafe { GetDriveTypeW(volume.as_ptr()) } != 3 {
-            return Err(ProjectStoreOpenError::UnsupportedFilesystem);
+            return Err(FilesystemQualificationError::UnsupportedFilesystem);
         }
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -74,19 +77,32 @@ pub(super) fn qualify_filesystem(
                 | libc::TMPFS_MAGIC
                 | libc::OVERLAYFS_SUPER_MAGIC
         ) {
-            return Err(ProjectStoreOpenError::UnsupportedFilesystem);
+            return Err(FilesystemQualificationError::UnsupportedFilesystem);
         }
         #[cfg(target_os = "macos")]
         {
             // The kernel's filesystem name is a NUL-terminated fixed-size field.
             let filesystem = unsafe { std::ffi::CStr::from_ptr(stat.f_fstypename.as_ptr()) };
             if !matches!(filesystem.to_bytes(), b"apfs" | b"hfs") {
-                return Err(ProjectStoreOpenError::UnsupportedFilesystem);
+                return Err(FilesystemQualificationError::UnsupportedFilesystem);
             }
         }
     }
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-    return Err(ProjectStoreOpenError::UnsupportedFilesystem);
+    return Err(FilesystemQualificationError::UnsupportedFilesystem);
 
     Ok(())
 }
+
+/// Why a concrete file or directory cannot pass conservative local-storage checks.
+#[derive(Debug, Error)]
+pub enum FilesystemQualificationError {
+    #[error("the location requires a qualified local, unsynchronized filesystem")]
+    UnsupportedFilesystem,
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+#[cfg(test)]
+#[path = "filesystem_tests.rs"]
+mod tests;

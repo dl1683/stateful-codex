@@ -768,17 +768,26 @@ atomic completion/Forget and HAL acceptance remain outstanding milestone gates.
 True child-process contention, killed-writer recovery and uncertain-commit
 qualification are not established by the independent-connection fixtures.
 
-## S1b2: project-local bootstrap opening (2026-10-15)
+## S1b2a: concrete-path filesystem admission (2026-10-15)
 
-Local initialization delegates schema/identity to the reviewed registry, closes a
-unique DELETE-mode stage and publishes without replacement. Existing canonical
-stores are read-only inspected; stale bindings refuse before creating state.
-Windows27/Linux27 targeted tests passed with zero skips/retries, jobs2 and the
-shared strict RAM/build gate. Source-before/after receipts, lock regeneration,
-scoped fix and final fmt are retained in `reports/stateful_rebuild_opener_*`.
-No postcleanup tests are rerun. Native/domain writers, migration, writable-copy
-adoption, arbitrary sync-agent detection and hostile-SQLite resource admission
-remain unavailable; host storage qualification is a precondition. Process-kill,
-power-loss, macOS and Bazel execution are not established by these unit witnesses.
-Hands-on standalone inspection follows the separately gated CLI; the installed
-native launcher remains unchanged.
+The unlanded opener2901 received CHANGES REQUIRED for checking only a local
+project root while a descendant store could be an unsupported stable submount.
+This smaller foundation qualifies a concrete existing file/directory and exposes
+a distinct filesystem error; it opens no database or native route. Windows21 and
+local Linux21 tests passed, zero skipped/retries. Caller selection of actual store
+paths remains the following repaired-opener gate; these tests do not prove that
+lifecycle. Arbitrary sync detection, namespace/resource and macOS/Bazel execution
+remain unqualified. The held opener is not promoted by this foundation.
+
+## S1b2b: repaired publication and inspection lifecycle (2026-10-15)
+
+The first opener2901 was held after its27/27 platform gates: static review found
+that qualifying only the project root missed stable unsupported submounts.
+This repair retains that history and integrates concrete-path qualification.
+Initialization qualifies the actual .stateful directory before policy/staging
+writes; inspection qualifies the directory and database file before SQLite.
+Private injected-probe witnesses model ordinary stable directory/file submounts;
+a separately mounted WSL9p fixture is prepared for the following CLI witness.
+Closed-stage/no-replace publication and read-only existing-store admission remain.
+Targeted repaired gates are pending. No native/migration, actual killed-process,
+power-loss, arbitrary-sync, hostile-SQLite or complete-milestone claim follows.

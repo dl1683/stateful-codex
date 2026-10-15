@@ -35,11 +35,19 @@ The opener must establish fresh-file custody; an unknown preexisting empty file
 is not permission to initialize it. Configure a bounded busy timeout first.
 Only bootstrap format/domain1 is supported; foreign or incomplete stores refuse.
 
+`qualify_local_filesystem(&path)` checks an existing resolved file or directory.
+A root's filesystem does not establish a descendant store directory/file's
+filesystem: callers must qualify those actual locations before opening or writing.
+The helper creates no state. Known sync paths and unsupported/nonlocal filesystem
+kinds refuse; arbitrary sync-agent absence remains a host precondition, not a
+claim this heuristic can establish. This alone does not repair caller lifecycle
+selection, namespace races, resource admission or native storage routing.
+
 For a host-qualified local unsynchronized project, `initialize_local_store(&location)`
 creates metadata in a unique inactive stage, closes its DELETE-mode database,
 then publishes it to `memory.sqlite` without replacing an existing file. Competing
 initializers return the winning identity. Existing canonical files are inspected
-read-only; an unknown or empty existing file is refused. `inspect_store(&location)`
+read-only after actual store-directory and database-file filesystem checks; an unknown or empty existing file is refused. `inspect_store(&location)`
 never creates a database. SQLite can create sidecars for an existing WAL input.
 
 The `.stateful/.gitignore` policy is atomically published without overwrite.

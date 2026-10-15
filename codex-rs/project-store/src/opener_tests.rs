@@ -107,7 +107,7 @@ async fn missing_read_and_conflicting_ignore_policy_never_create_a_database() {
     let root = location(project.path());
     assert!(matches!(
         inspect_store(&root).await,
-        Err(ProjectStoreOpenError::Sql(_))
+        Err(ProjectStoreOpenError::Io(error)) if error.kind() == io::ErrorKind::NotFound
     ));
     assert!(!project.path().join(".stateful").exists());
     fs::create_dir(project.path().join(".stateful")).unwrap();
@@ -172,4 +172,38 @@ async fn stale_location_refuses_before_creating_state_in_redirected_project() {
     ));
     assert!(!other.path().join(".stateful").exists());
     assert!(!moved.join(".stateful").exists());
+}
+
+#[tokio::test]
+async fn stable_unsupported_store_directory_refuses_before_any_file_write() {
+    let project = TempDir::new().unwrap();
+    let root = location(project.path());
+    let store_directory = root.project_root().join(".stateful");
+    fs::create_dir(store_directory.as_path()).unwrap();
+    let qualification = |path: &AbsolutePathBuf| {
+        if path == &store_directory {
+            Err(ProjectStoreOpenError::UnsupportedFilesystem)
+        } else {
+            qualify_for_open(path)
+        }
+    };
+    assert!(matches!(initialize_qualified(&root, &qualification).await, Err(ProjectStoreOpenError::UnsupportedFilesystem)));
+    assert_eq!(fs::read_dir(store_directory.as_path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn stable_unsupported_database_mount_refuses_before_sqlite_inspection() {
+    let project = TempDir::new().unwrap();
+    let root = location(project.path());
+    initialize_local_store(&root).await.unwrap();
+    let before = fs::read(root.database_path().as_path()).unwrap();
+    let qualification = |path: &AbsolutePathBuf| {
+        if path == root.database_path() {
+            Err(ProjectStoreOpenError::UnsupportedFilesystem)
+        } else {
+            qualify_for_open(path)
+        }
+    };
+    assert!(matches!(inspect_qualified(&root, &qualification).await, Err(ProjectStoreOpenError::UnsupportedFilesystem)));
+    assert_eq!(fs::read(root.database_path().as_path()).unwrap(), before);
 }

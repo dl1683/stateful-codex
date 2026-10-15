@@ -6,6 +6,8 @@ mod location;
 mod opener;
 mod registry;
 
+pub use filesystem::FilesystemQualificationError;
+pub use filesystem::qualify_local_filesystem;
 pub use location::ProjectStoreLocation;
 pub use location::ResolveError;
 pub use opener::ProjectStoreOpenError;

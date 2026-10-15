@@ -14,7 +14,9 @@ use crate::ProjectStoreLocation;
 use crate::ResolveError;
 use crate::StoreIdentity;
 use crate::StoreRegistryError;
-use crate::filesystem::qualify_filesystem;
+use crate::FilesystemQualificationError;
+use crate::qualify_local_filesystem;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use crate::initialize_connection;
 use crate::read_identity;
 
@@ -28,17 +30,24 @@ const IGNORE: &[u8] = b"*\n!.gitignore\n";
 /// replacing any existing file; racing initializers return the winning identity.
 /// Killed initializers may leave ignored inactive staging files, never a partial
 /// canonical database. Power-loss durability is not qualified by this operation.
+pub async fn initialize_local_store(
+    location: &ProjectStoreLocation,
+) -> Result<StoreIdentity, ProjectStoreOpenError> {
+    initialize_qualified(location, &qualify_for_open).await
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "project-store owns its SQLite connections independently of codex-state"
 )]
-pub async fn initialize_local_store(
+async fn initialize_qualified(
     location: &ProjectStoreLocation,
+    qualification: &impl Fn(&AbsolutePathBuf) -> Result<(), ProjectStoreOpenError>,
 ) -> Result<StoreIdentity, ProjectStoreOpenError> {
     revalidate_location(location)?;
-    qualify_filesystem(location)?;
+    qualification(location.project_root())?;
     if location.database_path().as_path().try_exists()? {
-        return inspect_store(location).await;
+        return inspect_qualified(location, qualification).await;
     }
     let directory = location.project_root().join(".stateful");
     let builder = fs::DirBuilder::new();
@@ -55,6 +64,7 @@ pub async fn initialize_local_store(
         Err(error) => return Err(error.into()),
     }
     revalidate_location(location)?;
+    qualification(&directory)?;
     let ignore = directory.join(".gitignore");
     let temporary_ignore = directory.join(format!(".ignore-{}", Uuid::new_v4()));
     let mut file = fs::OpenOptions::new()
@@ -104,20 +114,29 @@ pub async fn initialize_local_store(
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
-    inspect_store(location).await
+    inspect_qualified(location, qualification).await
 }
 
 /// Read identity under a consistent snapshot without writable SQLite hooks.
 /// SQLite may create operational sidecars when reading an existing WAL database.
+pub async fn inspect_store(
+    location: &ProjectStoreLocation,
+) -> Result<StoreIdentity, ProjectStoreOpenError> {
+    inspect_qualified(location, &qualify_for_open).await
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "project-store owns read-only SQLite inspection independently of codex-state"
 )]
-pub async fn inspect_store(
+async fn inspect_qualified(
     location: &ProjectStoreLocation,
+    qualification: &impl Fn(&AbsolutePathBuf) -> Result<(), ProjectStoreOpenError>,
 ) -> Result<StoreIdentity, ProjectStoreOpenError> {
     revalidate_location(location)?;
-    qualify_filesystem(location)?;
+    qualification(location.project_root())?;
+    qualification(&location.project_root().join(".stateful"))?;
+    qualification(location.database_path())?;
     let options = SqliteConnectOptions::new()
         .filename(location.database_path().as_path())
         .read_only(true)
@@ -126,6 +145,19 @@ pub async fn inspect_store(
     let result = read_identity(&mut connection).await;
     connection.close().await?;
     Ok(result?)
+}
+
+fn qualify_for_open(path: &AbsolutePathBuf) -> Result<(), ProjectStoreOpenError> {
+    qualify_local_filesystem(path).map_err(ProjectStoreOpenError::from)
+}
+
+impl From<FilesystemQualificationError> for ProjectStoreOpenError {
+    fn from(error: FilesystemQualificationError) -> Self {
+        match error {
+            FilesystemQualificationError::UnsupportedFilesystem => Self::UnsupportedFilesystem,
+            FilesystemQualificationError::Io(error) => Self::Io(error),
+        }
+    }
 }
 
 fn revalidate_location(location: &ProjectStoreLocation) -> Result<(), ProjectStoreOpenError> {
