@@ -31,6 +31,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 mod migration_history;
+mod state_preflight;
 
 const LOGS_DB_FILENAME: &str = "logs_2.sqlite";
 const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
@@ -305,6 +306,22 @@ impl SqliteConfig {
         telemetry_override: Option<&dyn DbTelemetry>,
     ) -> anyhow::Result<SqlitePool> {
         let path = spec.path(self.home());
+        if matches!(spec.kind, DbKind::State) {
+            let started = Instant::now();
+            let result = state_preflight::check(self, &path).await;
+            if result.is_err() {
+                telemetry::record_init_result(
+                    telemetry_override,
+                    spec.kind,
+                    spec.migrate_phase,
+                    started.elapsed(),
+                    &result,
+                );
+            }
+            result.map_err(|source| {
+                RuntimeDbInitError::new(spec.label, "migrate", path.as_path(), source)
+            })?;
+        }
         let started = Instant::now();
         let pool_result = self
             .open_read_write_pool(&path)

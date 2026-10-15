@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn open_state_sqlite_tolerates_newer_applied_migrations() {
+    async fn open_state_sqlite_refuses_legacy_fork_with_opaque_migrations() {
         let codex_home = unique_temp_dir();
         tokio::fs::create_dir_all(&codex_home)
             .await
@@ -662,11 +662,13 @@ mod tests {
         strict_pool.close().await;
 
         let tolerant_migrator = runtime_state_migrator();
-        let tolerant_pool = sqlite
+        let error = sqlite
             .open_state_db(&tolerant_migrator, /*telemetry_override*/ None)
             .await
-            .expect("runtime migrator should tolerate newer applied migrations");
-        tolerant_pool.close().await;
+            .expect_err("legacy fork transfer cannot be classified across opaque migrations");
+        assert!(error.to_string().contains("opaque future state migrations"));
+        assert!(!crate::is_sqlite_corruption_error(&error));
+        assert_eq!(crate::runtime_db_path_for_corruption_error(&error), None);
 
         let _ = tokio::fs::remove_dir_all(codex_home).await;
     }

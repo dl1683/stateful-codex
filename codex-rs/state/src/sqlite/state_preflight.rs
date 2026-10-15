@@ -1,0 +1,246 @@
+//! Validate state migration identities before writable connection hooks run.
+//!
+//! This is a ledger preflight, not authorization to transfer legacy facts. Schema
+//! qualification and atomic transfer belong to the namespace coordinator.
+
+use std::collections::BTreeSet;
+use std::path::Path;
+
+use anyhow::bail;
+use anyhow::ensure;
+use sqlx::Row;
+use sqlx::SqlSafeStr;
+use sqlx::SqliteConnection;
+use sqlx::migrate::Migration;
+use sqlx::migrate::MigrationType;
+
+use crate::migrations::STATE_MIGRATOR;
+use crate::migrations::checksum_is_line_ending_equivalent;
+
+use super::SqliteConfig;
+
+pub(super) async fn check(config: &SqliteConfig, path: &Path) -> anyhow::Result<()> {
+    match tokio::fs::metadata(path).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    }
+    let pool = config
+        .open_read_only_pool(path, /*busy_timeout*/ None)
+        .await?;
+    let result = async {
+        let mut transaction = pool.begin().await?;
+        validate(&mut transaction).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+    .await;
+    pool.close().await;
+    result
+}
+
+/// Check the ledger within the caller's coherent SQLite snapshot.
+async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
+    let kind: Option<String> =
+        sqlx::query_scalar("SELECT type FROM sqlite_schema WHERE name = '_sqlx_migrations'")
+            .fetch_optional(&mut *connection)
+            .await?;
+    if kind.is_none() {
+        let populated: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*')",
+        )
+        .fetch_one(&mut *connection)
+        .await?;
+        ensure!(
+            !populated,
+            "state migration ledger missing for nonempty database"
+        );
+        return Ok(());
+    }
+    ensure!(
+        kind.as_deref() == Some("table"),
+        "state migration ledger is not a table"
+    );
+    let columns: Vec<(String, String, i64, Option<String>, i64)> = sqlx::query_as(
+        "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_xinfo('_sqlx_migrations') ORDER BY cid",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    let expected = [
+        ("version", "BIGINT", 0, None, 1),
+        ("description", "TEXT", 1, None, 0),
+        ("installed_on", "TIMESTAMP", 1, Some("CURRENT_TIMESTAMP"), 0),
+        ("success", "BOOLEAN", 1, None, 0),
+        ("checksum", "BLOB", 1, None, 0),
+        ("execution_time", "BIGINT", 1, None, 0),
+    ]
+    .map(|(name, ty, required, default, pk)| {
+        (
+            name.to_owned(),
+            ty.to_owned(),
+            required,
+            default.map(str::to_owned),
+            pk,
+        )
+    });
+    ensure!(
+        columns == expected,
+        "unsupported state migration ledger layout"
+    );
+    let hidden: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_xinfo('_sqlx_migrations') WHERE hidden != 0)",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    ensure!(
+        !hidden,
+        "unsupported generated state migration ledger columns"
+    );
+    let triggers: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = '_sqlx_migrations')",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    ensure!(!triggers, "unexpected state migration ledger trigger");
+
+    let rows = sqlx::query(
+        "SELECT version, checksum, typeof(version) AS vt, typeof(description) AS dt, typeof(installed_on) AS it, typeof(success) AS st, success, typeof(checksum) AS ct, typeof(execution_time) AS et FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    let mut canonical = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut owner = false;
+    let mut binding = false;
+    let mut legacy_recency = false;
+    let mut opaque = false;
+    for row in rows {
+        for (field, expected_type) in [
+            ("vt", "integer"),
+            ("dt", "text"),
+            ("it", "text"),
+            ("st", "integer"),
+            ("ct", "blob"),
+            ("et", "integer"),
+        ] {
+            ensure!(
+                row.try_get::<String, _>(field)? == expected_type,
+                "invalid state migration row storage class: {field}"
+            );
+        }
+        let version: i64 = row.try_get("version")?;
+        ensure!(
+            version > 0 && seen.insert(version),
+            "invalid or duplicate state migration version {version}"
+        );
+        ensure!(
+            row.try_get::<i64, _>("success")? == 1,
+            "unsuccessful state migration {version}"
+        );
+        let checksum: Vec<u8> = row.try_get("checksum")?;
+        let matching = |candidate: &Migration| {
+            candidate.checksum.as_ref() == checksum
+                || checksum_is_line_ending_equivalent(candidate, &checksum)
+        };
+        let fork_owner = STATE_MIGRATOR
+            .iter()
+            .find(|migration| migration.version == 59);
+        let fork_binding = STATE_MIGRATOR
+            .iter()
+            .find(|migration| migration.version == 60);
+        if matches!(version, 56 | 59) && fork_owner.is_some_and(matching) {
+            ensure!(!owner, "duplicate fork owner migration fact");
+            owner = true;
+        } else if version == 60 && fork_binding.is_some_and(matching) {
+            binding = true;
+        } else if version == 38
+            && STATE_MIGRATOR
+                .iter()
+                .find(|migration| migration.version == 39)
+                .is_some_and(matching)
+        {
+            legacy_recency = true;
+            canonical.insert(39);
+        } else if version > 60 {
+            opaque = true;
+        } else {
+            let candidate = if version <= 58 {
+                STATE_MIGRATOR
+                    .iter()
+                    .find(|migration| migration.version == version)
+                    .cloned()
+            } else {
+                Some(canonical_collision(version))
+            };
+            if !candidate.as_ref().is_some_and(matching) {
+                return Err(sqlx::migrate::MigrateError::VersionMismatch(version).into());
+            }
+            ensure!(
+                canonical.insert(version),
+                "duplicate canonical state migration fact {version}"
+            );
+        }
+    }
+    ensure!(
+        !binding || owner,
+        "fork binding migration without owner fact"
+    );
+    ensure!(
+        !legacy_recency || !seen.contains(&39),
+        "duplicate recency migration fact"
+    );
+    let last = canonical.last().copied().unwrap_or_default();
+    for version in 1..=last {
+        ensure!(
+            canonical.contains(&version) || (version == 38 && legacy_recency),
+            "state migration prefix missing version {version}"
+        );
+    }
+    if owner {
+        let required = if seen.contains(&59) { 58 } else { 55 };
+        ensure!(
+            last >= required,
+            "fork owner fact without required canonical prefix"
+        );
+    }
+    if opaque && (last != 60 || owner || binding || legacy_recency) {
+        bail!(
+            "opaque future state migrations require a complete canonical prefix without legacy transfer"
+        );
+    }
+    if seen.is_empty() {
+        let populated: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name NOT GLOB 'sqlite_*')",
+        ).fetch_one(&mut *connection).await?;
+        ensure!(
+            !populated,
+            "empty state migration ledger for nonempty database"
+        );
+    }
+    Ok(())
+}
+
+fn canonical_collision(version: i64) -> Migration {
+    let (description, sql) = match version {
+        59 => (
+            "thread attachment reverse lookup",
+            include_str!("../../migration_catalog/0059_thread_attachment_reverse_lookup.sql"),
+        ),
+        60 => (
+            "guardian review feedback",
+            include_str!("../../migration_catalog/0060_guardian_review_feedback.sql"),
+        ),
+        _ => unreachable!("only canonical collision versions use this catalog"),
+    };
+    Migration::new(
+        version,
+        description.into(),
+        MigrationType::Simple,
+        sql.into_sql_str(),
+        /*no_tx*/ false,
+    )
+}
+
+#[cfg(test)]
+#[path = "state_preflight_tests.rs"]
+mod tests;
