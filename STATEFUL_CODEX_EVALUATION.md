@@ -767,3 +767,14 @@ opening, neutral knowledge reads, legacy closure import, old-writer barrier,
 atomic completion/Forget and HAL acceptance remain outstanding milestone gates.
 True child-process contention, killed-writer recovery and uncertain-commit
 qualification are not established by the independent-connection fixtures.
+
+## S1b2a: concrete-path filesystem admission (2026-10-15)
+
+The unlanded opener2901 received CHANGES REQUIRED for checking only a local
+project root while a descendant store could be an unsupported stable submount.
+This smaller foundation qualifies a concrete existing file/directory and exposes
+a distinct filesystem error; it opens no database or native route. Windows21 and
+local Linux21 tests passed, zero skipped/retries. Caller selection of actual store
+paths remains the following repaired-opener gate; these tests do not prove that
+lifecycle. Arbitrary sync detection, namespace/resource and macOS/Bazel execution
+remain unqualified. The held opener is not promoted by this foundation.
