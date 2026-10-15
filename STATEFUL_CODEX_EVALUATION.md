@@ -897,3 +897,15 @@ native/app-server caches and direct evaluation readers. Source-only preparation,
 not an importer design, populated SQLx conversion, native activation or runtime
 result. Current-state/master-plan pointers now identify the owner rebuild order;
 historical detail and all failed gates remain intact. No code or runtime changed.
+
+## 2026-10-15 H1 child-shell diagnostic (not native qualification)
+
+Using the pinned source UTF-8 prefix and exact synthetic405-byte fixture, disposable
+FullLanguage/ConstrainedLanguage children isolate skipped file-reader defaults after
+the forbidden console setter. WindowsPowerShell5.1 default/prefix CLM reads529bytes
+of wrong decoded JSON; explicit file UTF-8 and a separate-default diagnostic retain
+407bytes (source+CRLF). pwsh7.6 retains407bytes for all read variants. Corrected probes
+show inherited codepage65001, so the native329-byte question-mark failure was NOT
+reproduced/fixed. Initial ContainsKey CLM probe errors retained, not counted as
+passes; all18 children collected. No native sandbox, source-matched native build,
+policy change or product patch. Details: STATEFUL_HAL_CHILD_SHELL_DIAGNOSTIC_20261015.md.
