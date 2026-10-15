@@ -4265,10 +4265,15 @@ dependencies = [
 name = "codex-project-store"
 version = "0.159.2"
 dependencies = [
+ "codex-state",
  "codex-utils-absolute-path",
  "pretty_assertions",
+ "sha2 0.10.9",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

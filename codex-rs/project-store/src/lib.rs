@@ -2,6 +2,11 @@
 //! Resolution does not create a store or change native engine storage routing.
 
 mod location;
+mod registry;
 
 pub use location::ProjectStoreLocation;
 pub use location::ResolveError;
+pub use registry::StoreIdentity;
+pub use registry::StoreRegistryError;
+pub use registry::initialize_connection;
+pub use registry::read_identity;
