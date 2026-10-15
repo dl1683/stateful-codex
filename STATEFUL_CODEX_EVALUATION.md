@@ -823,6 +823,14 @@ retained, and the recreated persistent fixture supplied the qualifying witness.
 The owned mount was removed. Receipts: external stateful_rebuild_cli_* logs and
 stateful_rebuild_cli_hands_on_20261015/. Native launcher/binaries remain unchanged.
 
+Fresh review held the initial reader for Bazel library/binary target collision,
+then held its packaging repair for preserve_order-sensitive snapshot ordering.
+The repaired reader disables library inference and sorts snapshot JSON objects.
+Final Windows5/Linux5 gates explicitly enabled serde_json/preserve_order and passed
+with zero skips/retries; scoped fix/final fmt exited zero. No post-cleanup tests.
+A Bazel package query loaded binary/tests successfully; build/test execution is
+still unrun. Both held histories and review findings remain preserved.
+
 ## S1c0b: explicit bootstrap administration (2026-10-15)
 
 `init --storage local-unsynchronized` exposes the reviewed metadata initializer.
