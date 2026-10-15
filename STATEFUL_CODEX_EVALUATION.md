@@ -859,3 +859,9 @@ was used in this journey. Native launcher and installed Codex were unchanged.
 Actual process-kill/power-loss, domain writes, writable-copy adoption, migration,
 old-writer barrier, atomic completion, knowledge reads and full milestone remain
 unqualified. Fresh exact Droid approval remains a separate promotion gate.
+
+Integrated reader/init gates additionally passed Windows7/Linux7 with
+serde_json/preserve_order enabled after sorting both snapshots. Conflict resolution
+retains both histories and the reviewed handoff. An accidental CRLF rewrite was
+normalized back to LF without changing logical text, followed by final format and
+candidate build; no tests ran after cleanup. Exact combined review remains required.
