@@ -1,8 +1,15 @@
 use super::*;
+use crate::migrations::STATE_MIGRATOR;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
+use sqlx::SqlSafeStr;
 use sqlx::SqlitePool;
+use sqlx::migrate::MigrationType;
 use sqlx::migrate::Migrator;
+
+fn canonical_collision(version: i64) -> Migration {
+    state_catalog::canonical(version).unwrap()
+}
 
 async fn fixture(last: i64) -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();

@@ -1,8 +1,8 @@
 //! Qualification prototype for state migration identities, isolated from startup.
 //!
-//! This is a ledger preflight, not authorization to transfer legacy facts. Its
-//! prefix rules do not yet cover interrupted historical repairs. Schema evidence,
-//! restart qualification, and atomic transfer must precede production activation.
+//! This is a ledger qualification prototype, not transfer authorization.
+//! Interrupted-repair prefix support and schema qualification remain incomplete;
+//! production activation requires the atomic coordinator and its full gates.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -10,12 +10,10 @@ use std::path::Path;
 use anyhow::bail;
 use anyhow::ensure;
 use sqlx::Row;
-use sqlx::SqlSafeStr;
 use sqlx::SqliteConnection;
 use sqlx::migrate::Migration;
-use sqlx::migrate::MigrationType;
 
-use crate::migrations::STATE_MIGRATOR;
+use super::state_catalog;
 use crate::migrations::checksum_is_line_ending_equivalent;
 
 use super::SqliteConfig;
@@ -143,21 +141,16 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
             candidate.checksum.as_ref() == checksum
                 || checksum_is_line_ending_equivalent(candidate, &checksum)
         };
-        let fork_owner = STATE_MIGRATOR
-            .iter()
-            .find(|migration| migration.version == 59);
-        let fork_binding = STATE_MIGRATOR
-            .iter()
-            .find(|migration| migration.version == 60);
-        if matches!(version, 56 | 59) && fork_owner.is_some_and(matching) {
+        let fork_owner = state_catalog::fork(/*version*/ 59);
+        let fork_binding = state_catalog::fork(/*version*/ 60);
+        if matches!(version, 56 | 59) && fork_owner.as_ref().is_some_and(matching) {
             ensure!(!owner, "duplicate fork owner migration fact");
             owner = true;
-        } else if version == 60 && fork_binding.is_some_and(matching) {
+        } else if version == 60 && fork_binding.as_ref().is_some_and(matching) {
             binding = true;
         } else if version == 38
-            && STATE_MIGRATOR
-                .iter()
-                .find(|migration| migration.version == 39)
+            && state_catalog::canonical(/*version*/ 39)
+                .as_ref()
                 .is_some_and(matching)
         {
             legacy_recency = true;
@@ -165,14 +158,7 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
         } else if version > 60 {
             opaque = true;
         } else {
-            let candidate = if version <= 58 {
-                STATE_MIGRATOR
-                    .iter()
-                    .find(|migration| migration.version == version)
-                    .cloned()
-            } else {
-                Some(canonical_collision(version))
-            };
+            let candidate = state_catalog::canonical(version);
             if !candidate.as_ref().is_some_and(matching) {
                 return Err(sqlx::migrate::MigrateError::VersionMismatch(version).into());
             }
@@ -219,27 +205,6 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
         );
     }
     Ok(())
-}
-
-fn canonical_collision(version: i64) -> Migration {
-    let (description, sql) = match version {
-        59 => (
-            "thread attachment reverse lookup",
-            include_str!("../../migration_catalog/0059_thread_attachment_reverse_lookup.sql"),
-        ),
-        60 => (
-            "guardian review feedback",
-            include_str!("../../migration_catalog/0060_guardian_review_feedback.sql"),
-        ),
-        _ => unreachable!("only canonical collision versions use this catalog"),
-    };
-    Migration::new(
-        version,
-        description.into(),
-        MigrationType::Simple,
-        sql.into_sql_str(),
-        /*no_tx*/ false,
-    )
 }
 
 #[cfg(test)]

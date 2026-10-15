@@ -31,9 +31,14 @@ use std::time::Duration;
 use std::time::Instant;
 
 mod migration_history;
+#[cfg(test)]
+mod state_catalog;
 // Qualification only until schema evidence and restartable transfer are ready.
 #[cfg(test)]
 mod state_preflight;
+#[cfg(test)]
+#[path = "sqlite/state_schema_tokens.rs"]
+mod state_schema_tokens;
 
 const LOGS_DB_FILENAME: &str = "logs_2.sqlite";
 const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
