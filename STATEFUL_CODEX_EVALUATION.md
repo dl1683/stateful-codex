@@ -1,5 +1,10 @@
 # Stateful Codex evaluation record
 
+> **Rebuild active (2026-10-15).** The current owner directive supersedes the
+> historical hold below. S0 evidence is landed; S1a is an inert placement foundation,
+> with native project ownership, migration and atomic completion still gated.
+> See the rebuild entries at the end and the linked baseline/custody receipt.
+
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
 > **Evidence in hand.** Ten ordinary Autonomous prompts on Gemma 4 31B end Answered in both registered checks (before and after A1 and A2: Completed 0, Answered 10, Partial 0, Blocked 0, nonzero 0); eight of ten first completion calls were refused for a missing `openIssues` before the fix and none after, but only three of ten sessions called the completion tool after the fix, so the guidance change and the field change are not separated. Luna hands-on runs show correct work and mostly Partial endings for checked tasks, a visible outcome footer, and a model that rewrites a failing checker and then says the check passes (see the hunt-corrected entries and `campaign2/FINDINGS.md`).
 > **On hold with the design filed.** Open-model usability stages A3 to A9 (the UNVERIFIABLE state, the bad-directory repair path, the observation provenance fix; frozen design `sc_dogfood/integrate/briefs/open_model_usability_freeze.md`, revision 3) and Part B (host-enforced constrained repair; owner constraints: check identity is host-held, a repaired check must be at least as strict, no wrapper scripts); slice 3 opt-in Work verification (drafts v1 to v3 and two REDRAFT reviews in `sc_dogfood/integrate/briefs/` and `reviews/`; v3 is unreviewed); slices 4 and 5 and lean 3a (`step3a_freeze.md`). The release check (the matched 216-session rerun with floors and a Luna non-git journey) has not been run, so the effect of slice 1 on the open-model regression is not measured.
@@ -683,3 +688,24 @@ rollback rehearsal, compaction, TUI or offline/HAL acceptance is established.
 S1a belongs to this location executor after the reciprocal handoff was explicitly
 reconciled; the other executor owns the migration registry. Evidence work is in
 `rebuild/project-store-bootstrap-2129`. Fresh Droid review remains a separate gate.
+
+## Project-store S1a: explicit and bounded placement (2026-10-15)
+
+`codex-project-store` provides canonical project-local `.stateful/memory.sqlite`
+locations through explicit selection or workspace-bounded discovery, with no
+engine-home fallback. Nested stores require explicit selection; redirected store
+components and canonical workspace escapes refuse. No native caller is attached.
+
+Windows and local WSL Linux targeted `just test -p codex-project-store` each passed
+9 tests, zero skipped, retries disabled, jobs2 under the shared build mutex and
+23,221,225,472-byte admission floor. Both Windows junction witnesses and Linux
+symlink witnesses executed. Bazel lock regeneration returned0 with no lock drift;
+scoped fix passed. Final `just fmt` and exact-Droid approval are separate receipts.
+No tests are rerun after cleanup. The earlier archived root prototype's six-test
+result and this implementation's earlier seven-test run are retained separately.
+
+Actual launcher/Luna baseline checks are in the S0 receipt; the installed binary
+is unchanged and has no call sites into this library. This is not a native-path,
+neutral-CLI, database/bootstrap, migration, writable-copy, contention or HAL gate.
+The next boundaries are reviewed registry/bootstrap, qualified local opening and
+bounded neutral reads; native cutover stays behind S2/S3.
