@@ -58,6 +58,7 @@ async fn database_rows(store: &BlackboardStore) -> Vec<Vec<String>> {
 
 #[tokio::test]
 async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reopen() {
+    let started = std::time::Instant::now();
     let home = TempDir::new().unwrap();
     let mut store = store(&home).await;
     let successor = BlackboardEntryId::parse("successor").unwrap();
@@ -113,8 +114,13 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
                 .await
                 .unwrap();
         }
+        eprintln!("seeded {count} predecessors at {:?}", started.elapsed());
         previous = count;
         let before = database_rows(&store).await;
+        eprintln!(
+            "captured {count}-predecessor data at {:?}",
+            started.elapsed()
+        );
         for attempt in 0..2 {
             let mut connection = store.pool.acquire().await.unwrap();
             // Actual production selectors, measured before full entry loads/dedup/display.
@@ -204,6 +210,10 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
                 ));
             }
             assert_eq!(database_rows(&store).await, before);
+            eprintln!(
+                "verified {count}-predecessor attempt {attempt} at {:?}",
+                started.elapsed()
+            );
             if attempt == 0 {
                 store.pool.close().await;
                 store = BlackboardStore::open(&SqliteConfig::new_for_testing(home.path().abs()))
@@ -240,6 +250,7 @@ async fn predecessor_fan_in_is_bounded_before_materialization_and_survives_reope
         200
     );
     store.pool.close().await;
+    eprintln!("fan-in assertions completed at {:?}", started.elapsed());
 }
 
 fn decision(content: &str, promotion: RootPromotion) -> NewBlackboardEntry {

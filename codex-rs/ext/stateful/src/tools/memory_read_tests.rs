@@ -7,6 +7,7 @@ use super::question_terms;
 
 #[tokio::test]
 async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay() {
+    let started = std::time::Instant::now();
     use codex_extension_api::ToolExecutor;
     use codex_project_intelligence::BlackboardEntryId;
     use codex_project_intelligence::RootPromotion;
@@ -41,6 +42,10 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
                 store.create_entry(id.clone(), value).await.unwrap();
                 mutations.push(serde_json::json!({"action":"supersede","entryId":id.to_string(),"expectedRevision":1,"successorEntryId":head}));
             }
+            eprintln!(
+                "created {head} {count}-predecessor fixture at {:?}",
+                started.elapsed()
+            );
             for batch in mutations.chunks(/*chunk_size*/ 4) {
                 let output = update
                     .handle(codex_extension_api::ToolCall {
@@ -68,10 +73,15 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
                     (Some(batch.len() as u64), Some(0))
                 );
             }
+            eprintln!(
+                "superseded {head} {count}-predecessor fixture at {:?}",
+                started.elapsed()
+            );
         }
     }
     // Reopen services/stores. Inspect assembled entry/hit items BEFORE response byte trimming.
-    for _ in 0..2 {
+    for attempt in 0..2 {
+        eprintln!("reopen attempt {attempt} at {:?}", started.elapsed());
         let services = crate::services::ProjectIntelligenceServices::new(sqlite.clone());
         let store = services.blackboard().await.unwrap();
         let tool = super::MemoryReadTool::new("project-1".into(), services.clone());
@@ -122,6 +132,7 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
             .is_err()
         );
     }
+    eprintln!("fan-in assertions completed at {:?}", started.elapsed());
 }
 
 #[test]
