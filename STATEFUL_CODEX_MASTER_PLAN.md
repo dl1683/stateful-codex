@@ -1,5 +1,12 @@
 # Stateful Codex master build plan
 
+Execution-order update2026-10-15: the owner-invoked
+[rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md)
+governs current sequencing and acceptance. The canonical-order wording below is
+the historical October7 plan, retained as reference. Current rebuild progress and
+open gates are linked at the top of [current state](./STATEFUL_CODEX_CURRENT_STATE.md).
+No historical acceptance is extended to new project-store/native migration work.
+
 Agreed with Devansh on 2026-10-07. This is the canonical build plan. It merges two sources:
 - the October 2–3 councils and hands-on campaign (evidence in SC-EVAL-035 and `campaign2/FINDINGS.md`);
 - the reference design, reviewed 2026-10-06 and archived unchanged as [`STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md`](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md).
