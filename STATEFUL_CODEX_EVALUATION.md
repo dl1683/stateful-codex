@@ -866,6 +866,20 @@ retains both histories and the reviewed handoff. An accidental CRLF rewrite was
 normalized back to LF without changing logical text, followed by final format and
 candidate build; no tests ran after cleanup. Exact combined review remains required.
 
+## S1 follow-on: source-SQL composition preparation (2026-10-15)
+
+The integrated CLI and both-parent merge received fresh exact approval before
+stateful-only promotion. A later disposable Python experiment composed bootstrap
+metadata plus all 33 application source SQL migrations: 67 tables including
+internals, 49 triggers, integrity ok and no foreign-key violations. A deliberately
+incomplete project-a copy matched three parent counts and passed SQLite checks
+while losing its entry revision and runtime thread link. The current reader
+refused the unregistered combined schema with unsupportedStore and unchanged DB
+hash. Initial fixture seeding failed on required strategy_revision; that attempt
+is retained separately from the corrected v2 witness. Full scope/receipts/limits:
+STATEFUL_PROJECT_STORE_DOMAIN_FEASIBILITY_20261015.md. This is not Rust domain
+installation, migration-history compatibility, conversion or effective-read proof.
+
 ## 2026-10-15 independent read-only reader witness
 
 - Exact reader781c8e1e4, approved opener5d3, independent frozen leaf SHA25670b782778f89a71dc4c7879aefc8b7b85720235fba430cbf370bd8d85acdfa79. Local mutex/jobs2/23,221,225,472-byte host admission, build0; before/after source hashes equal. No cryptographic source-to-binary attestation or native installation.
