@@ -784,12 +784,12 @@ remain unqualified. The held opener is not promoted by this foundation.
 The first opener2901 was held after its27/27 platform gates: static review found
 that qualifying only the project root missed stable unsupported submounts.
 This repair retains that history and integrates concrete-path qualification.
-Initialization qualifies the actual .stateful directory before policy/staging
-writes; inspection qualifies the directory and database file before SQLite.
+Initialization qualifies .stateful before writes; inspection qualifies the directory,
+database and existing WAL/SHM/journal sidecars before SQLite.
 Private injected-probe witnesses model ordinary stable directory/file submounts;
 a separately mounted WSL9p fixture is prepared for the following CLI witness.
 Closed-stage/no-replace publication and read-only existing-store admission remain.
-Final repaired Windows31/Linux31 gates passed with zero skips/retries; the file
+Final repaired Windows32/Linux32 gates passed with zero skips/retries; the file
 probe uses malformed bytes so SQLite-before-policy ordering would fail distinctly.
 Cleanup and fresh exact review remain separate receipts. No native/migration, actual killed-process,
 power-loss, arbitrary-sync, hostile-SQLite or complete-milestone claim follows.

@@ -216,3 +216,24 @@ async fn stable_unsupported_database_mount_refuses_before_sqlite_inspection() {
     ));
     assert_eq!(fs::read(root.database_path().as_path()).unwrap(), before);
 }
+
+#[tokio::test]
+async fn existing_operational_sidecar_requires_its_own_filesystem_admission() {
+    let project = TempDir::new().unwrap();
+    let root = location(project.path());
+    initialize_local_store(&root).await.unwrap();
+    let wal = root.project_root().join(".stateful/memory.sqlite-wal");
+    fs::write(wal.as_path(), b"opaque sidecar").unwrap();
+    let qualification = |path: &AbsolutePathBuf| {
+        if path == &wal {
+            Err(ProjectStoreOpenError::UnsupportedFilesystem)
+        } else {
+            qualify_for_open(path)
+        }
+    };
+    assert!(matches!(
+        inspect_qualified(&root, &qualification).await,
+        Err(ProjectStoreOpenError::UnsupportedFilesystem)
+    ));
+    assert_eq!(fs::read(wal.as_path()).unwrap(), b"opaque sidecar");
+}

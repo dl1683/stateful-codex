@@ -81,13 +81,7 @@ async fn initialize_qualified(
         Err(error) => return Err(error.into()),
     }
     let metadata = fs::symlink_metadata(ignore.as_path())?;
-    let redirected = metadata.file_type().is_symlink();
-    #[cfg(windows)]
-    let redirected = {
-        use std::os::windows::fs::MetadataExt;
-        redirected || metadata.file_attributes() & 0x400 != 0
-    };
-    if !metadata.is_file() || redirected || fs::read(ignore.as_path())? != IGNORE {
+    if !plain_file(&metadata) || fs::read(ignore.as_path())? != IGNORE {
         return Err(ProjectStoreOpenError::IgnorePolicy);
     }
     let staging = directory.join(format!(".bootstrap-{}.sqlite", Uuid::new_v4()));
@@ -137,6 +131,20 @@ async fn inspect_qualified(
     qualification(location.project_root())?;
     qualification(&location.project_root().join(".stateful"))?;
     qualification(location.database_path())?;
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = location
+            .project_root()
+            .join(format!(".stateful/memory.sqlite{suffix}"));
+        let metadata = match fs::symlink_metadata(sidecar.as_path()) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if !plain_file(&metadata) {
+            return Err(ResolveError::UnsafeStorePath.into());
+        }
+        qualification(&sidecar)?;
+    }
     let options = SqliteConnectOptions::new()
         .filename(location.database_path().as_path())
         .read_only(true)
@@ -149,6 +157,16 @@ async fn inspect_qualified(
 
 fn qualify_for_open(path: &AbsolutePathBuf) -> Result<(), ProjectStoreOpenError> {
     qualify_local_filesystem(path).map_err(ProjectStoreOpenError::from)
+}
+
+fn plain_file(metadata: &fs::Metadata) -> bool {
+    let redirected = metadata.file_type().is_symlink();
+    #[cfg(windows)]
+    let redirected = {
+        use std::os::windows::fs::MetadataExt;
+        redirected || metadata.file_attributes() & 0x400 != 0
+    };
+    metadata.is_file() && !redirected
 }
 
 impl From<FilesystemQualificationError> for ProjectStoreOpenError {
