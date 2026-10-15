@@ -67,6 +67,7 @@ async fn fresh_reader_returns_the_project_identity_without_an_engine_home() {
     ] {
         normalized["result"][field] = replacement.into();
     }
+    normalized.sort_all_objects();
     insta::assert_snapshot!(
         "bootstrap_root",
         serde_json::to_string_pretty(&normalized).unwrap()
