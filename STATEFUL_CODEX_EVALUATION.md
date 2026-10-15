@@ -767,3 +767,18 @@ opening, neutral knowledge reads, legacy closure import, old-writer barrier,
 atomic completion/Forget and HAL acceptance remain outstanding milestone gates.
 True child-process contention, killed-writer recovery and uncertain-commit
 qualification are not established by the independent-connection fixtures.
+
+## S1b2: project-local bootstrap opening (2026-10-15)
+
+Local initialization delegates schema/identity to the reviewed registry, closes a
+unique DELETE-mode stage and publishes without replacement. Existing canonical
+stores are read-only inspected; stale bindings refuse before creating state.
+Windows27/Linux27 targeted tests passed with zero skips/retries, jobs2 and the
+shared strict RAM/build gate. Source-before/after receipts, lock regeneration,
+scoped fix and final fmt are retained in `reports/stateful_rebuild_opener_*`.
+No postcleanup tests are rerun. Native/domain writers, migration, writable-copy
+adoption, arbitrary sync-agent detection and hostile-SQLite resource admission
+remain unavailable; host storage qualification is a precondition. Process-kill,
+power-loss, macOS and Bazel execution are not established by these unit witnesses.
+Hands-on standalone inspection follows the separately gated CLI; the installed
+native launcher remains unchanged.

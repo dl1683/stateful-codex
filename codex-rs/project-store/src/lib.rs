@@ -1,11 +1,16 @@
-//! Engine-independent ownership of a project's local knowledge-store location.
-//! Resolution does not create a store or change native engine storage routing.
+//! Engine-independent project-store placement, metadata and local opening.
+//! Native engine storage routing remains unchanged.
 
+mod filesystem;
 mod location;
+mod opener;
 mod registry;
 
 pub use location::ProjectStoreLocation;
 pub use location::ResolveError;
+pub use opener::ProjectStoreOpenError;
+pub use opener::initialize_local_store;
+pub use opener::inspect_store;
 pub use registry::StoreIdentity;
 pub use registry::StoreRegistryError;
 pub use registry::initialize_connection;

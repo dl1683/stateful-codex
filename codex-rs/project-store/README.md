@@ -1,7 +1,6 @@
 # Project-store kernel (inert foundation)
 
-This crate owns engine-independent placement and connection-only bootstrap
-metadata. Its production library has no dependency on `codex-core`, `codex-state`,
+This crate owns engine-independent placement, bootstrap metadata and local opening. Its production library has no dependency on `codex-core`, `codex-state`,
 intelligence or semantic runtime; tests use the state SQLite shim. Native storage
 still uses its existing home databases; this foundation does not activate cutover.
 
@@ -35,3 +34,24 @@ under a read snapshot and works on a read-only connection. Neither opens files.
 The opener must establish fresh-file custody; an unknown preexisting empty file
 is not permission to initialize it. Configure a bounded busy timeout first.
 Only bootstrap format/domain1 is supported; foreign or incomplete stores refuse.
+
+For a host-qualified local unsynchronized project, `initialize_local_store(&location)`
+creates metadata in a unique inactive stage, closes its DELETE-mode database,
+then publishes it to `memory.sqlite` without replacing an existing file. Competing
+initializers return the winning identity. Existing canonical files are inspected
+read-only; an unknown or empty existing file is refused. `inspect_store(&location)`
+never creates a database. SQLite can create sidecars for an existing WAL input.
+
+The `.stateful/.gitignore` policy is atomically published without overwrite.
+Fresh Unix state directories use mode0700. Killed initialization may leave ignored
+inactive stages; they are never discovered as authority. Cleanup/delivery failure
+may follow publication; retry inspects the same identity. Process-kill and power-loss
+qualification are separate gates, not inferred from orphan-file tests.
+
+Windows requires a fixed local volume and refuses UNC/network mappings; Linux
+and macOS use conservative filesystem allowlists. Recognized sync folders refuse.
+Arbitrary sync-agent absence remains a host qualification precondition; this is
+not comprehensive sync detection, hostile-SQLite resource qualification or a
+security boundary against concurrent same-user replacement. No canonical domain
+writer or native attachment is supplied. Writable-copy adoption, WAL domain pools,
+legacy conversion and atomic completion remain gated separately.
