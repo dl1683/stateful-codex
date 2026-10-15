@@ -5,7 +5,7 @@
 The detailed sections below retain the October12 snapshot; do not read their
 historical plan/implementation claims as qualification of the rebuild. Current
 execution order is the owner-invoked
-[Coded rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md):
+[Codex/Droid rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md):
 S0/S1, then M0-M3, then S2/S3 before native activation.
 
 Main922ee4509 contains reviewed project-local resolution, bootstrap identity and

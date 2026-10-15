@@ -887,3 +887,13 @@ installation, migration-history compatibility, conversion or effective-read proo
 - Actual installed launcher/Luna session01a141ec-3118-7090-ad15-3f43ad38efba returned two completed exit0 reads and exact final JSON matching direct/tool UUIDs and paths. Fixture files and candidate hash unchanged; normal native session home writes expected. No model judge; explicit UTF-8 deterministic scoring.
 - Migration inventory revision4 received fresh inventory-only approval:33 SQL files and disposable empty schemas are not populated SQLx migration qualification. Native/store-route map remains separately reviewed preparation. M0/S2/S3, native knowledge, atomic completion, legacy retirement, MCP/offline and HAL H1 remain open. Earlier native edit failure remains a failure.
 - Details and retained local receipts: STATEFUL_PROJECT_STORE_WITNESS_20261015.md. This is not the first milestone or company-brain acceptance.
+
+## 2026-10-15 cutover source inventory and authority pointers
+
+The reviewed migration revision4 and attachment revision2 inventories are retained
+in STATEFUL_PROJECT_STORE_CUTOVER_INVENTORY_20261015.md. They identify trigger and
+backfill preservation, project closure, exact bytes, both cross-database guards,
+native/app-server caches and direct evaluation readers. Source-only preparation,
+not an importer design, populated SQLx conversion, native activation or runtime
+result. Current-state/master-plan pointers now identify the owner rebuild order;
+historical detail and all failed gates remain intact. No code or runtime changed.
