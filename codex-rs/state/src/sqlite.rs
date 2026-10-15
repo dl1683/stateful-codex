@@ -33,6 +33,8 @@ use std::time::Instant;
 mod migration_history;
 #[cfg(test)]
 mod state_catalog;
+#[cfg(test)]
+mod state_ledger;
 // Qualification only until schema evidence and restartable transfer are ready.
 #[cfg(test)]
 mod state_preflight;

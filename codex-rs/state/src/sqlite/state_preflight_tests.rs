@@ -35,7 +35,7 @@ async fn fixture(last: i64) -> SqlitePool {
 
 async fn inspect(pool: &SqlitePool) -> anyhow::Result<()> {
     let mut transaction = pool.begin().await?;
-    let result = validate(&mut transaction).await;
+    let result = validate(&mut transaction).await.map(|_| ());
     transaction.rollback().await?;
     result
 }
@@ -598,4 +598,95 @@ async fn alternate_case_ledger_preserves_empty_and_opaque_trigger_policy() {
         }
         pool.close().await;
     }
+}
+
+#[tokio::test]
+async fn legacy_transfer_plan_retains_original_owner_and_binding_rows() {
+    for last in [55, 58] {
+        let pool = fixture(last).await;
+        let owner_version = if last == 55 { 56 } else { 59 };
+        let owner = state_catalog::fork(/*version*/ 59).unwrap();
+        sqlx::raw_sql(owner.sql).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO _sqlx_migrations VALUES (?, 'owner metadata λ', 'original time', 1, ?, -17)")
+            .bind(owner_version).bind(owner.checksum.as_ref()).execute(&pool).await.unwrap();
+        if last == 58 {
+            apply_fork_fact(&pool, /*version*/ 60).await;
+        }
+        let mut transaction = pool.begin().await.unwrap();
+        let original = state_ledger::read(&mut transaction, Ledger::Canonical)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut transfers = vec![LegacyTransfer {
+            source: original
+                .iter()
+                .find(|row| row.version == owner_version)
+                .unwrap()
+                .clone(),
+            destination: Destination::StatefulOwner,
+        }];
+        if last == 58 {
+            transfers.push(LegacyTransfer {
+                source: original
+                    .iter()
+                    .find(|row| row.version == 60)
+                    .unwrap()
+                    .clone(),
+                destination: Destination::StatefulBinding,
+            });
+        }
+        assert_eq!(
+            validate(&mut transaction).await.unwrap(),
+            LegacyHistory {
+                original,
+                transfers
+            }
+        );
+        transaction.rollback().await.unwrap();
+        pool.close().await;
+    }
+}
+
+#[tokio::test]
+async fn legacy_recency_plan_retains_original_38_row_without_relabeling_it() {
+    let pool = fixture(/*last*/ 39).await;
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 38; UPDATE _sqlx_migrations SET version = 38, description = 'original recency', installed_on = 'original time', execution_time = -19 WHERE version = 39; DROP TABLE external_agent_config_imports")
+        .execute(&pool).await.unwrap();
+    let mut transaction = pool.begin().await.unwrap();
+    let original = state_ledger::read(&mut transaction, Ledger::Canonical)
+        .await
+        .unwrap()
+        .unwrap();
+    let source = original
+        .iter()
+        .find(|row| row.version == 38)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        validate(&mut transaction).await.unwrap(),
+        LegacyHistory {
+            original,
+            transfers: vec![LegacyTransfer {
+                source,
+                destination: Destination::CanonicalRecency
+            }],
+        }
+    );
+    transaction.rollback().await.unwrap();
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn legacy_plan_refuses_reserved_reconciled_objects_even_with_opaque_suffix() {
+    let pool = fixture(/*last*/ 60).await;
+    sqlx::query("INSERT INTO _sqlx_migrations VALUES (61, 'future', 'fixed', 1, X'00', -4); CREATE TABLE _STATEFUL_MIGRATION_ARCHIVE (value TEXT)")
+        .execute(&pool).await.unwrap();
+    assert!(
+        inspect(&pool)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("dedicated classifier")
+    );
+    pool.close().await;
 }
