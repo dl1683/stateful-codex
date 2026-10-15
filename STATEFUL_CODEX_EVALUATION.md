@@ -709,3 +709,16 @@ is unchanged and has no call sites into this library. This is not a native-path,
 neutral-CLI, database/bootstrap, migration, writable-copy, contention or HAL gate.
 The next boundaries are reviewed registry/bootstrap, qualified local opening and
 bounded neutral reads; native cutover stays behind S2/S3.
+
+## HAL H1 preparation: exact-output baseline (2026-10-15)
+
+The [preservation baseline](./STATEFUL_HAL_PRESERVATION_BASELINE_20261015.md)
+records valid synthetic405byte Marathi/JSON inputs, two failed read-only copy
+journeys and a failed explicit-UTF8 diagnostic (all finals329bytes/question marks),
+a successful405byte full-access diagnostic control, and exact image770.23.
+The profile control does not clear the failing read-only gate. CLM refused the
+console setter; the cause/current source binding remains unqualified. An initial
+fixture-corruption diagnosis was disproved by hashes/codepoints and corrected
+without discarding failures. Scorer: deterministic bytes/JSON, no LLM judge.
+Installed launcher/Luna only; no candidate, IT2, translation quality, customer
+review, offline, compaction/restart or HAL acceptance claim.
