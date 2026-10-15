@@ -722,3 +722,48 @@ fixture-corruption diagnosis was disproved by hashes/codepoints and corrected
 without discarding failures. Scorer: deterministic bytes/JSON, no LLM judge.
 Installed launcher/Luna only; no candidate, IT2, translation quality, customer
 review, offline, compaction/restart or HAL acceptance claim.
+
+## Project-store S1b1: connection-only identity registry (2026-10-15)
+
+The independently reviewed final implementation is `d4860b6f8..a3731ab3f`
+(499 changed lines). It retains the resolver and adds fixed bootstrap SQL,
+stable project/store UUIDs, format/minimum-reader/minimum-writer versions, and
+the domain/version/SHA256 registry. Initialization uses one immediate transaction;
+inspection validates a read snapshot. Unknown schemas, histories, headers,
+partial/malformed metadata and oversized projected fields refuse. This accepts
+only the bootstrap domain, not arbitrary domain SQL or imported legacy content.
+
+Recorded local `just test -p codex-project-store`: Windows19passed/0skipped and
+WSL Linux19passed/0skipped, retries0/jobs2 under the shared build mutex and
+23,221,225,472-byte HOST admission floor. The WSL guest had approximately8.3GB
+total memory; this is not an equally sized Linux machine. The nineteen tests
+combine resolver9 and registry10: independent initializers, read-only reopen,
+isolated IDs, foreign/partial state, changed history, header/UUID corruption,
+allocation-failure rollback, oversized fields and bounded busy recovery.
+Scoped fix was warning-free; final `just fmt` and lock regeneration exited0,
+with no MODULE lock diff. No tests ran after final cleanup. macOS and Bazel
+build/test execution remain unrun; no CPU/heap bound for hostile SQLite is claimed.
+
+Fresh Droid returned **APPROVE COMMIT AND INTEGRATION** for that exact source
+slice and the additive facade/dependency resolution against resolver874eea815.
+Approved HAL docs28b0693d2 then merged without conflicts; the codex-rs subtree
+remained unchanged from a3731ab3f. Integration072a4360a fast-forwarded main and
+pushed only to `stateful/main` and `stateful/rebuild/store-migration-registry`.
+The earlier root prototype is archived, unlanded and separate from these gates.
+
+External receipts: `sc_dogfood/lsr_drivers/reports/stateful_rebuild/`, especially
+`registry_source_review1.txt`, `registry_combined_{win1,linux1,fix,bazel_lock,fmt}.log`
+and `registry_final_manifest.json`. Final source/test-binary/launcher hashes are
+inventoried; artifact paths/mtimes do not constitute cryptographic source-to-binary
+attestation. The installed launcher/binaries were not replaced by this component.
+
+Separate installed Luna baseline: arithmetic43passed; one file-edit trial claimed
+creation while its tool cell remained running, but independent inspection found
+no file. Count that trial failed, not a host-certified Completed. Baseline runs
+used the existing engine home and wrote ordinary session/project state; no home
+conversion occurred. Another executor's successful trial remains separate.
+This kernel opens no files and changes no native attachment. Qualified path
+opening, neutral knowledge reads, legacy closure import, old-writer barrier,
+atomic completion/Forget and HAL acceptance remain outstanding milestone gates.
+True child-process contention, killed-writer recovery and uncertain-commit
+qualification are not established by the independent-connection fixtures.
