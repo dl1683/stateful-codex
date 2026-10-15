@@ -10,7 +10,7 @@ use sqlx::SqliteConnection;
 use super::state_catalog;
 
 #[path = "state_schema_tokens.rs"]
-mod lexer;
+pub(super) mod lexer;
 
 pub(super) struct AppliedSchema {
     pub canonical: BTreeSet<i64>,

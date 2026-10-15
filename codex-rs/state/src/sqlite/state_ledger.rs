@@ -36,6 +36,11 @@ pub(super) async fn read(
     ledger: Ledger,
 ) -> anyhow::Result<Option<Vec<AppliedRecord>>> {
     let name = ledger.name();
+    if !super::state_metadata::validate(connection, super::state_metadata::Metadata::Ledger(ledger))
+        .await?
+    {
+        return Ok(None);
+    }
     let kinds: Vec<String> = sqlx::query_scalar(
         "SELECT type FROM sqlite_schema WHERE name = ? COLLATE NOCASE ORDER BY type",
     )

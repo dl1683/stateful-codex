@@ -4,7 +4,7 @@
 use anyhow::bail;
 use anyhow::ensure;
 
-pub(super) fn tokens(sql: &str) -> anyhow::Result<Vec<String>> {
+pub(in crate::sqlite) fn tokens(sql: &str) -> anyhow::Result<Vec<String>> {
     let bytes = sql.as_bytes();
     ensure!(!bytes.contains(&0), "NUL in schema SQL");
     let mut at = 0;

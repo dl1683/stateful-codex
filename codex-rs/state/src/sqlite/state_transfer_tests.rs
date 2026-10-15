@@ -118,6 +118,14 @@ async fn transferred_owner_facts_preserve_populated_pending_complete_and_running
             .await
             .unwrap();
         assert_eq!(data(&mut transaction, &projection).await, before);
+        assert!(
+            crate::sqlite::state_metadata::validate(
+                &mut transaction,
+                crate::sqlite::state_metadata::Metadata::Archive,
+            )
+            .await
+            .unwrap()
+        );
         let mut expected = original.clone();
         expected.version = 1;
         let fork = state_ledger::read(&mut transaction, Ledger::Stateful)

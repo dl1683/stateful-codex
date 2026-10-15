@@ -35,6 +35,8 @@ mod migration_history;
 mod state_catalog;
 #[cfg(test)]
 mod state_ledger;
+#[cfg(test)]
+mod state_metadata;
 // Qualification only until schema evidence and restartable transfer are ready.
 #[cfg(test)]
 mod state_preflight;
