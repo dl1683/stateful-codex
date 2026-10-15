@@ -17,12 +17,21 @@ to import or install the entire batch. No sync worktree mutation was performed.
 
 Two independently launched rebuild executors initially selected `sc_wt_rebuild`.
 Concurrent untracked crate files were detected; both versions were archived in
-`reports/stateful_rebuild_concurrent_2129/`. That worktree remains with the original
-resolver executor. This evidence work uses `sc_wt_rebuild_bootstrap` on
-`rebuild/project-store-bootstrap-2129`, created from main. The custody notice is
-`reports/STATEFUL_REBUILD_CONCURRENT_CUSTODY.md`. Resolver gates describe different
-source versions and cannot be combined into one approval. No resolver commit is
-claimed here, and no shared untracked source was staged or removed.
+`reports/stateful_rebuild_concurrent_2129/`. Initial reciprocal notices disagreed:
+the uppercase notice yielded the worktree to the original executor, while
+`reports/stateful_rebuild_custody.md` yielded it to this location executor.
+Fresh Droid review of the initial S0 document caught that unresolved handoff.
+At21:36Z this executor explicitly accepted the later handoff in BOTH notices:
+this executor owns `sc_wt_rebuild`; the other owns `sc_wt_rebuild_registry` and
+migration-registry work. Its untouched root prototype is retained externally;
+this resolver uses the location implementation. Gates from those different
+implementations cannot be combined into one approval.
+
+This evidence/identity work uses `sc_wt_rebuild_bootstrap` on
+`rebuild/project-store-bootstrap-2129`, created from main. No resolver approval is
+claimed here. The original executor archived its own root prototype; this session
+has neither staged nor deleted that prototype. Resolver implementation and
+migration registry receive separate exact-diff reviews before integration.
 
 Both rebuild worktrees ran `git merge --ff-only main`: already up to date.
 A history-preserving feature-to-main fast-forward was attempted from the historical
@@ -68,7 +77,10 @@ The short `scodex exec ...` invocation failed argument parsing before inference.
 With explicit `--stateful collaborative`, the same launcher ran Luna high effort
 in a plain non-Git scratch folder. It answered 17 + 25 with exact `42`, exit0.
 A separate session created and read back exactly `rebuild-baseline` plus LF in
-`note.txt`, exit0. Independent file bytes and SHA256 are recorded in
+`note.txt`, exit0. The edit log contains two tool-router errors (an invalid
+acceptance-ledger addition and completion-only fields on a noncompleted update).
+Successful file bytes do not make this an error-free semantic journey.
+Independent file bytes and SHA256 are recorded in
 `baseline_user_check.json`; this was exec, not TUI or candidate-binary testing.
 
 After the ordinary turn, native memory add saved scratch canary RB2129; a fresh

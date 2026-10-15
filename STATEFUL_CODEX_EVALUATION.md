@@ -680,5 +680,6 @@ online SQLite backups. Installed Luna exec answered `42`, made an exact LF scrat
 file, and native memory add/list/Forget confirmed home-scoped storage plus active
 CLI retirement. No project-local database, candidate source match, native conversion,
 rollback rehearsal, compaction, TUI or offline/HAL acceptance is established.
-S1a remains with the original resolver executor; this evidence work is isolated in
+S1a belongs to this location executor after the reciprocal handoff was explicitly
+reconciled; the other executor owns the migration registry. Evidence work is in
 `rebuild/project-store-bootstrap-2129`. Fresh Droid review remains a separate gate.
