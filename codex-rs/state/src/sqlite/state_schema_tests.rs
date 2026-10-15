@@ -53,7 +53,18 @@ fn numeric_blob_and_compound_operator_boundaries_are_preserved() {
     assert_ne!(tokens("a>=1").unwrap(), tokens("a > =1").unwrap());
     assert_ne!(tokens("a->>'x'").unwrap(), tokens("a-> >'x'").unwrap());
     assert_ne!(tokens("X'00ff'").unwrap(), tokens("X '00ff'").unwrap());
-    for input in ["X'0'", "X'gg'", "1e+", "0x"] {
+    for input in [
+        "X'0'",
+        "X'gg'",
+        "1e+",
+        "0x",
+        "SELECT 1e2_3",
+        "SELECT 0x1_2",
+        "SELECT 1_2",
+        "SELECT 1.2_3",
+    ] {
         assert!(tokens(input).is_err());
     }
+    assert!(tokens("SELECT 1e2 _3").is_ok());
+    assert!(tokens("SELECT 0x1 _2").is_ok());
 }

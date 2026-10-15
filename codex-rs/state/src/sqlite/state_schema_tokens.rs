@@ -78,18 +78,12 @@ pub(super) fn tokens(sql: &str) -> anyhow::Result<Vec<String>> {
                 }
                 ensure!(at > digits, "unsupported schema hexadecimal literal");
             } else {
-                while bytes
-                    .get(at)
-                    .is_some_and(|next| next.is_ascii_digit() || *next == b'_')
-                {
+                while bytes.get(at).is_some_and(u8::is_ascii_digit) {
                     at += 1;
                 }
                 if byte != b'.' && bytes.get(at) == Some(&b'.') {
                     at += 1;
-                    while bytes
-                        .get(at)
-                        .is_some_and(|next| next.is_ascii_digit() || *next == b'_')
-                    {
+                    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
                         at += 1;
                     }
                 }
@@ -111,6 +105,12 @@ pub(super) fn tokens(sql: &str) -> anyhow::Result<Vec<String>> {
                     ensure!(at > digits, "unsupported schema exponent");
                 }
             }
+            // SQLite permits separators inside numeric tokens. Stopping before
+            // one would conflate a numeric suffix with a distinct alias token.
+            ensure!(
+                bytes.get(at) != Some(&b'_'),
+                "unsupported numeric separator in schema SQL"
+            );
         } else if matches!(
             byte,
             b'(' | b')'
