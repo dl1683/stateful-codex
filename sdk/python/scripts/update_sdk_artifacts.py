@@ -3,12 +3,14 @@
 import argparse
 import importlib.util
 import json
+import os
 import platform
 import re
 import runpy
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import tempfile
 import types
@@ -63,7 +65,10 @@ def staged_runtime_package_root(root: Path) -> Path:
 
 
 def run(cmd: list[str], cwd: Path) -> None:
-    subprocess.run(cmd, cwd=str(cwd), check=True)
+    # Codegen invokes formatters by name; use this Python environment's tools.
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join([sysconfig.get_path("scripts"), env.get("PATH", "")])
+    subprocess.run(cmd, cwd=str(cwd), check=True, env=env)
 
 
 def run_python_module(module: str, args: list[str], cwd: Path) -> None:
