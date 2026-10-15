@@ -1,0 +1,26 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "codex-project-store"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "codex_project_store"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+sha2 = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+codex-state = { workspace = true }
+codex-utils-absolute-path = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
