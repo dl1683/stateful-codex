@@ -35,7 +35,9 @@ async fn fixture(last: i64) -> SqlitePool {
 
 async fn inspect(pool: &SqlitePool) -> anyhow::Result<()> {
     let mut transaction = pool.begin().await?;
-    validate(&mut transaction).await
+    let result = validate(&mut transaction).await;
+    transaction.rollback().await?;
+    result
 }
 
 #[tokio::test]
@@ -569,4 +571,31 @@ async fn reserved_ledger_name_cannot_hide_a_trigger_on_another_table() {
     assert!(error.to_string().contains("ambiguous"));
     assert_eq!(snapshot(&pool).await, before);
     pool.close().await;
+}
+
+#[tokio::test]
+async fn alternate_case_ledger_preserves_empty_and_opaque_trigger_policy() {
+    for last in [0, 60] {
+        let pool = fixture(last).await;
+        sqlx::query("ALTER TABLE _sqlx_migrations RENAME TO ledger_case_bridge; ALTER TABLE ledger_case_bridge RENAME TO _SQLX_MIGRATIONS")
+            .execute(&pool).await.unwrap();
+        if last == 60 {
+            sqlx::query(
+                "INSERT INTO _sqlx_migrations VALUES (61, 'future', 'fixed', 1, X'00', -4)",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        inspect(&pool).await.unwrap();
+        if last == 60 {
+            sqlx::query("CREATE TRIGGER arbitrary_ledger_trigger AFTER UPDATE ON _SQLX_MIGRATIONS BEGIN SELECT 1; END")
+                .execute(&pool).await.unwrap();
+            let before = snapshot(&pool).await;
+            let error = inspect(&pool).await.unwrap_err();
+            assert!(error.to_string().contains("ledger trigger"));
+            assert_eq!(snapshot(&pool).await, before);
+        }
+        pool.close().await;
+    }
 }

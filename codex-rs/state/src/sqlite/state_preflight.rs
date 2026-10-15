@@ -96,7 +96,7 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
         "unsupported generated state migration ledger columns"
     );
     let triggers: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = '_sqlx_migrations')",
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = '_sqlx_migrations' COLLATE NOCASE)",
     )
     .fetch_one(&mut *connection)
     .await?;
@@ -200,7 +200,7 @@ async fn validate(connection: &mut SqliteConnection) -> anyhow::Result<()> {
     }
     if seen.is_empty() {
         let populated: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name != '_sqlx_migrations' AND name NOT GLOB 'sqlite_*')",
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE NOT (type = 'table' AND name = '_sqlx_migrations' COLLATE NOCASE) AND name NOT GLOB 'sqlite_*')",
         ).fetch_one(&mut *connection).await?;
         ensure!(
             !populated,
