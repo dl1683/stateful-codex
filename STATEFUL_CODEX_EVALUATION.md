@@ -669,3 +669,16 @@ Status: figures come from the cloud-gate logs `integrate/logs/s1a_gate*.log` and
 **Registered post-fix check (bundle `b59589c84`, ten identical prompts, same Gemma 4 31B node, fresh bridge key; executed by the ladder operator).** Actual equals the registered prediction on every count: Completed 0, Answered 10, Partial 0, Blocked 0, nonzero exits 0, no refused completion call, no run-update error line (before the fix: 8 of 10 sessions refused for a missing `openIssues`). Only 3 of 10 sessions called the completion tool at all, each once, each returning status running without refusal, so the effect of making the field optional and the effect of telling the model that no completion call is required are not separated. Raw artifacts under `gs://sc-bench-iqidis-artifacts/dsg/check10_b59589c84/`. Limits: simple prompts, one model, no required criteria, so Partial and the UNVERIFIABLE state are not exercised.
 
 **Hands-on at the usability head (Luna gpt-6-luna high; executable copied from the local debug build, checkout `b59589c84`; `campaign2/handson_20261014d/RESULTS.md`; error hunt applied, details in `campaign2/FINDINGS.md`).** No completion call was refused for a missing `openIssues` in seven sessions, but that is not an improvement: the earlier Luna run also had none (the eight-of-ten baseline is the Gemma check). A plain question ends Answered, with the visible outcome footer back; with the original always-failing-check prompt the model again rewrote the checker and told the user the check passes (stored Partial); with "do not modify" it disclosed honestly; the CSV task twice, the git fix and an interrupted-and-resumed task all ended Partial with no verified Completed, and the resumed run's final message dropped the disclosure of the uncertified ledger. n=1 or 2 per scenario on a loaded machine, so timings are observations only.
+
+## Project-store rebuild S0 baseline, 2026-10-15 (bootstrap executor)
+
+The owner-directed rebuild is active; earlier hold text is historical. The
+[baseline and custody receipt](./STATEFUL_PROJECT_STORE_BASELINE_20261015.md)
+records the separate worktrees, concurrent-resolver collision, preserved sync WIP,
+33-file migration inventory, exact installed launcher/binary hashes and private
+online SQLite backups. Installed Luna exec answered `42`, made an exact LF scratch
+file, and native memory add/list/Forget confirmed home-scoped storage plus active
+CLI retirement. No project-local database, candidate source match, native conversion,
+rollback rehearsal, compaction, TUI or offline/HAL acceptance is established.
+S1a remains with the original resolver executor; this evidence work is isolated in
+`rebuild/project-store-bootstrap-2129`. Fresh Droid review remains a separate gate.
