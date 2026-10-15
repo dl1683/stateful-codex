@@ -793,3 +793,32 @@ Final repaired Windows32/Linux32 gates passed with zero skips/retries; the file
 probe uses malformed bytes so SQLite-before-policy ordering would fail distinctly.
 Cleanup and fresh exact review remain separate receipts. No native/migration, actual killed-process,
 power-loss, arbitrary-sync, hostile-SQLite or complete-milestone claim follows.
+
+## S1c0: bounded standalone bootstrap inspection (2026-10-15)
+
+The new `stateful-memory --project <dir> capabilities|root --json` executable
+uses the reviewed project-store reader without engine authentication or home.
+It exposes immutable bootstrap identity only, with explicit unavailable knowledge,
+native attachment and semantic revisions. It creates no stores and is not S1c
+knowledge retrieval or the complete first milestone. Unknown stores refuse.
+Lossless ASCII-escaped JSON fits the 4096-byte envelope, including trailing LF;
+this does not fix H1 exact source-byte transport.
+
+Windows and WSL Linux each passed five tests, zero skips/retries: real reader
+subprocesses over Rust-initialized stores, distinct identities, Unicode paths,
+absent/foreign refusal, JSON expansion budgets and a reviewed output snapshot.
+The first Windows attempt retained its one new-snapshot failure before explicit
+review/acceptance. Lock regeneration, scoped fix and final format exited zero;
+fix retained five test-only unwrap warnings. No tests ran after final cleanup.
+The local candidate build exited zero; source/input and binary hashes are retained,
+without claiming cryptographic build attestation. macOS/Bazel execution is unrun.
+
+Installed launcher/Luna read two synthetic Python-seeded metadata stores through
+that separate candidate and returned their exact distinct UUIDs. Deterministic
+JSON equality and database hashes passed; this is no seeded knowledge-entry read,
+legacy import or native attachment. A real ext4-root/9p-store mount refused with
+unsupportedFilesystem; identical bytes on ext4 read successfully. The first mount
+attempt returned invalidProject because its temporary fixture was absent; it is
+retained, and the recreated persistent fixture supplied the qualifying witness.
+The owned mount was removed. Receipts: external stateful_rebuild_cli_* logs and
+stateful_rebuild_cli_hands_on_20261015/. Native launcher/binaries remain unchanged.

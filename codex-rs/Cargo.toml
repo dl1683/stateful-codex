@@ -95,6 +95,7 @@ members = [
     "process-hardening",
     "project-intelligence",
     "project-store",
+    "stateful-memory",
     "stateful-runtime",
     "realtime-webrtc",
     "voice-host",
