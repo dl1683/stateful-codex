@@ -163,6 +163,23 @@ async fn source_produced_archive_sets_reopen_with_exact_original_metadata_and_re
                 .unwrap();
             let mut transaction = pool.begin().await.unwrap();
             let before = logical(&mut transaction).await;
+            let namespace = crate::sqlite::state_preflight::modern::PrivateHistory {
+                canonical: state_ledger::read(&mut transaction, Ledger::Canonical)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                private: state_ledger::read(&mut transaction, Ledger::Stateful)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                archive: Some(expected.clone()),
+            };
+            assert_eq!(
+                crate::sqlite::state_preflight::modern::qualify(&mut transaction)
+                    .await
+                    .unwrap(),
+                namespace
+            );
             assert_eq!(
                 archive::qualify(&mut transaction).await.unwrap(),
                 Some(expected)

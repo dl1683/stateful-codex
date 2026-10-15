@@ -18,6 +18,7 @@ pub(super) struct AppliedSchema {
     pub opaque_suffix: bool,
 }
 
+/// The caller must first qualify metadata layouts/rows or refuse private objects.
 pub(super) async fn validate(
     connection: &mut SqliteConnection,
     history: &AppliedSchema,
@@ -85,14 +86,14 @@ async fn schema(connection: &mut SqliteConnection) -> anyhow::Result<Schema> {
     // Bound this collector before fetching SQL strings or allocating tokens.
     // These are qualification limits, not limits on opaque future schemas.
     let (count, total, largest): (i64, i64, i64) = sqlx::query_as(
-        "SELECT count(*), COALESCE(sum(length(CAST(sql AS BLOB))), 0), COALESCE(max(length(CAST(sql AS BLOB))), 0) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' AND NOT (type = 'table' AND name = '_sqlx_migrations' COLLATE NOCASE) AND sql IS NOT NULL",
+        "SELECT count(*), COALESCE(sum(length(CAST(sql AS BLOB))), 0), COALESCE(max(length(CAST(sql AS BLOB))), 0) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' AND NOT (type = 'table' AND name COLLATE NOCASE IN ('_sqlx_migrations', '_stateful_migrations', '_stateful_migration_archive')) AND sql IS NOT NULL",
     ).fetch_one(&mut *connection).await?;
     ensure!(
         count <= 128 && total <= 1_048_576 && largest <= 65_536,
         "state schema exceeds qualification collection bounds"
     );
     let objects: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' AND NOT (type = 'table' AND name = '_sqlx_migrations' COLLATE NOCASE) AND sql IS NOT NULL ORDER BY type, name",
+        "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' AND NOT (type = 'table' AND name COLLATE NOCASE IN ('_sqlx_migrations', '_stateful_migrations', '_stateful_migration_archive')) AND sql IS NOT NULL ORDER BY type, name",
     ).fetch_all(connection).await?;
     objects
         .into_iter()
