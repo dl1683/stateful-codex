@@ -208,3 +208,6 @@ mod modern;
 
 #[path = "state_projection_tokens.rs"]
 mod projection_tokens;
+
+#[path = "state_projection_table.rs"]
+mod projection_table;
