@@ -830,3 +830,11 @@ Final Windows5/Linux5 gates explicitly enabled serde_json/preserve_order and pas
 with zero skips/retries; scoped fix/final fmt exited zero. No post-cleanup tests.
 A Bazel package query loaded binary/tests successfully; build/test execution is
 still unrun. Both held histories and review findings remain preserved.
+
+## 2026-10-15 independent read-only reader witness
+
+- Exact reader781c8e1e4, approved opener5d3, independent frozen leaf SHA25670b782778f89a71dc4c7879aefc8b7b85720235fba430cbf370bd8d85acdfa79. Local mutex/jobs2/23,221,225,472-byte host admission, build0; before/after source hashes equal. No cryptographic source-to-binary attestation or native installation.
+- Independently reviewed scratch harness ran once: Python-seeded metadata only; two distinct identities, Unicode/non-Git projects, moved-root identity, direct SQLite/digest/integrity and refusal/immutability checks PASS. Registered children collected; process-lifetime overlap is not a forced SQLite race. Rust initialization was NOT RUN by this witness.
+- Actual installed launcher/Luna session01a141ec-3118-7090-ad15-3f43ad38efba returned two completed exit0 reads and exact final JSON matching direct/tool UUIDs and paths. Fixture files and candidate hash unchanged; normal native session home writes expected. No model judge; explicit UTF-8 deterministic scoring.
+- Migration inventory revision4 received fresh inventory-only approval:33 SQL files and disposable empty schemas are not populated SQLx migration qualification. Native/store-route map remains separately reviewed preparation. M0/S2/S3, native knowledge, atomic completion, legacy retirement, MCP/offline and HAL H1 remain open. Earlier native edit failure remains a failure.
+- Details and retained local receipts: STATEFUL_PROJECT_STORE_WITNESS_20261015.md. This is not the first milestone or company-brain acceptance.
