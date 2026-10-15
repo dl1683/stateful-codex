@@ -34,5 +34,4 @@ It returns stable project/store UUIDs only after commit. `read_identity` validat
 under a read snapshot and works on a read-only connection. Neither opens files.
 The opener must establish fresh-file custody; an unknown preexisting empty file
 is not permission to initialize it. Configure a bounded busy timeout first.
-Only bootstrap format/domain1 is supported; unknown schemas, changed histories,
-partial metadata and nonzero SQLite application/user headers refuse.
+Only bootstrap format/domain1 is supported; foreign or incomplete stores refuse.
