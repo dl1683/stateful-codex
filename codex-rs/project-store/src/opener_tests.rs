@@ -187,7 +187,10 @@ async fn stable_unsupported_store_directory_refuses_before_any_file_write() {
             qualify_for_open(path)
         }
     };
-    assert!(matches!(initialize_qualified(&root, &qualification).await, Err(ProjectStoreOpenError::UnsupportedFilesystem)));
+    assert!(matches!(
+        initialize_qualified(&root, &qualification).await,
+        Err(ProjectStoreOpenError::UnsupportedFilesystem)
+    ));
     assert_eq!(fs::read_dir(store_directory.as_path()).unwrap().count(), 0);
 }
 
@@ -195,7 +198,10 @@ async fn stable_unsupported_store_directory_refuses_before_any_file_write() {
 async fn stable_unsupported_database_mount_refuses_before_sqlite_inspection() {
     let project = TempDir::new().unwrap();
     let root = location(project.path());
-    initialize_local_store(&root).await.unwrap();
+    fs::create_dir(root.project_root().join(".stateful").as_path()).unwrap();
+    // If SQLite is reached before the filesystem refusal, this fails as SQL,
+    // rather than the required filesystem-policy error.
+    fs::write(root.database_path().as_path(), b"not a SQLite database").unwrap();
     let before = fs::read(root.database_path().as_path()).unwrap();
     let qualification = |path: &AbsolutePathBuf| {
         if path == root.database_path() {
@@ -204,6 +210,9 @@ async fn stable_unsupported_database_mount_refuses_before_sqlite_inspection() {
             qualify_for_open(path)
         }
     };
-    assert!(matches!(inspect_qualified(&root, &qualification).await, Err(ProjectStoreOpenError::UnsupportedFilesystem)));
+    assert!(matches!(
+        inspect_qualified(&root, &qualification).await,
+        Err(ProjectStoreOpenError::UnsupportedFilesystem)
+    ));
     assert_eq!(fs::read(root.database_path().as_path()).unwrap(), before);
 }

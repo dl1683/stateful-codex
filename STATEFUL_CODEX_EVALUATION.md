@@ -789,5 +789,7 @@ writes; inspection qualifies the directory and database file before SQLite.
 Private injected-probe witnesses model ordinary stable directory/file submounts;
 a separately mounted WSL9p fixture is prepared for the following CLI witness.
 Closed-stage/no-replace publication and read-only existing-store admission remain.
-Targeted repaired gates are pending. No native/migration, actual killed-process,
+Final repaired Windows31/Linux31 gates passed with zero skips/retries; the file
+probe uses malformed bytes so SQLite-before-policy ordering would fail distinctly.
+Cleanup and fresh exact review remain separate receipts. No native/migration, actual killed-process,
 power-loss, arbitrary-sync, hostile-SQLite or complete-milestone claim follows.

@@ -10,15 +10,15 @@ use sqlx::sqlite::SqliteJournalMode;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::FilesystemQualificationError;
 use crate::ProjectStoreLocation;
 use crate::ResolveError;
 use crate::StoreIdentity;
 use crate::StoreRegistryError;
-use crate::FilesystemQualificationError;
-use crate::qualify_local_filesystem;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use crate::initialize_connection;
+use crate::qualify_local_filesystem;
 use crate::read_identity;
+use codex_utils_absolute_path::AbsolutePathBuf;
 
 const IGNORE: &[u8] = b"*\n!.gitignore\n";
 
