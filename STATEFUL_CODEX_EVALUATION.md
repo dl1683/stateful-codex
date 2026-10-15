@@ -831,6 +831,41 @@ with zero skips/retries; scoped fix/final fmt exited zero. No post-cleanup tests
 A Bazel package query loaded binary/tests successfully; build/test execution is
 still unrun. Both held histories and review findings remain preserved.
 
+## S1c0b: explicit bootstrap administration (2026-10-15)
+
+`init --storage local-unsynchronized` exposes the reviewed metadata initializer.
+The required enum is an explicit operator assertion of host qualification, not
+comprehensive synchronization detection. Reads still create no stores; unknown
+existing files are refused. Initialization returns the same bounded identity
+schema, with bootstrap-only coverage and no knowledge/native/legacy conversion.
+The earlier read-only CLI review found a Bazel duplicate-target defect; disabling
+library inference repaired it. A local Bazel package query then loaded the binary
+and test targets; this query is not a Bazel build/test qualification.
+
+Windows7/Linux7 passed with zero skips/retries: two spawned independent initializer
+processes converge, repeat init/read preserves the database, abandoned stages stay
+inactive, and missing storage assertion/foreign files refuse. These observations
+do not prove an overlapping SQLite lock window, killed-process or power-loss
+recovery. Initial init snapshot failure remains recorded; it was reviewed/accepted
+before final passes. Scoped fix/final fmt/build exited zero, retaining five
+test-helper unwrap warnings. Format waited when host RAM was below the floor.
+No tests ran after cleanup; package dependencies/lock inputs did not change.
+
+Installed launcher/Luna initialized two fresh scratch projects through the pinned
+candidate, then read both identities and returned exact distinct UUIDs. Read-only
+SQLite inspection and deterministic JSON equality confirmed the reply, integrity
+and metadata-only schema; candidate/source hashes are retained. No synthetic seed
+was used in this journey. Native launcher and installed Codex were unchanged.
+Actual process-kill/power-loss, domain writes, writable-copy adoption, migration,
+old-writer barrier, atomic completion, knowledge reads and full milestone remain
+unqualified. Fresh exact Droid approval remains a separate promotion gate.
+
+Integrated reader/init gates additionally passed Windows7/Linux7 with
+serde_json/preserve_order enabled after sorting both snapshots. Conflict resolution
+retains both histories and the reviewed handoff. An accidental CRLF rewrite was
+normalized back to LF without changing logical text, followed by final format and
+candidate build; no tests ran after cleanup. Exact combined review remains required.
+
 ## 2026-10-15 independent read-only reader witness
 
 - Exact reader781c8e1e4, approved opener5d3, independent frozen leaf SHA25670b782778f89a71dc4c7879aefc8b7b85720235fba430cbf370bd8d85acdfa79. Local mutex/jobs2/23,221,225,472-byte host admission, build0; before/after source hashes equal. No cryptographic source-to-binary attestation or native installation.

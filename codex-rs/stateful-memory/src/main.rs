@@ -6,8 +6,10 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use clap::Subcommand;
+use clap::ValueEnum;
 use codex_project_store::ProjectStoreLocation;
 use codex_project_store::ProjectStoreOpenError;
+use codex_project_store::initialize_local_store;
 use codex_project_store::inspect_store;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value;
@@ -16,7 +18,7 @@ use serde_json::json;
 const MAX_REPLY_BYTES: usize = 4 * 1024;
 
 #[derive(Parser)]
-#[command(version, about = "Inspect an engine-neutral project-store bootstrap")]
+#[command(version, about = "Manage an engine-neutral project-store bootstrap")]
 struct Cli {
     #[arg(long)]
     project: PathBuf,
@@ -31,6 +33,16 @@ struct Cli {
 enum Operation {
     Capabilities,
     Root,
+    /// Initialize metadata only after qualifying this host's storage.
+    Init {
+        #[arg(long, value_enum)]
+        storage: StorageQualification,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum StorageQualification {
+    LocalUnsynchronized,
 }
 
 #[derive(Clone, Copy)]
@@ -89,12 +101,17 @@ async fn execute(cli: Cli) -> Result<Value, (&'static str, String)> {
         Operation::Capabilities => {
             return Ok(json!({
                 "protocolVersion": 1, "coverage": "bootstrapOnly",
-                "operations": ["capabilities", "root"],
+                "operations": ["capabilities", "root", "init"],
                 "maxReplyBytes": MAX_REPLY_BYTES, "knowledgeAvailable": false,
                 "nativeAttached": false
             }));
         }
         Operation::Root => inspect_store(&location).await.map_err(open_error)?,
+        Operation::Init {
+            storage: StorageQualification::LocalUnsynchronized,
+        } => initialize_local_store(&location)
+            .await
+            .map_err(open_error)?,
     };
     Ok(json!({
         "projectUuid": identity.project_uuid.to_string(), "storeUuid": identity.store_uuid.to_string(),
