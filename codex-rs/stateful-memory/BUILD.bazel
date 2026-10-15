@@ -3,4 +3,5 @@ load("//:defs.bzl", "codex_rust_crate")
 codex_rust_crate(
     name = "stateful-memory",
     crate_name = "stateful_memory",
+    crate_srcs = [],
 )
