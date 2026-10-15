@@ -1,0 +1,19 @@
+---
+source: stateful-memory/tests/cli.rs
+assertion_line: 151
+expression: "serde_json::to_string_pretty(&normalized).unwrap()"
+---
+{
+  "ok": true,
+  "result": {
+    "coverage": "bootstrapOnly",
+    "databasePath": "[database-path]",
+    "eligibilityGeneration": null,
+    "knowledgeAvailable": false,
+    "nativeAttached": false,
+    "projectRoot": "[project-root]",
+    "projectUuid": "[project-uuid]",
+    "snapshotRevision": null,
+    "storeUuid": "[store-uuid]"
+  }
+}

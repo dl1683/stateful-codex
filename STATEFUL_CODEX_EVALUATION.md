@@ -822,3 +822,32 @@ attempt returned invalidProject because its temporary fixture was absent; it is
 retained, and the recreated persistent fixture supplied the qualifying witness.
 The owned mount was removed. Receipts: external stateful_rebuild_cli_* logs and
 stateful_rebuild_cli_hands_on_20261015/. Native launcher/binaries remain unchanged.
+
+## S1c0b: explicit bootstrap administration (2026-10-15)
+
+`init --storage local-unsynchronized` exposes the reviewed metadata initializer.
+The required enum is an explicit operator assertion of host qualification, not
+comprehensive synchronization detection. Reads still create no stores; unknown
+existing files are refused. Initialization returns the same bounded identity
+schema, with bootstrap-only coverage and no knowledge/native/legacy conversion.
+The earlier read-only CLI review found a Bazel duplicate-target defect; disabling
+library inference repaired it. A local Bazel package query then loaded the binary
+and test targets; this query is not a Bazel build/test qualification.
+
+Windows7/Linux7 passed with zero skips/retries: two spawned independent initializer
+processes converge, repeat init/read preserves the database, abandoned stages stay
+inactive, and missing storage assertion/foreign files refuse. These observations
+do not prove an overlapping SQLite lock window, killed-process or power-loss
+recovery. Initial init snapshot failure remains recorded; it was reviewed/accepted
+before final passes. Scoped fix/final fmt/build exited zero, retaining five
+test-helper unwrap warnings. Format waited when host RAM was below the floor.
+No tests ran after cleanup; package dependencies/lock inputs did not change.
+
+Installed launcher/Luna initialized two fresh scratch projects through the pinned
+candidate, then read both identities and returned exact distinct UUIDs. Read-only
+SQLite inspection and deterministic JSON equality confirmed the reply, integrity
+and metadata-only schema; candidate/source hashes are retained. No synthetic seed
+was used in this journey. Native launcher and installed Codex were unchanged.
+Actual process-kill/power-loss, domain writes, writable-copy adoption, migration,
+old-writer barrier, atomic completion, knowledge reads and full milestone remain
+unqualified. Fresh exact Droid approval remains a separate promotion gate.
