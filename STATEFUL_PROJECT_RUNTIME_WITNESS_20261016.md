@@ -66,6 +66,12 @@ The old writer LF failure is not retried, normalized or upgraded by this new
 explicitly frozen protocol. Earlier Marathi and nested final escaping failures
 remain OPEN.
 
+Supplementary later readonly raw_payload_posthoc_audit1.json compares the retained
+runtime trial's complete raw result bodies and final against public stdout/final
+bytes and expected objects: PASS, with no new native/helper/model run or changed
+original score. The original frozen inventory checked identities/association;
+subsequent clock trials freeze this stronger payload-content check before launch.
+
 The source frame was checked before this documentation commit. Future HEAD/doc
 changes do not extend that frozen live-source claim; use retained manifests/ZIPs
 and verify the unchanged Rust tree. Exact closeout review precedes promotion.
