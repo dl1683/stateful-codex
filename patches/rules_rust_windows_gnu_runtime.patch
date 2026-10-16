@@ -1,0 +1,72 @@
+# Assemble the matching official GNU runtime and declare its import-library tool.
+# Preserve GCC unwind code and avoid an ambient PATH dependency for raw DLL imports.
+
+diff --git a/rust/private/repository_utils.bzl b/rust/private/repository_utils.bzl
+--- a/rust/private/repository_utils.bzl
++++ b/rust/private/repository_utils.bzl
+@@ -341,6 +341,7 @@
+             "lib/rustlib/{target_triple}/lib/*{dylib_ext}*",
+             "lib/rustlib/{target_triple}/lib/*{staticlib_ext}",
+             "lib/rustlib/{target_triple}/lib/self-contained/**",
++            "lib/rustlib/{target_triple}/bin/self-contained/**",
+         ],
+         # Some patterns (e.g. `lib/*.a`) don't match anything, see https://github.com/bazelbuild/rules_rust/pull/245
+         allow_empty = True,
+@@ -858,6 +859,16 @@
+         tool_subdirectories = ["rust-std-{}".format(target_triple.str)],
+         version = version,
+     )
++
++    if target_triple.str == "x86_64-pc-windows-gnu":
++        sha256.update(load_arbitrary_tool(
++            ctx,
++            iso_date = iso_date,
++            target_triple = target_triple,
++            tool_name = "rust-mingw",
++            tool_subdirectories = ["rust-mingw"],
++            version = version,
++        ))
+ 
+     return BUILD_for_stdlib(target_triple), sha256
+ 
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -699,6 +699,16 @@
+     """
+     return getattr(ctx.attr, "cc_runtime_linkage", "dynamic")
+ 
++def _gnu_dlltool(toolchain, cc_toolchain):
++    if toolchain.exec_triple.str != "x86_64-pc-windows-gnu" or toolchain.target_flag_value != "x86_64-pc-windows-gnu":
++        return None
++    if not cc_toolchain:
++        fail("GNU raw DLL imports require a declared LLVM C/C++ toolchain")
++    tools = [file for file in cc_toolchain.all_files.to_list() if file.basename == "llvm-dlltool.exe"]
++    if len(tools) != 1:
++        fail("Expected one declared LLVM dlltool for native GNU import libraries")
++    return tools[0]
++
+ def get_cc_toolchain_runtime_libs(cc_toolchain, feature_configuration, crate_type, linkage = "dynamic"):
+     if not cc_toolchain:
+         return depset()
+@@ -815,6 +825,9 @@
+         transitive_crate_outputs = dep_info.transitive_metadata_outputs
+ 
+     nolinkstamp_compile_direct_inputs = []
++    dlltool = _gnu_dlltool(toolchain, cc_toolchain)
++    if dlltool:
++        nolinkstamp_compile_direct_inputs.append(dlltool)
+     if build_info:
+         if build_info.rustc_env:
+             nolinkstamp_compile_direct_inputs.append(build_info.rustc_env)
+@@ -1557,6 +1570,10 @@
+             format_each = "--sysroot=%s",
+         )
+ 
++    dlltool = _gnu_dlltool(toolchain, cc_toolchain)
++    if dlltool:
++        rustc_flags.add(dlltool, format = "-Cdlltool=%s")
++
+     if toolchain._rename_first_party_crates:
+         env["RULES_RUST_THIRD_PARTY_DIR"] = toolchain._third_party_dir
+ 

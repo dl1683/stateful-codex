@@ -1,0 +1,15 @@
+# Rust GNU raw-DLL imports need the LLVM import-library driver alongside LLD.
+# Declare it in the Windows linker tool's data rather than relying on PATH.
+
+diff --git a/toolchain/llvm/llvm.bzl b/toolchain/llvm/llvm.bzl
+--- a/toolchain/llvm/llvm.bzl
++++ b/toolchain/llvm/llvm.bzl
+@@ -210,7 +210,7 @@
+             "bin/ld64.lld" + suffix,
+             "bin/lld" + suffix,
+             "bin/wasm-ld" + suffix,
+-        ],
++        ] + (["bin/llvm-dlltool.exe"] if suffix == ".exe" else []),
+     )
+ 
+     cc_tool(

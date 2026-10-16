@@ -137,10 +137,11 @@ def _bash_workspace_root_setup(ctx):
     return 'export INSTA_WORKSPACE_ROOT="${workspace_root}"\ncd "${workspace_root}"'
 
 def _windows_workspace_root_setup(ctx):
-    if not ctx.attr.chdir_workspace_root:
-        return ""
-    return """set "INSTA_WORKSPACE_ROOT=%workspace_root%"
-cd /d "%workspace_root%" || exit /b 1"""
+    # Snapshot metadata is workspace-relative even when tests keep their cwd.
+    setup = 'set "INSTA_WORKSPACE_ROOT=%workspace_root%"'
+    if ctx.attr.chdir_workspace_root:
+        setup += '\ncd /d "%workspace_root%" || exit /b 1'
+    return setup
 
 workspace_root_test = rule(
     implementation = _workspace_root_test_impl,

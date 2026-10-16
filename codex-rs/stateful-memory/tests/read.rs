@@ -112,6 +112,11 @@ async fn auth_free_subprocess_reads_two_projects_and_roundtrips_escaped_content(
                 .args(["--json", "capabilities"]);
             let cap_output = discovery.output().unwrap();
             assert!(cap_output.status.success() && cap_output.stderr.is_empty());
+            assert!(
+                cap_output.stdout.is_ascii()
+                    && cap_output.stdout.len() <= 4096
+                    && cap_output.stdout.last() == Some(&b'\n')
+            );
             let cap: Value = serde_json::from_slice(&cap_output.stdout).unwrap();
             let labels = ["projection", "verification", "omissions"];
             assert_eq!(
@@ -119,7 +124,9 @@ async fn auth_free_subprocess_reads_two_projects_and_roundtrips_escaped_content(
                 labels.map(|field| &reply["result"][field]),
             );
             let mut normalized = reply;
-            normalized["capabilitiesWire"] = String::from_utf8(cap_output.stdout).unwrap().into();
+            // JSON object order differs with serde_json's preserve_order feature.
+            // Snapshot the complete parsed reply; check its wire envelope above.
+            normalized["capabilities"] = cap;
             normalized["result"]["projectUuid"] = json!("[project-uuid]");
             normalized["result"]["storeUuid"] = json!("[store-uuid]");
             normalized.sort_all_objects();

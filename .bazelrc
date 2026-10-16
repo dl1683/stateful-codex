@@ -11,7 +11,8 @@ startup --experimental_remote_repo_contents_cache
 
 common --experimental_platform_in_output_dir
 
-build --workspace_status_command=./scripts/workspace-status.sh
+build:linux --workspace_status_command=./scripts/workspace-status.sh
+build:macos --workspace_status_command=./scripts/workspace-status.sh
 build:windows --workspace_status_command=./scripts/workspace-status.cmd
 
 # Runfiles strategy rationale: codex-rs/utils/cargo-bin/README.md
@@ -20,6 +21,12 @@ common --noenable_runfiles
 common --enable_platform_specific_config
 common:linux --host_platform=//:local_linux
 common:windows --host_platform=//:local_windows
+
+# Opt in on native x86_64 Windows when using the hermetic GNU C/C++ runtime.
+# Proc macros must use a GNU-hosted compiler as well as GNU native dependencies.
+common:windows-gnu-host --host_platform=//:local_windows_gnu
+common:windows-gnu-host --platforms=//:local_windows
+common:windows-gnu-host --extra_toolchains=@rust_toolchains//:all,//:windows_gnullvm_tests_on_gnu_host_toolchain
 common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
 common --@llvm//config:experimental_stub_libgcc_s
 

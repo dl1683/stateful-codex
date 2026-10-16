@@ -40,6 +40,15 @@ platform(
 )
 
 platform(
+    name = "local_windows_gnu",
+    constraint_values = [
+        "@llvm//constraints/windows/abi:gnu",
+        "@llvm//constraints/windows/crt:msvcrt",
+    ],
+    parents = ["@platforms//host"],
+)
+
+platform(
     name = "windows_x86_64_gnullvm",
     constraint_values = [
         "@platforms//cpu:x86_64",
@@ -64,6 +73,24 @@ toolchain(
         "@platforms//cpu:x86_64",
         "@platforms//os:windows",
         "@llvm//constraints/windows/abi:msvc",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@llvm//constraints/windows/abi:gnullvm",
+        "@llvm//constraints/windows/crt:msvcrt",
+    ],
+    toolchain = "@bazel_tools//tools/test:empty_toolchain",
+    toolchain_type = "@bazel_tools//tools/test:default_test_toolchain_type",
+)
+
+toolchain(
+    name = "windows_gnullvm_tests_on_gnu_host_toolchain",
+    exec_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@llvm//constraints/windows/abi:gnu",
+        "@llvm//constraints/windows/crt:msvcrt",
     ],
     target_compatible_with = [
         "@platforms//cpu:x86_64",

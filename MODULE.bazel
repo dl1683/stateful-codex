@@ -18,6 +18,7 @@ single_version_override(
         "//patches:llvm_rusty_v8_custom_libcxx.patch",
         "//patches:llvm_windows_arm64_powl.patch",
         "//patches:llvm_windows_mingw_compat.patch",
+        "//patches:llvm_windows_declared_dlltool.patch",
     ],
 )
 
@@ -212,6 +213,7 @@ rules_rust.patch(
         # Group build-script argument files to avoid Windows command-line limits.
         "//patches:rules_rust_group_build_script_arg_files.patch",
         "//patches:rules_rust_windows_execroot_separators.patch",
+        "//patches:rules_rust_windows_gnu_runtime.patch",
         "//patches:rules_rust_compiler_thp.patch",
     ],
     strip = 1,
@@ -288,6 +290,42 @@ nightly_rust.repository_set(
 )
 use_repo(nightly_rust, "rust_toolchains")
 
+# Native Windows GNU execution keeps proc macros compatible with hermetic LLVM's
+# GNU C/C++ dependencies. Selected only by --config=windows-gnu-host; retain the
+# workspace's existing Rust version and its GNU LLVM application target.
+nightly_rust.repository_set(
+    name = "stateful_rust_windows_gnu",
+    edition = "2024",
+    exec_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@llvm//constraints/windows/abi:gnu",
+        "@llvm//constraints/windows/crt:msvcrt",
+    ],
+    exec_triple = "x86_64-pc-windows-gnu",
+    sha256s = {
+        "rust-mingw-1.95.0-x86_64-pc-windows-gnu.tar.xz": "ac0b67b7ee8a35045c26b8e39a524f171b2dc4a18838bb15844308e4442802f2",
+    },
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@llvm//constraints/windows/abi:gnu",
+        "@llvm//constraints/windows/crt:msvcrt",
+    ],
+    target_triple = "x86_64-pc-windows-gnu",
+    versions = ["1.95.0"],
+)
+nightly_rust.repository_set(
+    name = "stateful_rust_windows_gnu",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@llvm//constraints/windows/abi:gnullvm",
+        "@llvm//constraints/windows/crt:msvcrt",
+    ],
+    target_triple = "x86_64-pc-windows-gnullvm",
+)
+
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
 toolchains.toolchain(
     edition = "2024",
@@ -327,6 +365,8 @@ crate.from_cargo(
         "x86_64-unknown-linux-gnu",
         "x86_64-unknown-linux-musl",
         "x86_64-apple-darwin",
+        # Native GNU-hosted proc macros and build tools in windows-gnu-host.
+        "x86_64-pc-windows-gnu",
         "x86_64-pc-windows-msvc",
         "x86_64-pc-windows-gnullvm",
     ],

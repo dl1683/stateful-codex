@@ -1,4 +1,5 @@
 exports_files([
+    "llvm_windows_declared_dlltool.patch",
     "abseil_windows_gnullvm_thread_identity.patch",
     "bzip2_windows_stack_args.patch",
     "llvm_rusty_v8_custom_libcxx.patch",
@@ -8,6 +9,7 @@ exports_files([
     "rules_rust_compiler_thp.patch",
     "rules_rust_group_build_script_arg_files.patch",
     "rules_rust_windows_execroot_separators.patch",
+    "rules_rust_windows_gnu_runtime.patch",
     "rules_rust_windows_msvc_direct_link_args.patch",
     "rules_rust_windows_process_wrapper_skip_temp_outputs.patch",
     "rules_cc_rusty_v8_custom_libcxx.patch",
