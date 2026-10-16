@@ -64,7 +64,7 @@ pub(crate) async fn end_on(
     connection: &mut SqliteConnection,
     run_id: &StatefulRunId,
     owner: &str,
-    attempt: u64,
+    attempt: i64,
 ) -> Result<(), StatefulRunStoreError> {
         sqlx::query(
             "UPDATE stateful_acceptance_ledgers
@@ -73,9 +73,13 @@ pub(crate) async fn end_on(
         )
         .bind(run_id.as_str())
         .bind(owner)
-        .bind(i64::try_from(attempt).map_err(|_| StatefulRunStoreError::CountOverflow)?)
+        .bind(attempt)
         .execute(connection)
         .await?;
         Ok(())
     }
 
+
+#[cfg(test)]
+#[path = "verification_tests.rs"]
+mod tests;

@@ -73,10 +73,27 @@ impl Fixture {
         let quoted = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
         for name in names {
             let columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info(?) ORDER BY cid").bind(&name).fetch_all(&mut self.observer).await?;
-            let fields = columns.iter().map(|name| format!("quote({})", quoted(name))).collect::<Vec<_>>().join(",");
+            // SQL quote() truncates TEXT at embedded NUL. Preserve storage class
+            // and full TEXT/BLOB bytes; compare REAL values by their exact bits.
+            let fields = columns.iter().map(|name| {
+                let name = quoted(name);
+                format!("typeof({name}),CASE WHEN typeof({name}) IN ('text','blob') THEN hex(CAST({name} AS BLOB)) ELSE {name} END")
+            }).collect::<Vec<_>>().join(",");
             let mut rows = Vec::new();
             for row in sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {fields} FROM {}", quoted(&name)))).fetch_all(&mut self.observer).await? {
-                rows.push((0..columns.len()).map(|index| row.try_get::<String, _>(index)).collect::<std::result::Result<Vec<_>, _>>()?);
+                let mut cells = Vec::new();
+                for index in 0..columns.len() {
+                    let storage: String = row.try_get(index * 2)?;
+                    let value = match storage.as_str() {
+                        "null" => String::new(),
+                        "integer" => row.try_get::<i64, _>(index * 2 + 1)?.to_string(),
+                        "real" => format!("{:016x}", row.try_get::<f64, _>(index * 2 + 1)?.to_bits()),
+                        "text" | "blob" => row.try_get::<String, _>(index * 2 + 1)?,
+                        _ => return Err(format!("unexpected SQLite storage class: {storage}").into()),
+                    };
+                    cells.push(format!("{storage}:{value}"));
+                }
+                rows.push(cells);
             }
             rows.sort();
             tables.insert(name, rows);
@@ -204,5 +221,16 @@ async fn successful_start_commits_prior_domain_writes_and_terminal_end_is_allowe
     sqlx::query("UPDATE stateful_runs SET status='cancelled'").execute(&mut f.observer).await?;
     f.end("owner", /*attempt*/ 1).await?;
     assert_eq!(f.lease().await?, (1, None, None));
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_observer_detects_nul_suffix_text_changes() -> Result {
+    let mut f = Fixture::new("stateful-runtime").await?;
+    f.start("owner", /*lease_ms*/ 60_000).await?;
+    sqlx::query("UPDATE stateful_acceptance_ledgers SET stalled_fingerprint=''").execute(&mut f.observer).await?;
+    let before = f.durable().await?;
+    sqlx::query("UPDATE stateful_acceptance_ledgers SET stalled_fingerprint=?").bind("\0changed").execute(&mut f.observer).await?;
+    assert_ne!(f.durable().await?, before);
     Ok(())
 }

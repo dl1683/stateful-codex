@@ -179,6 +179,7 @@ impl StatefulRunStore {
         owner: &str,
         attempt: u64,
     ) -> Result<(), StatefulRunStoreError> {
+        let attempt = i64::try_from(attempt).map_err(|_| StatefulRunStoreError::CountOverflow)?;
         let mut connection = self.pool.acquire().await?;
         crate::verification::end_on(&mut connection, run_id, owner, attempt).await
     }

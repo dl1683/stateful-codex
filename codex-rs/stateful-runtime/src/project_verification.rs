@@ -48,6 +48,7 @@ pub async fn commit_project_verification_end(
     attempt: u64,
 ) -> Result<(), ProjectVerificationError> {
     require_run(&mut transaction, run_id).await?;
+    let attempt = i64::try_from(attempt).map_err(|_| StatefulRunStoreError::CountOverflow)?;
     crate::verification::end_on(transaction.connection(), run_id, owner, attempt).await?;
     transaction.commit().await?;
     Ok(())
