@@ -1,8 +1,9 @@
-//! Inert Windows console-worker request framing. Decoded references are non-owning
+//! Inert Windows console-worker framing. Decoded references and responses are
 //! data, not authenticated capabilities, launch authority or lifecycle evidence.
 
 mod codec;
 mod request;
+mod response;
 mod stream;
 
 pub use codec::ProtocolError;
@@ -13,6 +14,12 @@ pub use request::OutputMode;
 pub use request::ReceiveContext;
 pub use request::Request;
 pub use request::WorkerWidth;
+pub use response::FailureStage;
+pub use response::Response;
+pub use response::ResponseError;
+pub use response::ResponseEvent;
+pub use response::decode_response;
+pub use response::encode_response;
 pub use stream::read_closed_request;
 
 #[cfg(test)]
