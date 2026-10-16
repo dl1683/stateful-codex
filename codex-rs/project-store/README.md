@@ -72,6 +72,9 @@ history, under one read snapshot; a read-only connection is supported. Actual
 migration numbers (including gaps) and SHA256 of SQL bytes identify each domain.
 Kernel UUIDs/schema and bootstrap migration1 stay unchanged. Manifests must
 contain forward, transactional main-database SQL without external effects.
-Preparation/admission supplies no public installer or native attachment in this
-review unit. Transactional installation follows separately. Legacy data import,
-application eligibility and effective knowledge reads remain unqualified.
+`PreparedDomains::install` explicitly transitions a validated bootstrap connection
+to that complete format2 store in one immediate transaction. Repeated installation
+requires the identical full manifest/schema. The caller must qualify placement,
+enable foreign keys and configure a bounded busy timeout. No WAL pool or native
+attachment is supplied. Legacy data import, application eligibility and effective
+knowledge reads remain unqualified.

@@ -126,6 +126,51 @@ impl PreparedDomains {
         Ok(result)
     }
 
+    /// Explicitly install into an already initialized bootstrap connection.
+    /// Caller must qualify placement and configure a bounded busy timeout.
+    /// All domain DDL/records and version changes commit together; errors roll back.
+    /// Existing format-2 stores require exact full-manifest/schema equality.
+    pub async fn install(
+        &self,
+        connection: &mut SqliteConnection,
+    ) -> Result<StoreIdentity, StoreRegistryError> {
+        let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&mut *connection)
+            .await?;
+        if foreign_keys != 1 {
+            return Err(StoreRegistryError::UnknownSchema);
+        }
+        let mut transaction = connection.begin_with("BEGIN IMMEDIATE").await?;
+        let result = async {
+            let version: i64 = sqlx::query_scalar(
+                "SELECT format_version FROM project_store_identity WHERE singleton = 1",
+            )
+            .fetch_one(&mut *transaction)
+            .await?;
+            if version == 1 {
+                let identity = registry::validate(&mut transaction).await?;
+                self.apply(&mut transaction).await?;
+                if self.validate(&mut transaction).await? != identity {
+                    return Err(StoreRegistryError::InvalidIdentity);
+                }
+                Ok(identity)
+            } else {
+                self.validate(&mut transaction).await
+            }
+        }
+        .await;
+        match result {
+            Ok(identity) => {
+                transaction.commit().await?;
+                Ok(identity)
+            }
+            Err(error) => {
+                transaction.rollback().await?;
+                Err(error)
+            }
+        }
+    }
+
     /// Admit a complete registered store using one read-only-compatible snapshot.
     pub async fn read_identity(
         &self,
