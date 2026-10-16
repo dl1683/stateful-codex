@@ -1,5 +1,9 @@
 # Runtime adapter preparation — 2026-10-16
 
+Historical retained preparation/failure record. The later separately frozen
+[component and actual launcher/Luna witness](./STATEFUL_PROJECT_RUNTIME_WITNESS_20261016.md)
+passes without changing the failure below or activating native attachment.
+
 **SOURCE APPROVED; LOCAL/unpromoted. Component attempt FAIL; no Luna witness.**
 
 Source commit78989cce288a7b95fa56f137f0a04d8d72168012 is a499-line trusted

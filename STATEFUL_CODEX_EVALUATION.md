@@ -1034,3 +1034,39 @@ Separate runtime adapter78989cce28 is SOURCE APPROVED but NOT promoted pending i
 Runtime source78989cce28 remains LOCAL/unpromoted. Its main-docs merge22c0c84a33 preserves the exact reviewed codex-rs tree65a8491b8d0f714574006c67cdc96d7baef5768f. External helper source44e94817763f4380e2371e44d499f336c6e55e9b171d166a01626e2d1d3f6e25 was freshly source-reviewed and built locally locked/offline in1m40s, with9565 unchanged source leaves and matching auxiliary hashes under shared mutex/jobs2/RAM floor. Original helper draft's SQLx string-type/idempotent-collision findings were repaired before build; original source/review retained. Fresh offline lock resolution initially refused yankedspin0.9.8; retained failure. Seeding the helper from the unchanged workspace lock and updating its root offline preserved the existing pin; no repo dependency/lock change.
 
 Prepared proposal1 never executed: review found a missing hierarchy-trigger revision delta, and the operator hardened reparse checks with lstat. Fresh proposal2 received APPROVE FROZEN COMPONENT EXPERIMENT before one actual attempt. The success helper returned0; frozen oracle then refused an existing sqlite_sequence row at0, which fixture copying had initialized, instead of its assumed absent row. Trial2 remains FAIL_ORACLE_PRECONDITION_RETAINED; no retry, normalization or PASS. Stale and collision calls NEVER RAN. Separate diagnostic reconstruction from retained before/after images, including explicit seq0-to1, matches the entire successful image and whole reply; this does not upgrade acceptance. All28 postflight bindings and9565 source leaves match; owned Job active0/rootExit0. No runtime Luna/native/model call occurred. Manufactured host receipts are fixture data, not checker execution, migration or knowledge-policy certification. Packet STATEFUL_RUNTIME_ADAPTER_PREPARATION_20261016.md and external runtime_20261016/FINAL_HANDOFF.md preserve the closed failure and next gates. The first company-brain milestone and native/HAL gates remain open.
+
+## 2026-10-16 runtime adapter component and actual Luna witness
+
+Runtime source78989cce28 remains the499-line source-reviewed unit; doc-merge
+facedae24f6d preserves Rust tree65a8491b8d0f714574006c67cdc96d7baef5768f.
+Recorded Windows/WSL75runtime+51store each pass; final equivalent cleanup was
+typechecked/formatted, not retested. New build3 and fixed-identity native helper
+build1 pass locally locked/offline, mutex/jobs2/RAM23221225472, with9566 identical
+source leaves and auxiliary maps. PowerShell5 stderr-wrapper failure retained.
+
+Fresh direct_review6 precedes one3case PASS_SYNTHETIC_RUNTIME_ADAPTER_ONLY:
+exact cross-domain success, stale ledger refusal, late conflicting-obligation
+rollback. Full schema/header/67tables/35migration rows, lease and prior PI writes
+are independently checked. Attempt2 stays FAIL_ORACLE_PRECONDITION; unexecuted
+proposals3–5 retain startup/type/probe review findings and corrections. No retry
+or normalization upgrades any old failure.
+
+Fresh luna_review2 precedes ONE unchanged-launcher/gpt-6-luna trial3 PASS. Exactly2
+ordered profile-free commands/raw custom calls, frozen one-LF cell terminators,
+authoritative counters2/prohibited0, whole tool/final/-o JSON and full success/
+late-conflict database deltas match. Job active0/rootExit0. Independent readonly
+recheck passes64bindings/9566source leaves/10closed database images. Native
+trials1/2 never executed (preparation controls ran); nonexistent alpha provider cwd was corrected and covered
+by an actual-function in-memory RPC probe. Stock provider/requirements/ChatGPT
+login and original launcher/CLI/host/config admitted; normal home session writes
+are possible. Source-matched external helper, no new native installation or judge.
+
+Packet STATEFUL_PROJECT_RUNTIME_WITNESS_20261016.md and runtime_20261016 retain
+all raw artifacts. Synthetic host receipts/UUIDs/legacy seed copying are fixtures,
+not checker execution, migration, ownership or native knowledge-policy evidence.
+Exact closeout review precedes source promotion. Native project routing, knowledge/
+eligibility/steering/source revalidation, populated migration/old-writer barrier,
+native lock removal, compaction/Forget/MCP, Unicode/offline/HAL/customer and first
+company-brain milestone remain OPEN. Writer LF and Marathi/final-escaping failures
+remain failures. The separate in-progress knowledge-clock branch is not qualified
+by this witness.
