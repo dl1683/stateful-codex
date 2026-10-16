@@ -1280,4 +1280,7 @@ cases plus static helper IO refusal, exact whole final JSON and33bindings,
 exit255 remain retained failures; revised helper review APPROVE and stdin prompt
 controller are separate receipts. No regrading/normalization, judge, cloud build,
 AGENTS/policy change, origin operation or native/HAL/customer acceptance claim.
-Root witnesses link all logs; cleanup and final promotion need their own receipts.
+Root witnesses link all logs. Scoped protocol/extension fix and final fmt pass;
+fix made no source edits, with the existing extension large-enum warning retained.
+Formatting changes layout only; no Rust tests were rerun afterward. Final
+promotion requires its separate exact-candidate closeout and receipt.

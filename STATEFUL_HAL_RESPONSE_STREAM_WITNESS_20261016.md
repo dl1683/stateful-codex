@@ -46,4 +46,7 @@ or real worker behavior; fragmented/error IO is unit-test evidence only. No
 candidate installation or launcher/policy change occurred. Native Marathi,
 worker spawn/ownership/lifetime, offline and customer HAL gates remain open.
 The first project database/import/old-writer milestone remains unfulfilled.
-Final scoped fix/format and promotion disposition are recorded separately.
+Scoped `just fix` for protocol/extension and final `just fmt` pass. Fix made no
+source edits and retains the existing extension large-enum warning. Formatting
+only expands test layout and joins one read_exact chain; no Rust tests were run
+after cleanup. Final promotion disposition is recorded separately.
