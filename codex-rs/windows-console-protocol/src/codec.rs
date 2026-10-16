@@ -9,6 +9,14 @@ use crate::WorkerWidth;
 
 const MAX_PAYLOAD: usize = 1024 * 1024;
 
+pub(crate) fn payload_length(header: [u8; 4]) -> Result<usize, ProtocolError> {
+    let length = u32::from_le_bytes(header) as usize;
+    if length == 0 || length > MAX_PAYLOAD {
+        return Err(ProtocolError::Framing);
+    }
+    Ok(length)
+}
+
 /// Bounded stage-only errors; never echo command/environment or parser text.
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum ProtocolError {
@@ -120,8 +128,8 @@ pub fn decode_request(frame: &[u8], context: &ReceiveContext) -> Result<Request,
         .ok_or(ProtocolError::Framing)?
         .try_into()
         .map_err(|_| ProtocolError::Framing)?;
-    let length = u32::from_le_bytes(header) as usize;
-    if length == 0 || length > MAX_PAYLOAD || frame.len() != length + 4 {
+    let length = payload_length(header)?;
+    if frame.len() != length + 4 {
         return Err(ProtocolError::Framing);
     }
     let shape: serde_json::Value =
