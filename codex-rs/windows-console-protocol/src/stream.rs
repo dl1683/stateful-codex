@@ -30,9 +30,7 @@ pub(super) fn read_closed_frame<R: Read + ?Sized>(reader: &mut R) -> Result<Vec<
     let length = payload_length(header).map_err(|_| ())?;
     let mut frame = vec![0; 4 + length];
     frame[..4].copy_from_slice(&header);
-    reader
-        .read_exact(&mut frame[4..])
-        .map_err(|_| ())?;
+    reader.read_exact(&mut frame[4..]).map_err(|_| ())?;
     loop {
         match reader.read(&mut [0; 1]) {
             Ok(0) => break,

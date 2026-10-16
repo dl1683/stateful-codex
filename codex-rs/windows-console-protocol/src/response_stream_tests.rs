@@ -16,11 +16,17 @@ const NONCE: [u8; 16] = [7; 16];
 fn responses() -> Vec<Response> {
     let mut events = vec![
         ResponseEvent::Ready { worker_pid: 1 },
-        ResponseEvent::Ready { worker_pid: u32::MAX },
+        ResponseEvent::Ready {
+            worker_pid: u32::MAX,
+        },
         ResponseEvent::Spawned { target_pid: 1 },
-        ResponseEvent::Spawned { target_pid: u32::MAX },
+        ResponseEvent::Spawned {
+            target_pid: u32::MAX,
+        },
         ResponseEvent::RootExited { exit_code: 0 },
-        ResponseEvent::RootExited { exit_code: u32::MAX },
+        ResponseEvent::RootExited {
+            exit_code: u32::MAX,
+        },
     ];
     for stage in [
         FailureStage::Bootstrap,
@@ -34,7 +40,13 @@ fn responses() -> Vec<Response> {
             events.push(ResponseEvent::Failed { stage, win32_code });
         }
     }
-    events.into_iter().map(|event| Response { nonce: NONCE, event }).collect()
+    events
+        .into_iter()
+        .map(|event| Response {
+            nonce: NONCE,
+            event,
+        })
+        .collect()
 }
 
 struct InterruptedChunks<'a> {
@@ -61,8 +73,15 @@ fn partial_interrupted_reads_preserve_every_event_and_u32_value() {
     for response in responses() {
         let frame = encode_response(&response, &NONCE).unwrap();
         for chunk in [1, 2, 3, 4, 7, frame.len()] {
-            let mut reader = InterruptedChunks { bytes: &frame, chunk, interrupt_next: false };
-            assert_eq!(read_closed_response(&mut reader, &NONCE), Ok(response.clone()));
+            let mut reader = InterruptedChunks {
+                bytes: &frame,
+                chunk,
+                interrupt_next: false,
+            };
+            assert_eq!(
+                read_closed_response(&mut reader, &NONCE),
+                Ok(response.clone())
+            );
             assert_eq!(reader.bytes, b"");
         }
     }
@@ -73,11 +92,17 @@ fn every_short_frame_refuses_and_trailing_data_consumes_only_one_probe_byte() {
     for response in responses() {
         let mut frame = encode_response(&response, &NONCE).unwrap();
         for end in 0..frame.len() {
-            assert_eq!(read_closed_response(&mut &frame[..end], &NONCE), Err(ResponseError::Framing));
+            assert_eq!(
+                read_closed_response(&mut &frame[..end], &NONCE),
+                Err(ResponseError::Framing)
+            );
         }
         frame.extend_from_slice(b"private trailing data");
         let mut reader = frame.as_slice();
-        assert_eq!(read_closed_response(&mut reader, &NONCE), Err(ResponseError::Framing));
+        assert_eq!(
+            read_closed_response(&mut reader, &NONCE),
+            Err(ResponseError::Framing)
+        );
         assert_eq!(reader, b"rivate trailing data");
     }
 }
@@ -101,14 +126,26 @@ impl Read for BodyProbe<'_> {
 fn invalid_lengths_never_access_body_and_maximum_valid_length_stays_bounded() {
     for length in [0_u32, 1_048_577, u32::MAX] {
         let header = length.to_le_bytes();
-        let mut reader = BodyProbe { header: &header, requested: vec![] };
-        assert_eq!(read_closed_response(&mut reader, &NONCE), Err(ResponseError::Framing));
+        let mut reader = BodyProbe {
+            header: &header,
+            requested: vec![],
+        };
+        assert_eq!(
+            read_closed_response(&mut reader, &NONCE),
+            Err(ResponseError::Framing)
+        );
         assert_eq!(reader.requested, Vec::<usize>::new());
     }
     for length in [1_u32, 1_048_575, 1_048_576] {
         let header = length.to_le_bytes();
-        let mut reader = BodyProbe { header: &header, requested: vec![] };
-        assert_eq!(read_closed_response(&mut reader, &NONCE), Err(ResponseError::Framing));
+        let mut reader = BodyProbe {
+            header: &header,
+            requested: vec![],
+        };
+        assert_eq!(
+            read_closed_response(&mut reader, &NONCE),
+            Err(ResponseError::Framing)
+        );
         assert_eq!(reader.requested, vec![length as usize]);
     }
 }
@@ -140,7 +177,10 @@ fn io_failures_at_header_body_and_eof_have_only_static_diagnostics() {
 fn stream_preserves_codec_payload_shape_and_correlation_refusals() {
     let response = responses().remove(0);
     let frame = encode_response(&response, &NONCE).unwrap();
-    assert_eq!(read_closed_response(&mut frame.as_slice(), &[8; 16]), Err(ResponseError::Admission));
+    assert_eq!(
+        read_closed_response(&mut frame.as_slice(), &[8; 16]),
+        Err(ResponseError::Admission)
+    );
     let original = std::str::from_utf8(&frame[4..]).unwrap();
     for payload in [
         "!".to_string(),
@@ -154,6 +194,9 @@ fn stream_preserves_codec_payload_shape_and_correlation_refusals() {
         malformed.extend_from_slice(payload.as_bytes());
         let expected = decode_response(&malformed, &NONCE);
         assert!(expected.is_err());
-        assert_eq!(read_closed_response(&mut malformed.as_slice(), &NONCE), expected);
+        assert_eq!(
+            read_closed_response(&mut malformed.as_slice(), &NONCE),
+            expected
+        );
     }
 }
