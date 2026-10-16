@@ -40,26 +40,29 @@ fn raw(payload: &[u8]) -> Vec<u8> {
     frame
 }
 
-fn unchecked(request: &Request) -> Vec<u8> {
-    raw(
-        &serde_json::to_vec(&serde_json::json!({"version":1,"type":"request","request":request}))
-            .unwrap(),
-    )
-}
-
 fn assert_refused(request: &Request, context: &ReceiveContext) {
+    let payload = serde_json::to_vec(&serde_json::json!({"version":1,"type":"request","request":request})).unwrap();
     assert_eq!(
         encode_request(request, context),
         Err(ProtocolError::Admission)
     );
     assert_eq!(
-        decode_request(&unchecked(request), context),
+        decode_request(&raw(&payload), context),
         Err(ProtocolError::Admission)
     );
 }
 
+fn assert_bad_payload(payload: &[u8], context: &ReceiveContext) {
+    assert_eq!(decode_request(&raw(payload), context), Err(ProtocolError::Payload));
+}
+
+fn assert_roundtrip(request: &Request, context: &ReceiveContext) {
+    let frame = encode_request(request, context).unwrap();
+    assert_eq!(decode_request(&frame, context).unwrap(), *request);
+}
+
 #[test]
-fn lossless_surrogates_and_large_unicode_environment_round_trip_as_whole_objects() {
+fn utf16_large_environment_and_frame_boundaries_round_trip_as_whole_objects() {
     let (mut request, context) = fixture();
     request
         .command_line
@@ -71,23 +74,14 @@ fn lossless_surrogates_and_large_unicode_environment_round_trip_as_whole_objects
             .extend(wide(&format!("{name}={}\0", "x".repeat(/*n*/ 12000))));
     }
     request.environment_block.push(/*value*/ 0);
-    let frame = encode_request(&request, &context).unwrap();
-    assert_eq!(decode_request(&frame, &context).unwrap(), request);
-}
-
-#[test]
-fn actual_maximum_buffers_fit_and_one_more_environment_unit_refuses() {
-    let (mut request, context) = fixture();
+    assert_roundtrip(&request, &context);
     request.application = vec![u16::MAX; 32767];
     request.command_line = vec![u16::MAX; 32766];
     request.cwd = vec![u16::MAX; 32767];
     request.startup_desktop = vec![u16::MAX; 1024];
     request.environment_block = vec![u16::MAX; 65534];
     request.environment_block.extend([0, 0]);
-    assert_eq!(
-        decode_request(&encode_request(&request, &context).unwrap(), &context).unwrap(),
-        request
-    );
+    assert_roundtrip(&request, &context);
     request
         .environment_block
         .insert(/*index*/ 0, /*element*/ 65);
@@ -146,10 +140,7 @@ fn roles_width_and_explicit_output_aliasing_are_enforced() {
     let mut merged = request.clone();
     merged.handles.stderr = merged.handles.stdout;
     merged.output_mode = OutputMode::Merged;
-    assert_eq!(
-        decode_request(&encode_request(&merged, &context).unwrap(), &context).unwrap(),
-        merged
-    );
+    assert_roundtrip(&merged, &context);
     let mut wide_handle = request.clone();
     wide_handle.handles.restricted_token = 1_u64 << 32;
     let frame = encode_request(&wide_handle, &context).unwrap();
@@ -162,10 +153,7 @@ fn roles_width_and_explicit_output_aliasing_are_enforced() {
         decode_request(&frame, &context),
         Err(ProtocolError::Admission)
     );
-    assert_eq!(
-        decode_request(&encode_request(&request, &context).unwrap(), &context).unwrap(),
-        request
-    );
+    assert_roundtrip(&request, &context);
     context.status_pipe = context.request_pipe;
     assert_refused(&request, &context);
 }
@@ -201,8 +189,10 @@ fn json_direction_version_duplicates_nested_unknowns_and_types_refuse() {
     for (parent, key, value) in [
         ("", "version", serde_json::json!(2)),
         ("", "type", serde_json::json!("ready")),
+        ("", "type", serde_json::json!({"request":null})),
         ("", "unknown", serde_json::json!(0)),
         ("/request", "unknown", serde_json::json!(0)),
+        ("/request", "outputMode", serde_json::json!({"separate":null})),
         ("/request/handles", "unknown", serde_json::json!(0)),
         (
             "/request/handles",
@@ -217,19 +207,23 @@ fn json_direction_version_duplicates_nested_unknowns_and_types_refuse() {
             .as_object_mut()
             .unwrap()
             .insert(key.to_string(), value);
-        assert_eq!(
-            decode_request(&raw(&serde_json::to_vec(&invalid).unwrap()), &context),
-            Err(ProtocolError::Payload)
-        );
+        assert_bad_payload(&serde_json::to_vec(&invalid).unwrap(), &context);
+    }
+    let req = &envelope["request"];
+    let handles = &req["handles"];
+    for (path, array) in [
+        ("", serde_json::json!([1,"request",req])),
+        ("/request", serde_json::json!([req["nonce"],req["application"],req["commandLine"],req["cwd"],
+            req["startupDesktop"],req["environmentBlock"],req["handles"],req["outputMode"]])),
+        ("/request/handles", serde_json::json!([handles["restrictedToken"],handles["innerJob"],
+            handles["stdin"],handles["stdout"],handles["stderr"]])),
+    ] {
+        let mut invalid = envelope.clone();
+        *invalid.pointer_mut(path).unwrap() = array;
+        assert_bad_payload(&serde_json::to_vec(&invalid).unwrap(), &context);
     }
     let duplicate =
         format!("{{\"version\":1,\"version\":1,\"type\":\"request\",\"request\":{body}}}");
-    assert_eq!(
-        decode_request(&raw(duplicate.as_bytes()), &context),
-        Err(ProtocolError::Payload)
-    );
-    assert_eq!(
-        decode_request(&raw(&[0xff]), &context),
-        Err(ProtocolError::Payload)
-    );
+    assert_bad_payload(duplicate.as_bytes(), &context);
+    assert_bad_payload(&[0xff], &context);
 }
