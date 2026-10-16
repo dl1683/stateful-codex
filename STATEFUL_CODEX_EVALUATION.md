@@ -4,9 +4,10 @@
 > historical hold below. S0 evidence is landed; S1a is an inert placement foundation,
 > with native project ownership, migration and atomic completion still gated.
 > See the rebuild entries at the end and the linked baseline/custody receipt.
-> Latest 2026-10-16: inactive terminal composition and HAL response fixtures pass
-> their new checks on both OSes and one Luna fixture journey; full extension
-> suites remain unclean. Native routing/import/old-writer gates remain open.
+> Latest 2026-10-16: repaired extension fixtures yield Windows338/338 and WSL339/339;
+> the inactive closed response reader passes19/19 on each OS. Component checks
+> and installed-launcher checks have separate scopes. Native routing, populated
+> import, old-writer exclusion and the first database milestone remain open.
 
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
 > **Evidence in hand.** Ten ordinary Autonomous prompts on Gemma 4 31B end Answered in both registered checks (before and after A1 and A2: Completed 0, Answered 10, Partial 0, Blocked 0, nonzero 0); eight of ten first completion calls were refused for a missing `openIssues` before the fix and none after, but only three of ten sessions called the completion tool after the fix, so the guidance change and the field change are not separated. Luna hands-on runs show correct work and mostly Partial endings for checked tasks, a visible outcome footer, and a model that rewrites a failing checker and then says the check passes (see the hunt-corrected entries and `campaign2/FINDINGS.md`).
@@ -1242,3 +1243,44 @@ routing, populated import, old-writer exclusion, real checker/source freshness,
 full native atomic completion/fence removal, Forget, compaction, MCP/CLI reads,
 aggregate steering bounds, and native Unicode/Marathi/offline/HAL/customer gates
 remain OPEN. Protected dirty upstream B0 is untouched and not promoted.
+
+## 2026-10-16 extension baseline repairs and inactive HAL response stream
+
+The previous terminal-composition run's Windows Git-marker failure and WSL
+memory-history timeout were independently reproduced baseline failures. Source
+c945931e1c fixes their fixtures: inherited child-file denial plus the existing
+preflight and a HEAD-denial assertion, and two Tokio workers for the unchanged
+4160-entry/tool-batch/reopen/history/replay witness. No production acceptance
+policy or timeout was weakened. Windows338/338 and WSL339/339 now PASS with zero
+skips/retries; fan-in43.984s/48.500s. The explicit Windows success-output witness
+executes the denial and restoration, with no preflight return. The historical
+failures stay retained. A two-line explanatory comment changed during Windows
+preparation; exact source maps and scope caveats are in the root gate witness.
+
+The independent d74dd9f58f HAL source adds read_closed_response, sharing capped
+closed framing with requests and retaining strict original response admission.
+Windows/WSL19/19 PASS each, zero skips/retries. Partial/Interrupted reads,
+truncation, preallocation size rejection, maximum body request, one trailing
+probe, IO failures and strict payload/nonce cases are covered. Caller owns sender
+closure/deadline; no authentication, lifecycle, job/drain or native worker claim.
+
+Fresh Droid source approvals cover each source unit and the conflict-free merge
+preserves exact extension/protocol subtree identities. The149-line acceptance
+parity design d2b599a82f has fresh DESIGN APPROVE, not activation approval. It
+keeps hashing/observation outside a short final writer and preserves durable
+acceptance/steering gates, both learning dispositions and uncertain-COMMIT
+reconciliation. B0 remains parallel-owned and unqualified; S1 -> M0-M3 -> S2 -> S3
+ordering and populated import/old-writer exclusion gates remain controlling.
+
+One installed-launcher Luna file journey PASS: exact Marathi JSON copy/final,
+12.966s, no candidate installation. Separately, the source-pinned closed-file
+response helper2/direct oracle and one actual Luna inspector PASS11 response
+cases plus static helper IO refusal, exact whole final JSON and33bindings,
+12.540s. Helper1's raw-diagnostic review finding and the launcher's pre-model
+exit255 remain retained failures; revised helper review APPROVE and stdin prompt
+controller are separate receipts. No regrading/normalization, judge, cloud build,
+AGENTS/policy change, origin operation or native/HAL/customer acceptance claim.
+Root witnesses link all logs. Scoped protocol/extension fix and final fmt pass;
+fix made no source edits, with the existing extension large-enum warning retained.
+Formatting changes layout only; no Rust tests were rerun afterward. Final
+promotion requires its separate exact-candidate closeout and receipt.

@@ -4,6 +4,7 @@
 mod codec;
 mod request;
 mod response;
+mod response_stream;
 mod stream;
 
 pub use codec::ProtocolError;
@@ -20,6 +21,7 @@ pub use response::ResponseError;
 pub use response::ResponseEvent;
 pub use response::decode_response;
 pub use response::encode_response;
+pub use response_stream::read_closed_response;
 pub use stream::read_closed_request;
 
 #[cfg(test)]

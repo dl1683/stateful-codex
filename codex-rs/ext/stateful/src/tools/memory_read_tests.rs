@@ -5,7 +5,9 @@ use super::mentions_any;
 use super::parse_utc_day;
 use super::question_terms;
 
-#[tokio::test]
+// Keep SQLx's thousands of worker handoffs off the single-thread fixture runtime;
+// retain the full 4096/64 fan-in and the ordinary nextest deadline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay() {
     use codex_extension_api::ToolExecutor;
     use codex_project_intelligence::BlackboardEntryId;
