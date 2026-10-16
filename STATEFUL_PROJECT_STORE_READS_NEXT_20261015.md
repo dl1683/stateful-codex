@@ -1,5 +1,23 @@
 # Next S1 boundary: domain registration and effective knowledge reads
 
+## Superseding checkpoint: 2026-10-16
+
+The source facts and sequence below describe the earlier bootstrap-only boundary.
+PreparedDomains preparation/atomic installation and ProjectStoreReader are now
+landed: format2 admits exact compiled domain histories/schema, installs both real
+schemas in fresh scratch, and supplies one owned read-only connection after exact
+domain matching. See DOMAIN_INSTALL, DOMAIN_WITNESS and REGISTERED_READER/READER_WITNESS
+packets. The old bootstrap CLI still refuses application stores as designed; no
+effective knowledge read command or native attachment has been activated.
+
+Next implement step3's narrow application-domain facade, then step4's effective
+CLI reads with existing eligibility/snapshot/retirement logic and escaped envelopes.
+The kernel project UUID versus legacy intelligence project_id mapping remains an
+explicit design decision; schema installation did not solve populated ownership.
+Domain upgrades, M0/B0 cohort qualification, S2 and S3 remain separate gates. The
+historical bootstrap observations below are retained rather than silently recast
+as current limitations of the new API.
+
 This is an implementation handoff, not an implemented feature or permission to
 activate native storage. The converged rebuild strategy remains the authority.
 The current executable can initialize and inspect bootstrap metadata only.
