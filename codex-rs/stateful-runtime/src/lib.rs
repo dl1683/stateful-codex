@@ -81,6 +81,7 @@ pub use obligation_operations::RETAINED_ISSUE_PREFIX;
 pub use project_completion::ProjectRunCompletion;
 pub use project_completion::ProjectRunCompletionError;
 pub use project_completion::commit_project_run;
+pub use project_completion::revalidate_project_run_start;
 pub use run::NewObligation;
 pub use run::NewStatefulRun;
 pub use run::ObligationPacket;

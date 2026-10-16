@@ -31,6 +31,49 @@ pub enum ProjectRunCompletionError {
     Runtime(#[from] StatefulRunStoreError),
     #[error("run or its dependent rows belong to another project")]
     ProjectMismatch,
+    #[error("persisted run start does not match the expected timestamp")]
+    RunStartMismatch,
+}
+
+/// Bind a trusted caller's prepared timestamp to one persisted project run.
+/// The expected value must come from the opaque knowledge preparation. Validate
+/// that preparation and complete the SAME run using this SAME returned guard.
+/// This checks neither acceptance nor the other completion/source policies.
+/// Supported runtime writers preserve created_at_ms; arbitrary SQL rewrites are
+/// unsupported. Refusal/cancellation drops the guard, queues rollback and leaves
+/// its owner close-only. Await owner close before durable-state reconciliation.
+pub async fn revalidate_project_run_start<'a>(
+    mut transaction: ProjectWriteTransaction<'a>,
+    run_id: &StatefulRunId,
+    expected_created_at_ms: i64,
+) -> Result<ProjectWriteTransaction<'a>, ProjectRunCompletionError> {
+    transaction.require_domain(&DomainManifest {
+        domain: "stateful-runtime",
+        migrations: &storage::MIGRATOR,
+    })?;
+    if expected_created_at_ms < 0 {
+        return Err(ProjectRunCompletionError::RunStartMismatch);
+    }
+    let project = transaction.identity().project_uuid.to_string();
+    let (owner, created): (Option<String>, Option<i64>) = sqlx::query_as(
+        "SELECT CASE WHEN typeof(project_id)='text' AND octet_length(project_id)=36
+                THEN project_id END,
+                CASE WHEN typeof(created_at_ms)='integer' AND created_at_ms>=0
+                THEN created_at_ms END
+         FROM stateful_runs WHERE id=?",
+    )
+    .bind(run_id.as_str())
+    .fetch_optional(transaction.connection())
+    .await
+    .map_err(StatefulRunStoreError::from)?
+    .ok_or_else(|| StatefulRunStoreError::RunNotFound(run_id.to_string()))?;
+    if owner.as_deref() != Some(project.as_str()) {
+        return Err(ProjectRunCompletionError::ProjectMismatch);
+    }
+    if created != Some(expected_created_at_ms) {
+        return Err(ProjectRunCompletionError::RunStartMismatch);
+    }
+    Ok(transaction)
 }
 
 /// Consume and commit the guard with prior domain writes. Failure/cancellation

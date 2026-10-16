@@ -12,6 +12,9 @@ use sqlx::migrate::Migrator;
 use std::borrow::Cow;
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[path = "project_binding_tests.rs"]
+mod binding;
 type Durable = (
     Option<StatefulRun>,
     Option<StatefulObligation>,
