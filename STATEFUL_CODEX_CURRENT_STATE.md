@@ -8,10 +8,11 @@ execution order is the owner-invoked
 [Codex/Droid rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md):
 S0/S1, then M0-M3, then S2/S3 before native activation.
 
-Code checkpoint9e427d9fa contains reviewed project-local resolution, bootstrap
+Code checkpoint4216c2c85 contains reviewed project-local resolution, bootstrap
 identity/registry, filesystem admission, closed-stage publication and bounded
 metadata CLI reads/explicit initialization, plus format2 compiled-domain
-preparation, atomic installation and an owned registered read connection. Real
+preparation, atomic installation, an owned registered read connection and admitted
+read-snapshot guards. Real
 intelligence/runtime schemas were installed together in fresh scratch stores and
 read by separate frozen helpers. These are inert components; native
 knowledge/runtime still use the legacy stores. Effective neutral knowledge reads,
@@ -21,6 +22,7 @@ The owner's first milestone is NOT fulfilled. See the latest appended entries in
 [independent frozen-reader witness](./STATEFUL_PROJECT_STORE_WITNESS_20261015.md),
 the [real-domain witness](./STATEFUL_PROJECT_STORE_DOMAIN_WITNESS_20261016.md),
 the [registered-reader witness](./STATEFUL_PROJECT_STORE_READER_WITNESS_20261016.md),
+the [owned-snapshot witness](./STATEFUL_PROJECT_STORE_SNAPSHOT_WITNESS_20261016.md),
 and the [cutover inventory](./STATEFUL_PROJECT_STORE_CUTOVER_INVENTORY_20261015.md).
 
 The separate upstream-sync executor owns uncommitted B0 accounting/recovery work;
@@ -41,7 +43,8 @@ is current-user/self-imposed CLM evidence only, not a native policy or transport
 repair. All clean active rebuild/feature worktrees were fast-forwarded to reviewed
 main during this run; the dirty upstream branch remains separately owned.
 The [next effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
-is a staged source plan, not an implemented facade or runtime qualification.
+is a staged source plan. Stage1's snapshot guard is now landed and witnessed;
+the later effective facade and CLI remain unimplemented.
 
 Updated 2026-10-12 (a snapshot: landings of 2026-10-13 and 2026-10-14 are summarised in the note at the top of `STATEFUL_CODEX_EVALUATION.md`, which is the current pointer until this page is refreshed). This page says what the published code does, what has and
 has not been measured, where unmerged work lives, and how to operate the

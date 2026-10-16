@@ -19,9 +19,10 @@ historical bootstrap observations below are retained rather than silently recast
 as current limitations of the new API.
 
 The staged [effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
-selects an admitted snapshot guard as the next source unit, followed by a
-behavior-preserving eligibility extraction and separately reviewed bounded
-projection/CLI contracts. Design approval does not implement those stages.
+selected an admitted snapshot guard, now landed at4216c2c85 with its
+[separate witness](./STATEFUL_PROJECT_STORE_SNAPSHOT_WITNESS_20261016.md).
+Next is behavior-preserving eligibility extraction and separately reviewed bounded
+projection/CLI contracts; those stages remain unimplemented.
 
 This is an implementation handoff, not an implemented feature or permission to
 activate native storage. The converged rebuild strategy remains the authority.
