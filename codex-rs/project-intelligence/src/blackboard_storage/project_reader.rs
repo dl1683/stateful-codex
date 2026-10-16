@@ -55,6 +55,10 @@ pub enum ProjectKnowledgeReadError {
     InvalidEntry,
     #[error("foreign project ownership or invalid child dependency")]
     InvalidOwnership,
+    #[error("run start timestamp must be nonnegative")]
+    InvalidRunStart,
+    #[error("agent-written project knowledge changed during this run")]
+    ReusableLearningPresent,
 }
 
 impl ProjectKnowledgeReader {
@@ -90,6 +94,49 @@ impl ProjectKnowledgeReader {
         let identity = snapshot.identity().clone();
         let result = ownership::inspect_on(snapshot.connection(), identity).await;
         snapshot.finish().await?;
+        result
+    }
+
+    /// Prepare the legacy conservative `noReusableLearning` predicate outside
+    /// any writer reservation. Admission, clocks and historical query share ONE
+    /// read snapshot. All historical agent revisions and relations count at or
+    /// after run start, including retired/noncurrent revisions. Ordinary refusal
+    /// finishes the snapshot; cancellation keeps the reader close-only.
+    pub async fn prepare_no_reusable_learning(
+        &mut self,
+        expected: &StoreIdentity,
+        run_created_at_ms: i64,
+    ) -> Result<super::PreparedProjectNoLearning, ProjectKnowledgeReadError> {
+        if expected != &self.admission_identity {
+            return Err(ProjectKnowledgeReadError::IdentityMismatch);
+        }
+        if run_created_at_ms < 0 {
+            return Err(ProjectKnowledgeReadError::InvalidRunStart);
+        }
+        let mut read = self.reader.begin_snapshot().await?;
+        let identity = read.identity().clone();
+        let result = async {
+            let snapshot = ownership::inspect_on(read.connection(), identity).await?;
+            if !snapshot.coverage_complete {
+                return Err(ProjectKnowledgeReadError::CoverageIncomplete);
+            }
+            let project = snapshot.identity.project_uuid.to_string();
+            if super::query::agent_knowledge_changed_since_on_connection(
+                read.connection(),
+                &project,
+                run_created_at_ms,
+            )
+            .await?
+            {
+                return Err(ProjectKnowledgeReadError::ReusableLearningPresent);
+            }
+            Ok(super::PreparedProjectNoLearning {
+                snapshot,
+                run_created_at_ms,
+            })
+        }
+        .await;
+        read.finish().await?;
         result
     }
 

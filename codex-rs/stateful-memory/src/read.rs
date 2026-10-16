@@ -26,6 +26,8 @@ fn read_error(error: ProjectKnowledgeReadError) -> (&'static str, String) {
     refused(match error {
         ProjectKnowledgeReadError::IdentityMismatch => "identityMismatch",
         ProjectKnowledgeReadError::InvalidRequest => "invalidArguments",
+        ProjectKnowledgeReadError::InvalidRunStart => "invalidArguments",
+        ProjectKnowledgeReadError::ReusableLearningPresent => "reusableLearningPresent",
         ProjectKnowledgeReadError::InvalidClock => "invalidClock",
         ProjectKnowledgeReadError::InvalidEntry => "invalidEntry",
         ProjectKnowledgeReadError::InvalidOwnership => "invalidOwnership",

@@ -5,6 +5,23 @@ use thiserror::Error;
 
 use super::ProjectKnowledgeSnapshot;
 
+/// Negative historical-learning result prepared in an admitted read snapshot.
+/// Fields are private so trusted callers cannot manufacture a successful check.
+/// Supported writers preserve immutable history and advance the checked clocks;
+/// arbitrary SQL/history rewrites and clock resets are outside this contract.
+#[derive(Debug)]
+pub struct PreparedProjectNoLearning {
+    pub(super) snapshot: ProjectKnowledgeSnapshot,
+    pub(super) run_created_at_ms: i64,
+}
+
+impl PreparedProjectNoLearning {
+    /// The caller must match this to the persisted run under the terminal guard.
+    pub fn run_created_at_ms(&self) -> i64 {
+        self.run_created_at_ms
+    }
+}
+
 /// Refusal of a trusted caller's project knowledge clock precondition.
 #[derive(Debug, Error)]
 pub enum ProjectKnowledgeWriteError {
@@ -77,6 +94,22 @@ pub async fn revalidate_project_knowledge_clocks<'a>(
         return Err(ProjectKnowledgeWriteError::CoverageIncomplete);
     }
     Ok(transaction)
+}
+
+/// Revalidate a prepared negative history result under the final writer without
+/// querying history while holding that writer reservation. A supported knowledge
+/// write or retirement since preparation invalidates the snapshot.
+///
+/// This trusted precondition is not a completion certificate. The caller must
+/// bind the prepared timestamp to the persisted run and validate runtime acceptance,
+/// steering and ownership under this same transaction. Further knowledge writes
+/// may invalidate the result. Refusal/cancellation drops the guard, rolling back
+/// prior writes and making its owner close-only. Native routing is unchanged.
+pub async fn revalidate_project_no_reusable_learning<'a>(
+    transaction: ProjectWriteTransaction<'a>,
+    prepared: &PreparedProjectNoLearning,
+) -> Result<ProjectWriteTransaction<'a>, ProjectKnowledgeWriteError> {
+    revalidate_project_knowledge_clocks(transaction, &prepared.snapshot).await
 }
 
 #[cfg(test)]
