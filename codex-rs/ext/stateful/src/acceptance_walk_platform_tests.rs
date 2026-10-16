@@ -135,7 +135,9 @@ fn unreadable_root_git_marker_never_discovers_an_ignoring_parent_after_preflight
         .arg(&marker)
         .args([
             "/deny",
-            &format!("{}:(R)", std::env::var("USERNAME").unwrap()),
+            // Deny known child reads too: denying directory listing alone still
+            // lets Git read HEAD/config and correctly use this repository.
+            &format!("{}:(OI)(CI)(R)", std::env::var("USERNAME").unwrap()),
         ])
         .status()
         .is_ok_and(|status| status.success());
@@ -148,6 +150,8 @@ fn unreadable_root_git_marker_never_discovers_an_ignoring_parent_after_preflight
     let denied = std::fs::symlink_metadata(&marker).is_ok()
         && std::fs::read_dir(&marker)
             .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
+    let head_denied = std::fs::read(marker.join("HEAD"))
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied);
     let identity = denied.then(|| snapshot(&project));
     #[cfg(unix)]
     std::fs::set_permissions(&marker, permissions).unwrap();
@@ -164,6 +168,7 @@ fn unreadable_root_git_marker_never_discovers_an_ignoring_parent_after_preflight
         eprintln!("not run (preflight): root .git directory read denial does not take effect");
         return;
     }
+    assert!(head_denied, "the fixture must deny Git's known child reads");
     assert_eq!(identity, Some(Err(IdentityGap::Git)));
 }
 
