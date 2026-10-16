@@ -1,5 +1,15 @@
 //! Exact model reads shared by transaction-owning domain callers.
 
+// Inert until the separately reviewed project-reader attachment.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged bounded projection; native reads stay unchanged"
+    )
+)]
+pub(super) mod attributed;
+
 use sqlx::SqliteConnection;
 
 use crate::BlackboardEntryId;

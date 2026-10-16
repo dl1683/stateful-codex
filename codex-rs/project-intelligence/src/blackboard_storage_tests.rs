@@ -39,6 +39,9 @@ use crate::ProjectRelativePath;
 use crate::RegionAnchor;
 use crate::RootBlackboardQuery;
 
+#[path = "blackboard_storage/attributed_content_tests.rs"]
+mod attributed_content_tests;
+
 #[path = "blackboard_storage/effective_hit_tests.rs"]
 mod effective_hit_tests;
 
