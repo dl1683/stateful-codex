@@ -4,6 +4,9 @@
 > historical hold below. S0 evidence is landed; S1a is an inert placement foundation,
 > with native project ownership, migration and atomic completion still gated.
 > See the rebuild entries at the end and the linked baseline/custody receipt.
+> Latest 2026-10-16: inactive terminal composition and HAL response fixtures pass
+> their new checks on both OSes and one Luna fixture journey; full extension
+> suites remain unclean. Native routing/import/old-writer gates remain open.
 
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
 > **Evidence in hand.** Ten ordinary Autonomous prompts on Gemma 4 31B end Answered in both registered checks (before and after A1 and A2: Completed 0, Answered 10, Partial 0, Blocked 0, nonzero 0); eight of ten first completion calls were refused for a missing `openIssues` before the fix and none after, but only three of ten sessions called the completion tool after the fix, so the guidance change and the field change are not separated. Luna hands-on runs show correct work and mostly Partial endings for checked tasks, a visible outcome footer, and a model that rewrites a failing checker and then says the check passes (see the hunt-corrected entries and `campaign2/FINDINGS.md`).
@@ -1203,3 +1206,39 @@ Forget/compaction/MCP/native Unicode/offline/HAL/customer gates stay OPEN.
 No native installation, legacy conversion, AGENTS/sandbox policy edit or upstream
 B0 touch. Exact closeout approval precedes inactive source promotion; closed full
 source frames become HISTORICAL after these documentation changes.
+
+
+## 2026-10-16: inactive terminal composition and HAL response fixtures
+
+Two independently reviewed source slices, each under 500 changed lines, are
+composed without conflicts: terminal fixture b6c645a8fc and response codec
+ddfd2a9d89, merge 9fb1a6070ec0. No native routing or worker is attached.
+[Exact scope and evidence](./STATEFUL_TERMINAL_RESPONSE_WITNESS_20261016.md).
+
+All three new terminal fixtures pass on Windows and Linux. Complete extension
+suites remain unclean: Windows 337/338 (Git-marker permission preflight failure),
+Linux 338/339 (existing memory-history test at the unchanged 60-second timeout).
+Both failures reproduced on clean main. Protocol tests pass 14/14 on both OSes.
+Initial fixture errors, the relation-column repair and the stale Windows2
+extension executable remain retained; the stale extension run is excluded from
+current-source qualification, with clean/recompile proof for Windows3.
+
+One SHA-frozen, freshly Droid-approved unchanged-launcher gpt-6-luna journey
+passed seven exact custom exec cells in 34.610s. Independent closed audit passed
+116 bound inputs and 9,585/9,586 archived source leaves, exact raw/public replies,
+whole final outputs and natural zero-descendant cleanup. This is only
+PASS_LUNA_INACTIVE_FIXTURES_ONLY: syntheticAcceptance:true, nativeRouting:false,
+windowsSuiteClean:false, linuxSuiteClean:false. No retry, normalization or judge.
+Earlier PI/stream final-contract FAIL results remain FAIL.
+
+Scoped fix and fmt succeeded; no Rust tests followed cleanup. The source commits
+retain separate reviewable units and merge_identity.json proves exact disjoint
+crate composition, not merged runtime qualification. External exact-candidate
+closeout review and promotion receipts determine landing; source archives retain
+the exact executed pre-cleanup source after live documentation changes.
+
+First project-owned database milestone remains NOT FULFILLED. Native project
+routing, populated import, old-writer exclusion, real checker/source freshness,
+full native atomic completion/fence removal, Forget, compaction, MCP/CLI reads,
+aggregate steering bounds, and native Unicode/Marathi/offline/HAL/customer gates
+remain OPEN. Protected dirty upstream B0 is untouched and not promoted.
