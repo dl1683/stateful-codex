@@ -183,7 +183,7 @@ impl PreparedDomains {
         Ok(identity)
     }
 
-    async fn validate(
+    pub(crate) async fn validate(
         &self,
         connection: &mut SqliteConnection,
     ) -> Result<StoreIdentity, StoreRegistryError> {
@@ -257,6 +257,14 @@ impl ProjectStoreReader {
         self,
         manifest: &DomainManifest<'_>,
     ) -> Result<(StoreIdentity, SqliteConnection), StoreRegistryError> {
+        let reader = self.admit_domain(manifest).await?;
+        Ok((reader.identity, reader.connection))
+    }
+
+    pub(crate) async fn admit_domain(
+        self,
+        manifest: &DomainManifest<'_>,
+    ) -> Result<Self, StoreRegistryError> {
         let migrations = manifest.migrations;
         let matches = !migrations.no_tx
             && migrations.iter().len() > 0
@@ -276,7 +284,7 @@ impl ProjectStoreReader {
             self.connection.close().await?;
             return Err(StoreRegistryError::IncompatibleHistory);
         }
-        Ok((self.identity, self.connection))
+        Ok(self)
     }
 }
 

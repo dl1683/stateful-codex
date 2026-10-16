@@ -100,3 +100,23 @@ The connection cannot reconnect to another project. Close and reselect after a
 move. Admission identifies a schema/store, not current knowledge authority or
 freshness; domain eligibility and snapshot checks remain mandatory. This is not
 a foreign SQL interface, writable domain attachment or native cutover.
+
+For repeated trusted domain operations, retain the admission contract and use a
+guard owning each read transaction:
+
+```rust,ignore
+let mut domain = reader.into_domain_reader(&manifests[0]).await?;
+let mut snapshot = domain.begin_snapshot().await?;
+let identity = snapshot.identity().clone();
+let value: String = sqlx::query_scalar("SELECT value FROM application_values")
+    .fetch_one(snapshot.connection()).await?;
+snapshot.finish().await?;
+domain.close().await?;
+```
+
+Every snapshot rechecks complete schema/history/header and both admitted UUIDs
+inside that same transaction. Missing/changed metadata refuses before domain
+access. Finish explicitly; an unfinished guard, cancelled operation or refusal
+makes the owner close-only. Await close before reopening or moving. Borrowers are
+trusted and must not issue transaction control, pragmas or attachments. This
+supplies a store snapshot, not application eligibility, freshness or Forget policy.

@@ -7,6 +7,7 @@ mod location;
 mod opener;
 mod reader;
 mod registry;
+mod snapshot;
 
 pub use domains::DomainManifest;
 pub use domains::PreparedDomains;
@@ -22,3 +23,6 @@ pub use registry::StoreIdentity;
 pub use registry::StoreRegistryError;
 pub use registry::initialize_connection;
 pub use registry::read_identity;
+pub use snapshot::ProjectDomainReader;
+pub use snapshot::ProjectReadError;
+pub use snapshot::ProjectReadSnapshot;
