@@ -1,6 +1,6 @@
 # Stateful Codex current state
 
-## Rebuild status pointer â€” 2026-10-16
+## Rebuild status pointer — 2026-10-16
 
 The dated sections after this pointer preserve the October12 snapshot. Current
 execution follows the owner-invoked
@@ -264,7 +264,7 @@ part 3.
 - **Step 3b, deliverable guidance and warning-only diagnostic: CLOSED, stays**
   (`64e6176ed`, with the follow-on `9eddc1af4`: warn once per run;
   status-phrase sequences). None of the predeclared revert criteria triggers
-  (SC-EVAL-044): R2 B=14 vs C=19; R3 ms4 ctlâˆ’3b +0.258, q36a3 âˆ’0.204; R4 0/22;
+  (SC-EVAL-044): R2 B=14 vs C=19; R3 ms4 ctl−3b +0.258, q36a3 −0.204; R4 0/22;
   R1 0/317 after adjudication. **Disclosure:** the file-deliverable
   interpretation used for R1 was adopted after outcomes were visible; the
   first checker's 39/317 (12.303%) is retained (FINDINGS "3b R1 ADJUDICATED
@@ -430,7 +430,7 @@ follow-up, so an event during an in-flight read causes one final read.
 
 ### Known limits of the published browser and TUI
 
-- Hierarchy indentation uses an inline `style="--depth:â€¦"`, which the
+- Hierarchy indentation uses an inline `style="--depth:…"`, which the
   `style-src 'self'` policy blocks, so the tree renders flat. Fix with external
   CSS classes, not by weakening the policy.
 - The workspace appends message deltas and clears live text on `turn/started`
@@ -623,7 +623,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    38 and q35d9h 3 of 4. Another 7 step37f sessions and 1 q35d9h session ran
    26 turns. Rejections are common even in sessions that end rc=0 (q36a3 89 of
    98).
-   **Correction:** the 3b freeze (Â§Â§7/9) and the predeclared FINDINGS entry
+   **Correction:** the 3b freeze (§§7/9) and the predeclared FINDINGS entry
    originally classified these ten exits as hydration failures. Both have now
    been amended: nine sessions ran 25 turns with rejected completion updates;
    memcontinue t2/s1 ended after four turns following a successful Blocked

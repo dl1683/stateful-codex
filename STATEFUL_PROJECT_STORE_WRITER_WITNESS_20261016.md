@@ -1,4 +1,4 @@
-# Project-local writer qualification â€” 2026-10-16
+# Project-local writer qualification — 2026-10-16
 
 Source component: `ab8764ef5d8207164396b181a8b60cb8af6acbd3`, based on
 `139e3b62c7d3e6676477f36b14f8fa26d9b0d942`. Fresh `source_review1.txt`
@@ -67,7 +67,7 @@ recall or the S1 seeded-entry acceptance journey, even apart from the literal
 contract failure. Promotion is limited to source-reviewed/Cargo/direct-harness
 qualified inactive writer code; native acceptance remains open.
 
-## Separate runtime adapter â€” source approved, NOT promoted
+## Separate runtime adapter — source approved, NOT promoted
 
 `rebuild/project-runtime-transaction` at
 `78989cce288a7b95fa56f137f0a04d8d72168012` adds the guard-consuming runtime
