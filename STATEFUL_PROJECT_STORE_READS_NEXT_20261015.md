@@ -18,6 +18,11 @@ Domain upgrades, M0/B0 cohort qualification, S2 and S3 remain separate gates. Th
 historical bootstrap observations below are retained rather than silently recast
 as current limitations of the new API.
 
+The staged [effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
+selects an admitted snapshot guard as the next source unit, followed by a
+behavior-preserving eligibility extraction and separately reviewed bounded
+projection/CLI contracts. Design approval does not implement those stages.
+
 This is an implementation handoff, not an implemented feature or permission to
 activate native storage. The converged rebuild strategy remains the authority.
 The current executable can initialize and inspect bootstrap metadata only.

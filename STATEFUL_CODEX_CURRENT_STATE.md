@@ -1,6 +1,6 @@
 # Stateful Codex current state
 
-## Rebuild status pointer - 2026-10-15
+## Rebuild status pointer - 2026-10-16
 
 The detailed sections below retain the October12 snapshot; do not read their
 historical plan/implementation claims as qualification of the rebuild. Current
@@ -8,22 +8,40 @@ execution order is the owner-invoked
 [Codex/Droid rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md):
 S0/S1, then M0-M3, then S2/S3 before native activation.
 
-Main922ee4509 contains reviewed project-local resolution, bootstrap identity and
-migration registry, concrete-path filesystem admission, closed-stage publication,
-and bounded standalone metadata CLI reads/explicit initialization. These are inert
-bootstrap components; native knowledge/runtime still use the legacy stores.
+Code checkpoint9e427d9fa contains reviewed project-local resolution, bootstrap
+identity/registry, filesystem admission, closed-stage publication and bounded
+metadata CLI reads/explicit initialization, plus format2 compiled-domain
+preparation, atomic installation and an owned registered read connection. Real
+intelligence/runtime schemas were installed together in fresh scratch stores and
+read by separate frozen helpers. These are inert components; native
+knowledge/runtime still use the legacy stores. Effective neutral knowledge reads,
+application facades, populated conversion and atomic completion are not active.
 The owner's first milestone is NOT fulfilled. See the latest appended entries in
 [the evaluation ledger](./STATEFUL_CODEX_EVALUATION.md), the
 [independent frozen-reader witness](./STATEFUL_PROJECT_STORE_WITNESS_20261015.md),
+the [real-domain witness](./STATEFUL_PROJECT_STORE_DOMAIN_WITNESS_20261016.md),
+the [registered-reader witness](./STATEFUL_PROJECT_STORE_READER_WITNESS_20261016.md),
 and the [cutover inventory](./STATEFUL_PROJECT_STORE_CUTOVER_INVENTORY_20261015.md).
 
 The separate upstream-sync executor owns uncommitted B0 accounting/recovery work;
 its production59/60 collision and remaining compatibility gates block promotion.
-This rebuild has not converted homes, installed a native candidate, removed the
-application lock or implemented atomic completion. HAL H1 read-only Marathi
-transport remains FAILED; the bounded ASCII CLI is not a repair for that gate.
+This rebuild has not converted homes, permanently installed a native candidate,
+removed the application lock or implemented atomic completion. A frozen local
+native candidate was selected temporarily through the actual launcher and then
+the original launcher bytes restored; installed CLI/host hashes were unchanged.
+Its independent UTF8 file-default fix is qualified, while the exact Marathi copy
+still fails with329 ASCII bytes. See the [source-matched native qualification](./STATEFUL_HAL_NATIVE_QUALIFICATION_20261016.md).
+HAL H1 transport remains FAILED; the bounded ASCII CLI is not a repair for it.
 [HAL preservation evidence](./STATEFUL_HAL_PRESERVATION_BASELINE_20261015.md)
 retains the failures and diagnostic controls. Customer/offline acceptance is open.
+
+The [next-read handoff](./STATEFUL_PROJECT_STORE_READS_NEXT_20261015.md) marks which
+earlier bootstrap limitations have been superseded. Prototype console inheritance
+is current-user/self-imposed CLM evidence only, not a native policy or transport
+repair. All clean active rebuild/feature worktrees were fast-forwarded to reviewed
+main during this run; the dirty upstream branch remains separately owned.
+The [next effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
+is a staged source plan, not an implemented facade or runtime qualification.
 
 Updated 2026-10-12 (a snapshot: landings of 2026-10-13 and 2026-10-14 are summarised in the note at the top of `STATEFUL_CODEX_EVALUATION.md`, which is the current pointer until this page is refreshed). This page says what the published code does, what has and
 has not been measured, where unmerged work lives, and how to operate the
