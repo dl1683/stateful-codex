@@ -1165,3 +1165,41 @@ precedes inactive source promotion. First project-owned database milestone/nativ
 routing/populated import/old-writer barrier/full certificate/fence removal, actual
 Forget/compaction/MCP, native Marathi/final escaping, offline/HAL/customer remain
 OPEN. Protected upstream dirty B0 untouched; no approved batch or native install.
+
+
+## 2026-10-16 persisted run-start binding precondition
+
+Runtime919ded934503 adds201lines/4files, approved exact source and disjoint
+main merge05aeb4d. revalidate_project_run_start consumes/returns the SAME guard,
+requires actual runtime manifest, selected primary-key run/canonical project owner,
+and exact nonnegative INTEGER/i64 created_at_ms. Missing/foreign/malformed/mismatch
+refuse and roll back prior writes; caller still derives the timestamp from opaque
+PI preparation and preserves all other policies under that same run/guard.
+
+Actual local Windows/WSL just test runtime each80PASS0skip (including5new tests),
+full9579-leaf source maps stable. Scoped fix/final fmt0; no postcleanup tests.
+Disjoint main merge preserves runtime/dependency trees. Revised external helper
+build2 locked/offline/local6.39s/jobs2/mutex/RAM passes. Fresh controller review
+required zero boundary; match corrected to0; no previous failure overwritten.
+
+Fresh direct1 PASS7cases (zero, mismatch, >2^53, REAL, missing, foreign, late agent),
+independent67table/204object/35migration/all-row baseline and three-image deltas.
+Success marker only, refusal images identical, natural drain/cleanup0/source pins.
+Fresh frozen approval verifies102pins/all9583archive members/all direct evidence;
+ONE unchanged-launcher/gpt-6-luna15.252s run passes2exact sequential custom cells,
+whole raw/public replies/final/-o, exact STRING timestamp, complete database images,
+zero active BEFORE/after cleanup/root0 and source/input postflight. Independent
+closed audit repeats102pins/current9583leaves/actual images/raw payloads without
+copying raw rollout. PASS_LUNA_INACTIVE_COMPONENTS_ONLY, no retry/normalization/judge.
+
+This helper commits only a marker and always completionCertified:false,
+syntheticOnly:true,nativeAttached:false. Earlier PI/stream final-contract FAIL
+remains FAIL; explicit stdout parsing in this distinct unit does not regrade it.
+Packet STATEFUL_PROJECT_RUN_START_BINDING_WITNESS_20261016.md and external
+reports/stateful_rebuild/run_binding_20261016 retain exact limits/receipts.
+First project-owned database milestone remains NOT FULFILLED: native routing,
+populated import, old-writer barrier, full atomic completion/fence removal, actual
+Forget/compaction/MCP/native Unicode/offline/HAL/customer gates stay OPEN.
+No native installation, legacy conversion, AGENTS/sandbox policy edit or upstream
+B0 touch. Exact closeout approval precedes inactive source promotion; closed full
+source frames become HISTORICAL after these documentation changes.
