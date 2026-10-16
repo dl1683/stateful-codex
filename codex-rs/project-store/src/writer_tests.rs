@@ -18,7 +18,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 async fn domains() -> TestResult<PreparedDomains> {
     let manifest = |sql| Migrator {
         migrations: Cow::Owned(vec![Migration::new(
-            1,
+            /*version*/ 1,
             "domain".into(),
             MigrationType::Simple,
             sqlx::SqlStr::from_static(sql),
