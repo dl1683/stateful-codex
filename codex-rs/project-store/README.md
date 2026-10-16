@@ -4,6 +4,19 @@ This crate owns engine-independent placement, bootstrap metadata and local openi
 intelligence or semantic runtime; tests use the state SQLite shim. Native storage
 still uses its existing home databases; this foundation does not activate cutover.
 
+`ProjectStoreWriter::open(&location, domains, &expected_identity)` opens an existing
+complete registered store, admitting it read-only before enabling a writable WAL
+connection. The caller must own the writable location; this does not adopt copied
+stores. `begin_write` checks schema/history and both UUIDs under `BEGIN IMMEDIATE`.
+Trusted domain code borrows `transaction.connection()` for bounded SQL, then awaits
+`commit()` or `rollback()`. Commit checks schema/identity again. Dropped, cancelled
+or refused operations make the writer close-only; await `close()` before reopening
+and reconcile uncertain commits using durable domain operation identities.
+A two-second busy timeout bounds each SQLite lock wait; reservation contention
+returns `ProjectWriteError::Busy` without silent retry. No guard may span inference,
+commands, scans or another database. This supplies transaction ownership, not
+native atomic completion, domain authorization, an importer or storage cutover.
+
 Select an existing project explicitly, including a non-Git directory:
 
 ```rust,ignore
