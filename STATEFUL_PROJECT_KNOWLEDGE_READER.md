@@ -1,23 +1,23 @@
-# S1 intelligence snapshot admission
+# S1 intelligence snapshot admission and attributed content
 
-This unit introduces ProjectKnowledgeReader, consuming a ProjectStoreReader only
-through the intelligence crate's actual compiled manifest check. Its inspect
-operation requires both expected UUIDs, revalidates the kernel snapshot, checks
-typed clocks/current revision pointers, the fixed complete direct-owner inventory,
-declared and missing semantic child references, and hierarchy cycles before
-returning metadata/coverage. Expected UUID mismatch refuses before any snapshot
-or kernel access. Other ordinary refusals finish the snapshot before reuse;
-kernel cancellation/commit refusal remains close-only. Explicit close awaits release.
+ProjectKnowledgeReader consumes ProjectStoreReader through the intelligence
+crate's exact compiled manifest check. inspect returns metadata and coverage.
+The additive read operation requires both expected UUIDs and a valid bounded
+entry ID before kernel access, then validates clocks/current pointers, complete
+ownership/dependency/FTS/cycle inventory and coverage inside one fresh snapshot.
+It delegates scalar materialization to the separately source-approved bounded
+loader and uses the native ModelTool eligibility predicate. Ordinary refusals
+finish before reuse; explicit close awaits release. No pool/home fallback exists.
 
-Canonical kernel project UUID is the fresh-domain owner. Foreign/legacy IDs refuse;
-there is no conversion, first-row selection, repair, pool or home fallback. Only
-intelligence ownership is certified: this is not runtime ownership or native
-attachment. No entry content, model context, effective verification, root, CLI or
-new writer is exposed. This stages the ownership prerequisite of the separately
-approved attributed-content contract; the scalar loader remains the next unit.
+Successful content and uniform policy misses carry both identities, lossless
+decimal-string clocks/timestamps, projection attributedContent, verification
+notEvaluated and the six fixed omissions. CoverageIncomplete remains distinct
+from Missing. Stored provenance is historical attribution, not authenticated
+human ingress or a verification/standing-rule certificate. Every subsequent call
+checks current retirement; already delivered bytes cannot be retracted.
 
-Tests use the real compiled intelligence schema in fresh project-local stores.
-Windows/local WSL scoped tests, Cargo/Bazel lock maintenance, scoped fix/final fmt,
-fresh exact Droid review and a separate local frozen-helper/Luna witness are gates.
-No first-milestone, migration/atomic-completion, native Unicode, MCP/offline/HAL or
-customer qualification follows from metadata admission.
+Fresh canonical UUID ownership is conservative, not a legacy conversion. Native
+routing, runtime/completion transactions, source/root/MCP/writes and migration
+remain gated. This component is not first-milestone, offline/HAL or customer
+acceptance. Windows scoped crate gates, local WSL changed-case gates, cleanup,
+fresh exact Droid review and a separate frozen-helper/Luna check are required.

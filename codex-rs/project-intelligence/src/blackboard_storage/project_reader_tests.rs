@@ -263,3 +263,6 @@ async fn orphan_links_and_missing_current_revision_are_distinct_and_close_releas
     )
     .unwrap();
 }
+
+#[path = "project_reader_content_tests.rs"]
+mod content_tests;

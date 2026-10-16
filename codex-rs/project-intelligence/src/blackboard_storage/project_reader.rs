@@ -1,6 +1,10 @@
 //! Project-owned, read-only intelligence admission; no native/home routing.
 
+mod content;
 mod ownership;
+
+pub use content::ProjectAttributedEntry;
+pub use content::ProjectAttributedRead;
 
 use codex_project_store::DomainManifest;
 use codex_project_store::ProjectDomainReader;
@@ -39,6 +43,12 @@ pub enum ProjectKnowledgeReadError {
     Intelligence(#[from] super::BlackboardStoreError),
     #[error("expected project/store identity does not match")]
     IdentityMismatch,
+    #[error("invalid bounded entry identifier")]
+    InvalidRequest,
+    #[error("identity coverage is incomplete")]
+    CoverageIncomplete,
+    #[error("unsupported scalar content")]
+    UnsupportedContent,
     #[error("malformed project clock, entry revision or timestamp")]
     InvalidClock,
     #[error("an entry has no matching current revision")]
@@ -79,6 +89,29 @@ impl ProjectKnowledgeReader {
         let mut snapshot = self.reader.begin_snapshot().await?;
         let identity = snapshot.identity().clone();
         let result = ownership::inspect_on(snapshot.connection(), identity).await;
+        snapshot.finish().await?;
+        result
+    }
+
+    /// Read bounded attributed history under one fresh admitted snapshot.
+    /// This evaluates neither verification nor omitted support/applicability.
+    /// Both UUIDs and a bounded valid entry ID are required before kernel access.
+    pub async fn read(
+        &mut self,
+        expected: &StoreIdentity,
+        entry_id: &str,
+    ) -> Result<ProjectAttributedRead, ProjectKnowledgeReadError> {
+        if expected != &self.admission_identity {
+            return Err(ProjectKnowledgeReadError::IdentityMismatch);
+        }
+        if entry_id.len() > 512 {
+            return Err(ProjectKnowledgeReadError::InvalidRequest);
+        }
+        let entry_id = crate::BlackboardEntryId::parse(entry_id)
+            .map_err(|_| ProjectKnowledgeReadError::InvalidRequest)?;
+        let mut snapshot = self.reader.begin_snapshot().await?;
+        let identity = snapshot.identity().clone();
+        let result = content::read_on(snapshot.connection(), identity, &entry_id).await;
         snapshot.finish().await?;
         result
     }

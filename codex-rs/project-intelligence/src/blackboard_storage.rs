@@ -68,6 +68,8 @@ pub use context_bounds::ContextPolicy;
 pub use fence::CompletionFence;
 pub use knowledge::CreateOutcome;
 pub use knowledge::MAX_CHANGES_PAGE;
+pub use project_reader::ProjectAttributedEntry;
+pub use project_reader::ProjectAttributedRead;
 pub use project_reader::ProjectKnowledgeReadError;
 pub use project_reader::ProjectKnowledgeReader;
 pub use project_reader::ProjectKnowledgeSnapshot;

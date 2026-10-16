@@ -58,6 +58,8 @@ pub use blackboard_storage::ContextPolicy;
 pub use blackboard_storage::CreateOutcome;
 pub use blackboard_storage::MAX_CHANGES_PAGE;
 pub use blackboard_storage::MAX_SUPERSEDED_ENTRIES;
+pub use blackboard_storage::ProjectAttributedEntry;
+pub use blackboard_storage::ProjectAttributedRead;
 pub use blackboard_storage::ProjectKnowledgeReadError;
 pub use blackboard_storage::ProjectKnowledgeReader;
 pub use blackboard_storage::ProjectKnowledgeSnapshot;
