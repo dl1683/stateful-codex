@@ -5,7 +5,8 @@ Implementation checkpoint: Stage1's additive snapshot owner/guard landed at
 [separate witness](./STATEFUL_PROJECT_STORE_SNAPSHOT_WITNESS_20261016.md).
 The remaining stages below are unimplemented design, with their own freeze gates.
 
-Design only; no implementation or milestone acceptance. Authority remains the
+The contract below is a staged design; implementation status is limited to the
+checkpoint above, with no milestone acceptance. Authority remains the
 converged rebuild strategy. Format2 preparation/installation and the owned reader
 are landed; native stores, caches, completion and conversion remain unchanged.
 
