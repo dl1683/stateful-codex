@@ -924,6 +924,13 @@ policy change or product patch. Details: STATEFUL_HAL_CHILD_SHELL_DIAGNOSTIC_202
 - Shared mutex/jobs2/RAM floor retained; cleanup queued below the threshold then admitted after RAM recovered. Scoped fix and final fmt exit0; no post-cleanup tests. Fresh exact source review and real-schema subprocess/Luna evidence are separate gates, not implied by these counts.
 - No populated migration, legacy retirement/quiescence, completion/Forget transaction, effective neutral knowledge reads, native installation or HAL/offline/customer acceptance. Cancellation, killed-writer, power-loss and domain upgrade qualification remain open.
 
+## 2026-10-16 real-schema project-store witness
+
+- Frozen Rust helper597ef108 on approved abac embeds all25intelligence+8runtime migrations. Local build1 failed absolute SQLx9 paths; repaired relative inputs source-reviewed, build2 passed with mutex/jobs2/RAM floor. Input/leaf/resolved-lock hashes retained; no cryptographic attestation.
+- Reviewed independent harness once PASS: both full schemas equal Python-executed source oracle including67tables, exact UUID rows/non-nil canonical values,35digests/integrity/FKs/noSQLx ledger. Rust init. All13children recorded, including four diagnostic-specific normal exit1 refusals. Real held-writer busy refused within5seconds then retry passed; move hash and corruption no-repair hash passed. Launch-to-collection overlap only, not proven process/critical-section overlap.
+- Actual unchanged launcher/Luna workspace-write six candidate bootstrap/install/read commands PASS on two fresh ASCII-path projects; exact final/helper/directSQLite UUID/path JSON. Both stores format2/67tables/35records, empty knowledge/run rows. Binary unchanged. Independent witness covers Unicode paths; manual journey does not qualify native Unicode transport. Deterministic scorer, no model judge.
+- Packet STATEFUL_PROJECT_STORE_DOMAIN_WITNESS_20261016.md; receipts domain_fixtures/20261016T005722Z/ and luna_real_domains_20261016/. No native home conversion/installation, populated import/old-writer barrier, effective recall, WAL/atomic completion/Forget, process-kill/power-loss, MCP/offline/HAL/customer acceptance. Existing native edit and Marathi failures remain open.
+
 ## 2026-10-16 H1 independent PowerShell file-decoding defaults
 
 - Split console encoding and the existing Get-Content/Select-String/Import-Csv UTF8 defaults into independent best-effort blocks. A refused console setter no longer skips file defaults. Explicit file encoding still wins; writing defaults and sandbox/approval policy are unchanged.
