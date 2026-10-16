@@ -1056,7 +1056,7 @@ ordered profile-free commands/raw custom calls, frozen one-LF cell terminators,
 authoritative counters2/prohibited0, whole tool/final/-o JSON and full success/
 late-conflict database deltas match. Job active0/rootExit0. Independent readonly
 recheck passes64bindings/9566source leaves/10closed database images. Native
-preparations1/2 never ran; nonexistent alpha provider cwd was corrected and covered
+trials1/2 never executed (preparation controls ran); nonexistent alpha provider cwd was corrected and covered
 by an actual-function in-memory RPC probe. Stock provider/requirements/ChatGPT
 login and original launcher/CLI/host/config admitted; normal home session writes
 are possible. Source-matched external helper, no new native installation or judge.

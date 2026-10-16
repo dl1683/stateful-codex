@@ -45,7 +45,8 @@ fixtures only; duplicate identities across independent controls are not writable
 copy/production ownership qualification. Host acceptance receipts are manufactured
 fixture data, never actual checker results or verified production knowledge.
 
-Native preparations1/2 never ran. Review1 found the provider adapter's nonexistent
+Prepared native trials1/2 never executed; their preparation controls ran.
+Review1 found the provider adapter's nonexistent
 alpha cwd; the corrected adapter uses the existing root and its bound actual-function
 in-memory RPC probe launches zero processes. Fresh luna_review2 APPROVE precedes
 ONE actual trial3, manifest
