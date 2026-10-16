@@ -25,9 +25,11 @@ native lock removal or attachment. The sole actual Luna check failed its exact-c
 separate diagnostics matched both tool/final JSON outputs. It remains FAIL,
 without retry or normalization. This is source/direct-harness qualification only.
 The separate runtime-completion adapter remains local on
-`rebuild/project-runtime-transaction` at `78989cce288a7b95fa56f137f0a04d8d72168012`:
+`rebuild/project-runtime-transaction` (source commit `78989cce288a7b95fa56f137f0a04d8d72168012`):
 Droid source-approved and Windows/WSL75 runtime+51store tests passed, but no
-separate hands-on Luna witness or promotion. Native completion certification must
+separate hands-on Luna witness or promotion. Its [helper preparation](./STATEFUL_RUNTIME_ADAPTER_PREPARATION_20261016.md)
+retains a failed oracle precondition; unrun refusal cases remain unqualified.
+Native completion certification must
 also validate knowledge, eligibility, steering and source bindings in one guard.
 
 Earlier metadata/snapshot/effective-reader helper journeys remain scoped evidence,
