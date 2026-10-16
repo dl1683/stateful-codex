@@ -78,3 +78,25 @@ requires the identical full manifest/schema. The caller must qualify placement,
 enable foreign keys and configure a bounded busy timeout. No WAL pool or native
 attachment is supplied. Legacy data import, application eligibility and effective
 knowledge reads remain unqualified.
+
+`ProjectStoreReader` owns one admitted, read-only connection, with no home,
+pool or automatic reconnect. A trusted domain facade consumes it only with its
+complete matching compiled manifest:
+
+```rust,ignore
+use codex_project_store::ProjectStoreReader;
+use sqlx::Connection;
+let manifests = [intelligence_manifest, runtime_manifest];
+let domains = PreparedDomains::prepare(&manifests).await?;
+let reader = ProjectStoreReader::open(&location, domains).await?;
+let (identity, connection) = reader.into_domain_connection(&manifests[0]).await?;
+// Continue through the domain's existing effective-read logic.
+connection.close().await?;
+```
+
+Missing/bootstrap/changed stores refuse without creation or repair. Unknown,
+partial, changed-SQL or nontransactional domain claims receive no connection.
+The connection cannot reconnect to another project. Close and reselect after a
+move. Admission identifies a schema/store, not current knowledge authority or
+freshness; domain eligibility and snapshot checks remain mandatory. This is not
+a foreign SQL interface, writable domain attachment or native cutover.

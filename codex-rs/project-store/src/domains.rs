@@ -4,6 +4,7 @@ use sqlx::Connection;
 use sqlx::SqliteConnection;
 use sqlx::migrate::Migrator;
 
+use crate::ProjectStoreReader;
 use crate::StoreIdentity;
 use crate::StoreRegistryError;
 use crate::registry::SCHEMA;
@@ -246,6 +247,37 @@ async fn history(connection: &mut SqliteConnection) -> Result<History, StoreRegi
     .fetch_all(connection)
     .await?;
     Ok(rows)
+}
+
+impl ProjectStoreReader {
+    /// Consume the admitted read-only connection for a matching domain owner.
+    /// The caller owns subsequent snapshot/eligibility checks. This trusted Rust
+    /// API does not authorize foreign SQL or confer authority on stored claims.
+    pub async fn into_domain_connection(
+        self,
+        manifest: &DomainManifest<'_>,
+    ) -> Result<(StoreIdentity, SqliteConnection), StoreRegistryError> {
+        let migrations = manifest.migrations;
+        let matches = !migrations.no_tx
+            && migrations.iter().len() > 0
+            && migrations.iter().all(|migration| {
+                !migration.no_tx && migration.migration_type == sqlx::migrate::MigrationType::Simple
+            })
+            && self
+                .domains
+                .migrations
+                .iter()
+                .filter(|(domain, _, _)| domain == manifest.domain)
+                .map(|(_, version, sql)| (*version, sql.as_str()))
+                .eq(migrations
+                    .iter()
+                    .map(|migration| (migration.version, migration.sql.as_str())));
+        if !matches {
+            self.connection.close().await?;
+            return Err(StoreRegistryError::IncompatibleHistory);
+        }
+        Ok((self.identity, self.connection))
+    }
 }
 
 #[cfg(test)]

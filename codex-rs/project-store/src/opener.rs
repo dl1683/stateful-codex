@@ -127,6 +127,21 @@ async fn inspect_qualified(
     location: &ProjectStoreLocation,
     qualification: &impl Fn(&AbsolutePathBuf) -> Result<(), ProjectStoreOpenError>,
 ) -> Result<StoreIdentity, ProjectStoreOpenError> {
+    qualify_store(location, qualification)?;
+    let options = SqliteConnectOptions::new()
+        .filename(location.database_path().as_path())
+        .read_only(true)
+        .busy_timeout(Duration::from_secs(/*secs*/ 2));
+    let mut connection = SqliteConnection::connect_with(&options).await?;
+    let result = read_identity(&mut connection).await;
+    connection.close().await?;
+    Ok(result?)
+}
+
+pub(crate) fn qualify_store(
+    location: &ProjectStoreLocation,
+    qualification: &impl Fn(&AbsolutePathBuf) -> Result<(), ProjectStoreOpenError>,
+) -> Result<(), ProjectStoreOpenError> {
     revalidate_location(location)?;
     qualification(location.project_root())?;
     qualification(&location.project_root().join(".stateful"))?;
@@ -145,17 +160,10 @@ async fn inspect_qualified(
         }
         qualification(&sidecar)?;
     }
-    let options = SqliteConnectOptions::new()
-        .filename(location.database_path().as_path())
-        .read_only(true)
-        .busy_timeout(Duration::from_secs(/*secs*/ 2));
-    let mut connection = SqliteConnection::connect_with(&options).await?;
-    let result = read_identity(&mut connection).await;
-    connection.close().await?;
-    Ok(result?)
+    Ok(())
 }
 
-fn qualify_for_open(path: &AbsolutePathBuf) -> Result<(), ProjectStoreOpenError> {
+pub(crate) fn qualify_for_open(path: &AbsolutePathBuf) -> Result<(), ProjectStoreOpenError> {
     qualify_local_filesystem(path).map_err(ProjectStoreOpenError::from)
 }
 
