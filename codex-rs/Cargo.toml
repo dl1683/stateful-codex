@@ -118,6 +118,7 @@ members = [
     "websocket-auth",
     "websocket-client",
     "windows-sandbox-rs/tests/support",
+    "windows-console-protocol",
     "windows-sandbox-service",
     "worktree",
     "workload-identity",
@@ -326,6 +327,7 @@ codex-user-verification = { path = "user-verification" }
 codex-v8-poc = { path = "v8-poc" }
 codex-workload-identity = { path = "workload-identity" }
 codex-windows-sandbox = { path = "windows-sandbox-rs" }
+codex-windows-console-protocol = { path = "windows-console-protocol" }
 codex-windows-sandbox-test-support = { path = "windows-sandbox-rs/tests/support" }
 core_test_support = { path = "core/tests/common" }
 
