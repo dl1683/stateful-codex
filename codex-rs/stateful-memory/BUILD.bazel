@@ -2,6 +2,10 @@ load("//:defs.bzl", "codex_rust_crate")
 
 codex_rust_crate(
     name = "stateful-memory",
+    compile_data = [
+        "//codex-rs/project-intelligence:project-store-migrations",
+        "//codex-rs/stateful-runtime:project-store-migrations",
+    ],
     crate_name = "stateful_memory",
     crate_srcs = [],
 )

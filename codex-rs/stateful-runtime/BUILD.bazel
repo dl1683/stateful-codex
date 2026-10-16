@@ -17,3 +17,9 @@ filegroup(
     ]),
     visibility = ["//codex-rs/app-server:__pkg__"],
 )
+
+filegroup(
+    name = "project-store-migrations",
+    srcs = glob(["migrations/**"]),
+    visibility = ["//codex-rs/stateful-memory:__pkg__"],
+)

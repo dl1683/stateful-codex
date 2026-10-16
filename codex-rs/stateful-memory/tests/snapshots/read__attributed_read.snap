@@ -1,0 +1,38 @@
+---
+source: stateful-memory/tests/read.rs
+expression: "serde_json::to_string_pretty(&normalized).unwrap()"
+---
+{
+  "ok": true,
+  "result": {
+    "coverage": "complete",
+    "eligibilityGeneration": "9007199254740995",
+    "entry": {
+      "content": "alpha \"quoted\"\nम🙂",
+      "createdAtMs": "0",
+      "id": "entry",
+      "kind": "note",
+      "nodeId": "node",
+      "provenance": {
+        "kind": "user",
+        "sourceId": "synthetic"
+      },
+      "revision": "1",
+      "state": "active",
+      "updatedAtMs": "0"
+    },
+    "omissions": [
+      "structuredValue",
+      "evidence",
+      "premises",
+      "relations",
+      "context",
+      "applicability"
+    ],
+    "projectUuid": "[project-uuid]",
+    "projection": "attributedContent",
+    "snapshotRevision": "9007199254740993",
+    "storeUuid": "[store-uuid]",
+    "verification": "notEvaluated"
+  }
+}
