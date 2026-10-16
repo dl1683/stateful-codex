@@ -1,59 +1,62 @@
 # Stateful Codex current state
 
-## Rebuild status pointer - 2026-10-16
+## Rebuild status pointer â€” 2026-10-16
 
-The detailed sections below retain the October12 snapshot; do not read their
-historical plan/implementation claims as qualification of the rebuild. Current
-execution order is the owner-invoked
-[Codex/Droid rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md):
-S0/S1, then M0-M3, then S2/S3 before native activation.
+The dated sections after this pointer preserve the October12 snapshot. Current
+execution follows the owner-invoked
+[Codex/Droid rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md).
+The first company-brain milestone remains **NOT FULFILLED**. Consult the latest
+appended entries in [the evaluation ledger](./STATEFUL_CODEX_EVALUATION.md).
 
-Code checkpoint cc8fc834b contains reviewed project-local resolution, bootstrap
-identity/registry, filesystem admission, closed-stage publication and bounded
-metadata CLI reads/explicit initialization, plus format2 compiled-domain
-preparation, atomic installation, an owned registered read connection and admitted
-read-snapshot guards. Real
-intelligence/runtime schemas were installed together in fresh scratch stores and
-read by separate frozen helpers. These are inert components; native
-knowledge/runtime still use the legacy stores. Effective neutral knowledge reads,
-effective content facades, populated conversion and atomic completion are not active.
-The additive ProjectKnowledgeReader now validates fresh intelligence ownership,
-clocks and coverage under admitted snapshots; it returns metadata only. Its
-[separate helper/Luna witness](./STATEFUL_PROJECT_KNOWLEDGE_WITNESS_20261016.md)
-passed with large clocks and incomplete coverage. Windows142 passed; full Linux
-qualification remains held on two baseline-reproduced timeouts.
-The owner's first milestone is NOT fulfilled. See the latest appended entries in
-[the evaluation ledger](./STATEFUL_CODEX_EVALUATION.md), the
-[independent frozen-reader witness](./STATEFUL_PROJECT_STORE_WITNESS_20261015.md),
-the [real-domain witness](./STATEFUL_PROJECT_STORE_DOMAIN_WITNESS_20261016.md),
-the [registered-reader witness](./STATEFUL_PROJECT_STORE_READER_WITNESS_20261016.md),
-the [owned-snapshot witness](./STATEFUL_PROJECT_STORE_SNAPSHOT_WITNESS_20261016.md),
-and the [cutover inventory](./STATEFUL_PROJECT_STORE_CUTOVER_INVENTORY_20261015.md).
+Reviewed components now provide project-local resolution, bootstrap identity and
+registry, filesystem admission, closed-stage publication, compiled intelligence
+and runtime schema installation, owned readonly snapshots, bounded attributed
+content reads and the `stateful-memory` CLI. CLI reads disclose historical
+attribution and omitted fields; they do not authenticate production ingress or
+assert effective truth. Native knowledge/runtime still use the legacy stores.
+The owner priority is one project-owned authority with verified conversion and
+lock handling; these components do not yet deliver that complete milestone.
 
-The separate upstream-sync executor owns uncommitted B0 accounting/recovery work;
-its production59/60 collision and remaining compatibility gates block promotion.
-This rebuild has not converted homes, permanently installed a native candidate,
-removed the application lock or implemented atomic completion. A frozen local
-native candidate was selected temporarily through the actual launcher and then
-the original launcher bytes restored; installed CLI/host hashes were unchanged.
-Its independent UTF8 file-default fix is qualified, while the exact Marathi copy
-still fails with329 ASCII bytes. See the [source-matched native qualification](./STATEFUL_HAL_NATIVE_QUALIFICATION_20261016.md).
-HAL H1 transport remains FAILED; the bounded ASCII CLI is not a repair for it.
-[HAL preservation evidence](./STATEFUL_HAL_PRESERVATION_BASELINE_20261015.md)
-retains the failures and diagnostic controls. Customer/offline acceptance is open.
+The [project-local writer packet](./STATEFUL_PROJECT_STORE_WRITER_WITNESS_20261016.md)
+records the new trusted short-transaction primitive, exact source review and local
+Windows/WSL51-test gates, plus separate real-schema rollback/commit/contention/
+owned-helper recovery evidence. It is an inactive library component, with no
+native lock removal or attachment. The sole actual Luna check failed its exact-cell contract on added trailing LF;
+separate diagnostics matched both tool/final JSON outputs. It remains FAIL,
+without retry or normalization. This is source/direct-harness qualification only.
+The separate runtime-completion adapter remains local on
+`rebuild/project-runtime-transaction` at `78989cce288a7b95fa56f137f0a04d8d72168012`:
+Droid source-approved and Windows/WSL75 runtime+51store tests passed, but no
+separate hands-on Luna witness or promotion. Native completion certification must
+also validate knowledge, eligibility, steering and source bindings in one guard.
 
-The [next-read handoff](./STATEFUL_PROJECT_STORE_READS_NEXT_20261015.md) marks which
-earlier bootstrap limitations have been superseded. The [restricted-token console mechanism](./STATEFUL_HAL_RESTRICTED_CONSOLE_WITNESS_20261016.md)
-now reproduces CP437 corruption versus exact CP65001 inheritance under natural
-CLM and a denied write canary. It is separate from native policy/transport repair;
-full ACL/WFP/IPC/package/cancellation/normal-descendant acceptance remains open. All clean active rebuild/feature worktrees were fast-forwarded to reviewed
-main during this run; the dirty upstream branch remains separately owned.
-The [next effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
-is a staged source plan. Stage1's snapshot guard is now landed and witnessed;
-the behavior-preserving exact-hit extraction and metadata-only domain admission
-are landed and witnessed. Bounded attributed-content projection and its neutral
-CLI remain unimplemented; the [scalar contract](./STATEFUL_PROJECT_STORE_SCALAR_READ_CONTRACT.md)
-freezes their required bounds and explicit omissions.
+Earlier metadata/snapshot/effective-reader helper journeys remain scoped evidence,
+linked from their packets and the ledger. Bounded attributed CLI source is now
+implemented; older next-read plans saying otherwise are historical. The full
+Linux PI qualification hold was resolved by the later149-pass run recorded in the
+[platform qualification packet](./STATEFUL_PROJECT_PLATFORM_QUALIFICATION_20261016.md).
+The opt-in Windows GNU CLI Bazel lane passed7cases/2targets; default Windows/MSVC,
+ARM64 and full native Codex are not qualified by it. The associated native journey
+failed because code-mode-host=false made its tool unavailable; exit0 was not PASS.
+
+Native exact Marathi transport still fails405-to329bytes. A separate attributed
+CLI journey preserved both tool results but failed final nested JSON escaping.
+Both failures remain OPEN; the bounded ASCII CLI and narrower refusal witness do
+not repair them. See [native qualification](./STATEFUL_HAL_NATIVE_QUALIFICATION_20261016.md),
+[attributed CLI witness](./STATEFUL_PROJECT_ATTRIBUTED_CLI_WITNESS_20261016.md),
+[HAL preservation](./STATEFUL_HAL_PRESERVATION_BASELINE_20261015.md) and the
+[restricted-console mechanism](./STATEFUL_HAL_RESTRICTED_CONSOLE_WITNESS_20261016.md).
+The latter qualifies only a separate mechanism, not production policy/transport.
+
+The separate upstream executor retains dirty B0 accounting/recovery custody;
+production59/60 collision and remaining gates block its promotion. No approved
+upstream batch is available. Historical refs and its worktree remain preserved.
+No home conversion, populated importer, old-writer barrier, native project routing,
+whole-store completion certification, compaction survival, verified edit/Forget
+ingress, MCP, offline/HAL/customer acceptance is claimed. The
+[cutover inventory](./STATEFUL_PROJECT_STORE_CUTOVER_INVENTORY_20261015.md)
+identifies cached pools, queued publishers, state-DB admission coupling and legacy
+authority readers that must be reconciled before activation.
 
 Updated 2026-10-12 (a snapshot: landings of 2026-10-13 and 2026-10-14 are summarised in the note at the top of `STATEFUL_CODEX_EVALUATION.md`, which is the current pointer until this page is refreshed). This page says what the published code does, what has and
 has not been measured, where unmerged work lives, and how to operate the
@@ -261,7 +264,7 @@ part 3.
 - **Step 3b, deliverable guidance and warning-only diagnostic: CLOSED, stays**
   (`64e6176ed`, with the follow-on `9eddc1af4`: warn once per run;
   status-phrase sequences). None of the predeclared revert criteria triggers
-  (SC-EVAL-044): R2 B=14 vs C=19; R3 ms4 ctl−3b +0.258, q36a3 −0.204; R4 0/22;
+  (SC-EVAL-044): R2 B=14 vs C=19; R3 ms4 ctlâˆ’3b +0.258, q36a3 âˆ’0.204; R4 0/22;
   R1 0/317 after adjudication. **Disclosure:** the file-deliverable
   interpretation used for R1 was adopted after outcomes were visible; the
   first checker's 39/317 (12.303%) is retained (FINDINGS "3b R1 ADJUDICATED
@@ -427,7 +430,7 @@ follow-up, so an event during an in-flight read causes one final read.
 
 ### Known limits of the published browser and TUI
 
-- Hierarchy indentation uses an inline `style="--depth:…"`, which the
+- Hierarchy indentation uses an inline `style="--depth:â€¦"`, which the
   `style-src 'self'` policy blocks, so the tree renders flat. Fix with external
   CSS classes, not by weakening the policy.
 - The workspace appends message deltas and clears live text on `turn/started`
@@ -620,7 +623,7 @@ Counts are from `runs/<arm>/sessions.jsonl` and `runs/<arm>/logs/`.
    38 and q35d9h 3 of 4. Another 7 step37f sessions and 1 q35d9h session ran
    26 turns. Rejections are common even in sessions that end rc=0 (q36a3 89 of
    98).
-   **Correction:** the 3b freeze (§§7/9) and the predeclared FINDINGS entry
+   **Correction:** the 3b freeze (Â§Â§7/9) and the predeclared FINDINGS entry
    originally classified these ten exits as hydration failures. Both have now
    been amended: nine sessions ran 25 turns with rejected completion updates;
    memcontinue t2/s1 ended after four turns following a successful Blocked
