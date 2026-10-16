@@ -3,6 +3,7 @@ source: stateful-memory/tests/read.rs
 expression: "serde_json::to_string_pretty(&normalized).unwrap()"
 ---
 {
+  "capabilitiesWire": "{\"ok\":true,\"result\":{\"contentRead\":{\"maxReplyBytes\":8192,\"omissions\":[\"structuredValue\",\"evidence\",\"premises\",\"relations\",\"context\",\"applicability\"],\"projection\":\"attributedContent\",\"requiresInstalledDomains\":[\"project-intelligence\",\"stateful-runtime\"],\"verification\":\"notEvaluated\"},\"coverage\":\"bootstrapOnly\",\"knowledgeAvailable\":false,\"maxReplyBytes\":4096,\"nativeAttached\":false,\"operations\":[\"capabilities\",\"root\",\"init\",\"read\"],\"protocolVersion\":1}}\n",
   "ok": true,
   "result": {
     "coverage": "complete",

@@ -104,14 +104,26 @@ async fn auth_free_subprocess_reads_two_projects_and_roundtrips_escaped_content(
             "entry":{"id":"entry","nodeId":"node","revision":"1","createdAtMs":"0","updatedAtMs":"0","kind":"note","state":"active","content":content,"provenance":{"kind":"user","sourceId":"synthetic"}}}})
         );
         if content.starts_with("alpha") {
-            let mut discovery = Command::new(codex_utils_cargo_bin::cargo_bin("stateful-memory").unwrap());
-            discovery.arg("--project").arg(project.path()).args(["--json", "capabilities"]);
+            let mut discovery =
+                Command::new(codex_utils_cargo_bin::cargo_bin("stateful-memory").unwrap());
+            discovery
+                .arg("--project")
+                .arg(project.path())
+                .args(["--json", "capabilities"]);
             let cap_output = discovery.output().unwrap();
             assert!(cap_output.status.success() && cap_output.stderr.is_empty());
             let cap: Value = serde_json::from_slice(&cap_output.stdout).unwrap();
             assert_eq!(
-                json!([cap["result"]["contentRead"]["projection"],cap["result"]["contentRead"]["verification"],cap["result"]["contentRead"]["omissions"]]),
-                json!([reply["result"]["projection"],reply["result"]["verification"],reply["result"]["omissions"]]),
+                json!([
+                    cap["result"]["contentRead"]["projection"],
+                    cap["result"]["contentRead"]["verification"],
+                    cap["result"]["contentRead"]["omissions"]
+                ]),
+                json!([
+                    reply["result"]["projection"],
+                    reply["result"]["verification"],
+                    reply["result"]["omissions"]
+                ]),
             );
             let mut normalized = reply;
             normalized["capabilitiesWire"] = String::from_utf8(cap_output.stdout).unwrap().into();
