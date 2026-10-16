@@ -58,10 +58,13 @@ and review packets are retained at
   repair PASS11/11, zero skips/retries,4.494s test runtime/40.67s build.
 - `fmt_final1.log`: required just fmt PASS after all tests. Snapshot storage
   then normalized to LF with exact parsed-object equality; no test rerun after
-  formatting, per repository instructions. Exact committed source review and
-  frozen candidate/Luna check remain **PENDING**; final receipts govern promotion.
+  formatting, per repository instructions. Exact committed source review: `source_review_final1.txt` APPROVE SOURCE scoped.
+  Reviewed-HEAD build-only gates1-4 pass; gate4 binds the repaired controller and
+  all9,577 input leaves in `candidate_source_inputs4.zip`.
+- Frozen trial approval: `luna_frozen_review3.txt`; actual one-shot outcome and
+  unconditional postflight: `luna_roots_trial1`. FAIL retained; no native usability qualification.
 
-All builds/tests are local under `Local\StatefulB0LocalBuild`, jobs2 and sampled
+All Rust/Bazel builds/tests are local under `Local\StatefulB0LocalBuild`, jobs2 and sampled
 host admission floor23,221,225,472 bytes. Windows and WSL Rust process checks,
 fresh before/after source inventories and controlled RC/local-only flags are
 retained. Public repository downloads were permitted; this is not an offline
@@ -100,3 +103,7 @@ populated migration/old-writer barrier, short atomic completion, compaction
 survival, verifiable edit/Forget ingress, MCP, offline or customer acceptance.
 The separate upstream executor retains B0/M0-M3 custody; no approved batch was
 available during initial inspection. Preserve that dirty work and historical refs.
+
+## Native hands-on closeout
+
+One actual unchanged-launcher gpt-6-luna trial FAIL_NATIVE_TOOL_AVAILABILITY: the prepared code-mode-host=false configuration made the installed exec host unavailable. Native exit0, one completed turn, authoritative function0/custom1, zero command_execution items, final error objects instead of identities. Original validator failure prohibited/extra tool and independent_audit.json retained. All18 postflight entries and current pins match. No retry, repair or normalization; raw output, original failure and unconditional per-binding postflight retained. This does not qualify native usability or content fidelity.
