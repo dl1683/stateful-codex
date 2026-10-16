@@ -149,7 +149,7 @@ async fn execute(cli: Cli) -> Result<Value, (&'static str, String)> {
             return Ok(json!({
                 "protocolVersion": 1, "coverage": "bootstrapOnly",
                 "operations": ["capabilities", "root", "init", "read"],
-                "contentRead": {"projection":"attributedContent","verification":"notEvaluated","maxReplyBytes":MAX_READ_REPLY_BYTES,"requiresInstalledDomains":["project-intelligence","stateful-runtime"]},
+                "contentRead": {"projection":"attributedContent","verification":"notEvaluated","omissions":["structuredValue","evidence","premises","relations","context","applicability"],"maxReplyBytes":MAX_READ_REPLY_BYTES,"requiresInstalledDomains":["project-intelligence","stateful-runtime"]},
                 "maxReplyBytes": MAX_REPLY_BYTES, "knowledgeAvailable": false,
                 "nativeAttached": false
             }));
