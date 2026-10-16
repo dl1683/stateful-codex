@@ -18,34 +18,35 @@ use super::*;
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Durable = BTreeMap<String, Vec<Vec<String>>>;
 
-async fn domains() -> Result<PreparedDomains> {
-    Ok(PreparedDomains::prepare(&[DomainManifest { domain: "stateful-runtime", migrations: &crate::storage::MIGRATOR }]).await?)
+async fn domains(domain: &str) -> Result<PreparedDomains> {
+    Ok(PreparedDomains::prepare(&[DomainManifest { domain, migrations: &crate::storage::MIGRATOR }]).await?)
 }
 
 struct Fixture {
     _directory: tempfile::TempDir,
     location: ProjectStoreLocation,
     identity: StoreIdentity,
+    domain: &'static str,
     observer: SqliteConnection,
     run: StatefulRunId,
 }
 
 impl Fixture {
     #[expect(clippy::disallowed_methods, reason = "disposable project lease fixture")]
-    async fn new() -> Result<Self> {
+    async fn new(domain: &'static str) -> Result<Self> {
         let directory = tempfile::tempdir()?;
         let location = ProjectStoreLocation::select_project(&directory.path().abs())?;
         let identity = codex_project_store::initialize_local_store(&location).await?;
         let mut observer = SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(location.database_path().as_path()).foreign_keys(/*on*/ true)).await?;
-        domains().await?.install(&mut observer).await?;
+        domains(domain).await?.install(&mut observer).await?;
         sqlx::query("INSERT INTO stateful_runs(id,project_id,goal,mode,status,strategy_revision,revision,created_at_ms,updated_at_ms,max_continuations,max_elapsed_seconds,continuations_used) VALUES ('run',?,'Do work.','autonomous','running',0,1,100,100,4,600,0)")
             .bind(identity.project_uuid.to_string()).execute(&mut observer).await?;
         sqlx::query("INSERT INTO stateful_run_threads VALUES ('run',0,'thread')").execute(&mut observer).await?;
-        Ok(Self { _directory: directory, location, identity, observer, run: StatefulRunId::parse("run")? })
+        Ok(Self { _directory: directory, location, identity, domain, observer, run: StatefulRunId::parse("run")? })
     }
 
     async fn writer(&self) -> Result<ProjectStoreWriter> {
-        Ok(ProjectStoreWriter::open(&self.location, domains().await?, &self.identity).await?)
+        Ok(ProjectStoreWriter::open(&self.location, domains(self.domain).await?, &self.identity).await?)
     }
 
     async fn start(&self, owner: &str, lease_ms: u32) -> Result<u64> {
@@ -86,7 +87,7 @@ impl Fixture {
 
 #[tokio::test]
 async fn same_owner_takeover_and_exact_release_preserve_other_attempts() -> Result {
-    let mut f = Fixture::new().await?;
+    let mut f = Fixture::new("stateful-runtime").await?;
     assert_eq!(f.start("owner", /*lease_ms*/ 60_000).await?, 1);
     assert_eq!(f.start("owner", /*lease_ms*/ 60_000).await?, 2);
     assert_eq!(f.lease().await?, (2, Some("owner".into()), Some(60_000)));
@@ -104,7 +105,7 @@ async fn same_owner_takeover_and_exact_release_preserve_other_attempts() -> Resu
 
 #[tokio::test]
 async fn competing_lease_refusal_rolls_back_prior_writes_and_closes_owner() -> Result {
-    let mut f = Fixture::new().await?;
+    let mut f = Fixture::new("stateful-runtime").await?;
     f.start("first", /*lease_ms*/ 60_000).await?;
     let before = f.durable().await?;
     let mut writer = f.writer().await?;
@@ -124,9 +125,9 @@ enum Refusal { Foreign, Missing, Terminal, InvalidOwner }
 #[tokio::test]
 async fn ownership_state_and_input_refusals_leave_all_project_rows_unchanged() -> Result {
     for case in [Refusal::Foreign, Refusal::Missing, Refusal::Terminal, Refusal::InvalidOwner] {
-        let mut f = Fixture::new().await?;
+        let mut f = Fixture::new("stateful-runtime").await?;
         match case {
-            Refusal::Foreign => { sqlx::query("UPDATE stateful_runs SET project_id='foreign'").execute(&mut f.observer).await?; }
+            Refusal::Foreign => { sqlx::query("UPDATE stateful_runs SET project_id='00000000-0000-4000-8000-000000000001'").execute(&mut f.observer).await?; }
             Refusal::Missing => { sqlx::query("DELETE FROM stateful_runs").execute(&mut f.observer).await?; }
             Refusal::Terminal => { sqlx::query("UPDATE stateful_runs SET status='cancelled'").execute(&mut f.observer).await?; }
             Refusal::InvalidOwner => {}
@@ -146,5 +147,62 @@ async fn ownership_state_and_input_refusals_leave_all_project_rows_unchanged() -
         writer.close().await?;
         assert_eq!(f.durable().await?, before);
     }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum Operation { Start, End }
+
+#[tokio::test]
+async fn both_operations_refuse_unclaimed_domain_or_foreign_and_missing_runs() -> Result {
+    for domain in ["other-runtime", "stateful-runtime"] {
+        for case in [Refusal::Foreign, Refusal::Missing] {
+            let mut f = Fixture::new(domain).await?;
+            if domain == "stateful-runtime" {
+                match case {
+                    Refusal::Foreign => { sqlx::query("UPDATE stateful_runs SET project_id='00000000-0000-4000-8000-000000000001'").execute(&mut f.observer).await?; }
+                    Refusal::Missing => { sqlx::query("DELETE FROM stateful_runs").execute(&mut f.observer).await?; }
+                    Refusal::Terminal | Refusal::InvalidOwner => unreachable!(),
+                }
+            }
+            for operation in [Operation::Start, Operation::End] {
+                let before = f.durable().await?;
+                let mut writer = f.writer().await?;
+                let mut transaction = writer.begin_write().await?;
+                sqlx::query("UPDATE stateful_runs SET updated_at_ms=999").execute(transaction.connection()).await?;
+                let error = match operation {
+                    Operation::Start => commit_project_verification_start(transaction, &f.run, "owner", /*lease_ms*/ 60_000).await.map(|_| ()).unwrap_err(),
+                    Operation::End => commit_project_verification_end(transaction, &f.run, "owner", /*attempt*/ 1).await.unwrap_err(),
+                };
+                if domain == "other-runtime" {
+                    assert!(matches!(error, ProjectVerificationError::Writer(ProjectWriteError::Registry(codex_project_store::StoreRegistryError::IncompatibleHistory))));
+                } else {
+                    assert!(match case {
+                        Refusal::Foreign => matches!(error, ProjectVerificationError::ProjectMismatch),
+                        Refusal::Missing => matches!(error, ProjectVerificationError::Runtime(StatefulRunStoreError::RunNotFound(_))),
+                        Refusal::Terminal | Refusal::InvalidOwner => unreachable!(),
+                    });
+                }
+                writer.close().await?;
+                assert_eq!(f.durable().await?, before);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn successful_start_commits_prior_domain_writes_and_terminal_end_is_allowed() -> Result {
+    let mut f = Fixture::new("stateful-runtime").await?;
+    let mut writer = f.writer().await?;
+    let mut transaction = writer.begin_write().await?;
+    sqlx::query("UPDATE stateful_runs SET updated_at_ms=117").execute(transaction.connection()).await?;
+    assert_eq!(commit_project_verification_start(transaction, &f.run, "owner", /*lease_ms*/ 60_000).await?, 1);
+    writer.close().await?;
+    let updated: i64 = sqlx::query_scalar("SELECT updated_at_ms FROM stateful_runs WHERE id='run'").fetch_one(&mut f.observer).await?;
+    assert_eq!((updated, f.lease().await?), (117, (1, Some("owner".into()), Some(60_000))));
+    sqlx::query("UPDATE stateful_runs SET status='cancelled'").execute(&mut f.observer).await?;
+    f.end("owner", /*attempt*/ 1).await?;
+    assert_eq!(f.lease().await?, (1, None, None));
     Ok(())
 }
