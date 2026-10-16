@@ -1,11 +1,14 @@
 //! Engine-independent project-store placement, metadata and local opening.
 //! Native engine storage routing remains unchanged.
 
+mod domains;
 mod filesystem;
 mod location;
 mod opener;
 mod registry;
 
+pub use domains::DomainManifest;
+pub use domains::PreparedDomains;
 pub use filesystem::FilesystemQualificationError;
 pub use filesystem::qualify_local_filesystem;
 pub use location::ProjectStoreLocation;

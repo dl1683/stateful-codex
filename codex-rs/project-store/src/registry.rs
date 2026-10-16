@@ -5,7 +5,7 @@ use sqlx::SqliteConnection;
 use thiserror::Error;
 use uuid::Uuid;
 
-const SCHEMA: &str = include_str!("../migrations/0001_bootstrap.sql");
+pub(crate) const SCHEMA: &str = include_str!("../migrations/0001_bootstrap.sql");
 const VERSION: i64 = 1;
 
 #[derive(sqlx::FromRow)]
@@ -71,7 +71,9 @@ pub async fn read_identity(
     Ok(identity)
 }
 
-async fn validate_header(connection: &mut SqliteConnection) -> Result<(), StoreRegistryError> {
+pub(crate) async fn validate_header(
+    connection: &mut SqliteConnection,
+) -> Result<(), StoreRegistryError> {
     let application_id: i64 = sqlx::query_scalar("PRAGMA application_id")
         .fetch_one(&mut *connection)
         .await?;
@@ -84,7 +86,9 @@ async fn validate_header(connection: &mut SqliteConnection) -> Result<(), StoreR
     Ok(())
 }
 
-async fn validate(connection: &mut SqliteConnection) -> Result<StoreIdentity, StoreRegistryError> {
+pub(crate) async fn validate(
+    connection: &mut SqliteConnection,
+) -> Result<StoreIdentity, StoreRegistryError> {
     validate_header(connection).await?;
     let actual: Vec<Option<String>> = sqlx::query_scalar(
         "SELECT CASE WHEN octet_length(sql) <= 4096 THEN sql END
@@ -100,6 +104,30 @@ async fn validate(connection: &mut SqliteConnection) -> Result<StoreIdentity, St
     if !actual.iter().map(Option::as_deref).eq(expected) {
         return Err(StoreRegistryError::UnknownSchema);
     }
+    let identity = validate_identity(connection, VERSION).await?;
+    let history: Vec<(Option<String>, i64, Option<Vec<u8>>)> = sqlx::query_as(
+        "SELECT CASE WHEN octet_length(domain) <= 64 THEN domain END, version,
+                CASE WHEN octet_length(digest) = 32 THEN digest END
+         FROM project_store_migrations ORDER BY domain, version LIMIT 2",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    if history
+        != vec![(
+            Some("project-store".to_string()),
+            VERSION,
+            Some(Sha256::digest(SCHEMA.as_bytes()).to_vec()),
+        )]
+    {
+        return Err(StoreRegistryError::IncompatibleHistory);
+    }
+    Ok(identity)
+}
+
+pub(crate) async fn validate_identity(
+    connection: &mut SqliteConnection,
+    version: i64,
+) -> Result<StoreIdentity, StoreRegistryError> {
     let identities: Vec<StoredIdentity> = sqlx::query_as(
         "SELECT CASE WHEN octet_length(project_uuid) = 36 THEN project_uuid END AS project_uuid,
                 CASE WHEN octet_length(store_uuid) = 36 THEN store_uuid END AS store_uuid,
@@ -121,7 +149,7 @@ async fn validate(connection: &mut SqliteConnection) -> Result<StoreIdentity, St
     else {
         return Err(StoreRegistryError::InvalidIdentity);
     };
-    if (*format, *reader, *writer) != (VERSION, VERSION, VERSION) {
+    if (*format, *reader, *writer) != (version, version, version) {
         return Err(StoreRegistryError::UnsupportedFormat);
     }
     let project_uuid = Uuid::parse_str(project).map_err(|_| StoreRegistryError::InvalidIdentity)?;
@@ -132,22 +160,6 @@ async fn validate(connection: &mut SqliteConnection) -> Result<StoreIdentity, St
         || store_uuid.to_string() != *store
     {
         return Err(StoreRegistryError::InvalidIdentity);
-    }
-    let history: Vec<(Option<String>, i64, Option<Vec<u8>>)> = sqlx::query_as(
-        "SELECT CASE WHEN octet_length(domain) <= 64 THEN domain END, version,
-                CASE WHEN octet_length(digest) = 32 THEN digest END
-         FROM project_store_migrations ORDER BY domain, version LIMIT 2",
-    )
-    .fetch_all(&mut *connection)
-    .await?;
-    if history
-        != vec![(
-            Some("project-store".to_string()),
-            VERSION,
-            Some(Sha256::digest(SCHEMA.as_bytes()).to_vec()),
-        )]
-    {
-        return Err(StoreRegistryError::IncompatibleHistory);
     }
     Ok(StoreIdentity {
         project_uuid,

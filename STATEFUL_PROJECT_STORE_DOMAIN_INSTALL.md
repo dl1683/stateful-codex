@@ -1,5 +1,8 @@
 # S1 domain installation: explicit format transition
 
+Review units: first manifest preparation/snapshot admission; then explicit atomic
+installation and its rollback/contention witnesses. Neither activates native use.
+
 Authority: the owner-invoked rebuild strategy and
 STATEFUL_PROJECT_STORE_READS_NEXT_20261015.md. This slice is inert: no native
 home, application attachment, legacy import, or completion-fence change.

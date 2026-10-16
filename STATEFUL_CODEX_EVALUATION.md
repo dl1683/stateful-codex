@@ -909,3 +909,10 @@ show inherited codepage65001, so the native329-byte question-mark failure was NO
 reproduced/fixed. Initial ContainsKey CLM probe errors retained, not counted as
 passes; all18 children collected. No native sandbox, source-matched native build,
 policy change or product patch. Details: STATEFUL_HAL_CHILD_SHELL_DIAGNOSTIC_20261015.md.
+
+## 2026-10-16 S1 domain manifest preparation and snapshot admission
+
+- Inert project-store API prepares trusted compiled domain SQL before any destination lock, and admits an exact format2 schema/history under one snapshot. Bootstrap migration1 and schema remain immutable; actual domain version gaps and SHA256 SQL digests are retained. Existing bootstrap APIs still refuse application stores. No public destination installer in this first review unit.
+- Final component gates Windows35/Linux35 passed, zero skips/retries; scoped fix clean. Final format receipt is recorded separately. No tests after cleanup. Synthetic fixtures cover schema/history/format refusal, kernel mutation, invalid manifests and read-only admission; this is not real-domain installation or populated conversion.
+- Initial PowerShell5 wrapper stopped on just stderr; retained. Initial unsplit prototype Windows36 passed, then the code was split to keep each complex review unit below500lines. Those prototype results do not replace final-unit gates or add to their counts.
+- No home conversion, installed-native change, effective knowledge recall, atomic completion, old-writer barrier, MCP, offline or HAL customer claim. Existing native edit and exact-Marathi failures remain open. Next unit adds explicit atomic installation with rollback/contention witnesses, followed by real-schema scratch qualification.

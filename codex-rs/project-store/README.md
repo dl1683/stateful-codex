@@ -33,7 +33,8 @@ It returns stable project/store UUIDs only after commit. `read_identity` validat
 under a read snapshot and works on a read-only connection. Neither opens files.
 The opener must establish fresh-file custody; an unknown preexisting empty file
 is not permission to initialize it. Configure a bounded busy timeout first.
-Only bootstrap format/domain1 is supported; foreign or incomplete stores refuse.
+These bootstrap APIs support only format/domain1; foreign, incomplete or
+application-domain stores refuse without automatic adoption.
 
 `qualify_local_filesystem(&path)` checks an existing resolved file or directory.
 A root's filesystem does not establish a descendant store directory/file's
@@ -63,3 +64,14 @@ not comprehensive sync detection, hostile-SQLite resource qualification or a
 security boundary against concurrent same-user replacement. No canonical domain
 writer or native attachment is supplied. Writable-copy adoption, WAL domain pools,
 legacy conversion and atomic completion remain gated separately.
+
+`PreparedDomains::prepare` accepts trusted application-owned `DomainManifest`
+values and constructs an exact format2 schema/history in isolated memory.
+Its `read_identity` admits only that complete schema and immutable migration
+history, under one read snapshot; a read-only connection is supported. Actual
+migration numbers (including gaps) and SHA256 of SQL bytes identify each domain.
+Kernel UUIDs/schema and bootstrap migration1 stay unchanged. Manifests must
+contain forward, transactional main-database SQL without external effects.
+Preparation/admission supplies no public installer or native attachment in this
+review unit. Transactional installation follows separately. Legacy data import,
+application eligibility and effective knowledge reads remain unqualified.
