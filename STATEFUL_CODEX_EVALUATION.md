@@ -1123,3 +1123,45 @@ Exact closeout precedes inactive promotion. Stream/responses/worker/lifecycle,
 native Unicode/final escaping, offline/HAL/customer and first project database/
 conversion/old-writer barrier/lock removal remain OPEN. Superseded unmerged draft
 branch retained without blind promotion. No upstream batch approved or touched.
+
+
+## 2026-10-16 prepared learning precondition and closed console stream
+
+Inactive PI source6e8b34337d (345additions/6files) prepares an opaque negative
+historical-learning result in one admitted read snapshot, then revalidates only
+identity/clocks/coverage under the SAME final writer. Inclusive agent history,
+retired/noncurrent revisions and relations retain legacy semantics; late writes
+refuse/rollback. Caller still must bind persisted run/start and preserve other
+policies. Stream2e23c2002f (221add/2delete/4files) validates exact header length
+before allocation/body, handles short/interrupted IO, requires bounded EOF probe
+and delegates strict codec. Caller must close/unblock/deadline the blocking pipe.
+Fresh final_source_review4 APPROVES BOTH EXACT SOURCES; no native route activated.
+
+Windows/WSL each162PI PASS/1intentional worker skip,11CLI PASS0skip,10stream PASS0skip.
+Scoped fix/final fmt0, no postcleanup tests. Windows PI gate has one explicit
+CLI-only two-error-arm source adjustment; PI closure unchanged, global equality
+NOT claimed there. Both CLI/Linux PI/stream maps stable; qualification_audit.json
+and fresh review verify. Old draft Linux timeout at60s remains failed/unexplained.
+
+Local locked/offline helper build2 PASS8.52s/jobs2/globalmutex/RAM23221225472;
+absolute-macro build1 failure retained. Fresh review precedes7case direct2
+PASS_SYNTHETIC_COMPONENTS_ONLY: complete independent53table/167object/schema/history/
+all-row three-image deltas including FTS commit boundaries, exact stream bytes,
+natural bounded drain, zero active BEFORE/after cleanup and root0. Original
+direct1 lifecycle activeBefore1 failure stays failed; postmortem diagnostic only.
+
+Fresh frozen approval precedes ONE actual unchanged-launcher/gpt-6-luna trial2:
+two exact sequential custom calls/other0, full raw/public helper replies, artifact
+and rollback/frame checks match; activeBefore/after0/root0. Independent closed
+recheck100pins/19158source and actual images PASS. The trial remains FAIL final
+contract: final/-o preserve execution envelopes, not the expected parsed payloads.
+The prompt's stdout-parsing ambiguity limits inference; no payload loss/new source
+defect established, no retry/normalization, no model usability PASS or judge.
+
+Packets STATEFUL_PROJECT_NO_LEARNING_PRECONDITION_WITNESS_20261016.md and
+STATEFUL_HAL_CONSOLE_STREAM_WITNESS_20261016.md retain scope. External evidence
+reports/stateful_rebuild/{learning_20261016,console_stream_20261016}. Exact closeout
+precedes inactive source promotion. First project-owned database milestone/native
+routing/populated import/old-writer barrier/full certificate/fence removal, actual
+Forget/compaction/MCP, native Marathi/final escaping, offline/HAL/customer remain
+OPEN. Protected upstream dirty B0 untouched; no approved batch or native install.
