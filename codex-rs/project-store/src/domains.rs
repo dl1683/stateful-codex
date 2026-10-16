@@ -198,6 +198,23 @@ impl PreparedDomains {
         Ok(identity)
     }
 
+    pub(crate) fn matches_domain(&self, manifest: &DomainManifest<'_>) -> bool {
+        let migrations = manifest.migrations;
+        !migrations.no_tx
+            && migrations.iter().len() > 0
+            && migrations.iter().all(|migration| {
+                !migration.no_tx && migration.migration_type == sqlx::migrate::MigrationType::Simple
+            })
+            && self
+                .migrations
+                .iter()
+                .filter(|(domain, _, _)| domain == manifest.domain)
+                .map(|(_, version, sql)| (*version, sql.as_str()))
+                .eq(migrations
+                    .iter()
+                    .map(|migration| (migration.version, migration.sql.as_str())))
+    }
+
     async fn apply(&self, connection: &mut SqliteConnection) -> Result<(), StoreRegistryError> {
         sqlx::raw_sql(TRANSITION).execute(&mut *connection).await?;
         for (domain, version, sql) in
@@ -265,22 +282,7 @@ impl ProjectStoreReader {
         self,
         manifest: &DomainManifest<'_>,
     ) -> Result<Self, StoreRegistryError> {
-        let migrations = manifest.migrations;
-        let matches = !migrations.no_tx
-            && migrations.iter().len() > 0
-            && migrations.iter().all(|migration| {
-                !migration.no_tx && migration.migration_type == sqlx::migrate::MigrationType::Simple
-            })
-            && self
-                .domains
-                .migrations
-                .iter()
-                .filter(|(domain, _, _)| domain == manifest.domain)
-                .map(|(_, version, sql)| (*version, sql.as_str()))
-                .eq(migrations
-                    .iter()
-                    .map(|migration| (migration.version, migration.sql.as_str())));
-        if !matches {
+        if !self.domains.matches_domain(manifest) {
             self.connection.close().await?;
             return Err(StoreRegistryError::IncompatibleHistory);
         }

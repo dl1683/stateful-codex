@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+codex-project-store = { workspace = true }
 codex-state = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

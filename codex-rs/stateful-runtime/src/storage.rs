@@ -183,33 +183,18 @@ impl StatefulRunStore {
         acceptance: &AcceptanceCommit,
         obligation: Option<(String, NewObligation)>,
     ) -> Result<(StatefulRun, Option<StatefulObligation>), StatefulRunStoreError> {
-        update.validate()?;
-        if update.status != StatefulRunStatus::Completed {
-            return Err(StatefulRunStoreError::CompletionStatusRequired);
-        }
-        if let Some((obligation_id, obligation)) = &obligation {
-            validate_record_id(obligation_id)?;
-            obligation.validate()?;
-            if obligation.run_id != *id {
-                return Err(StatefulRunStoreError::ObligationRunMismatch);
-            }
-            if !obligation.packet.blockers.is_empty() {
-                return Err(StatefulRunStoreError::AcceptanceGate(
-                    "the final obligation declares open blockers".to_string(),
-                ));
-            }
-        }
+        crate::project_completion::validate_request(&update, obligation.as_ref(), id)?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let run = update_run_in_transaction(&mut transaction, id, update, Some(acceptance)).await?;
-        let obligation = match obligation {
-            Some((obligation_id, obligation)) => Some(
-                append_obligation_in_transaction(&mut transaction, obligation_id, obligation)
-                    .await?,
-            ),
-            None => None,
-        };
+        let result = crate::project_completion::complete_on(
+            &mut transaction,
+            id,
+            update,
+            acceptance,
+            obligation,
+        )
+        .await?;
         transaction.commit().await?;
-        Ok((run, obligation))
+        Ok(result)
     }
 
     pub async fn update_mode(
@@ -594,7 +579,7 @@ impl StatefulRunStore {
     }
 }
 
-async fn update_run_in_transaction(
+pub(crate) async fn update_run_in_transaction(
     connection: &mut SqliteConnection,
     id: &StatefulRunId,
     update: StatefulRunUpdate,

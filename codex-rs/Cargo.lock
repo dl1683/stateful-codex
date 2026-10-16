@@ -4722,6 +4722,7 @@ dependencies = [
 name = "codex-stateful-runtime"
 version = "0.159.2"
 dependencies = [
+ "codex-project-store",
  "codex-state",
  "codex-utils-absolute-path",
  "pretty_assertions",

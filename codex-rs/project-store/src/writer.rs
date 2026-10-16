@@ -8,6 +8,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqliteSynchronous;
 use thiserror::Error;
 
+use crate::DomainManifest;
 use crate::PreparedDomains;
 use crate::ProjectStoreLocation;
 use crate::ProjectStoreOpenError;
@@ -160,6 +161,15 @@ impl ProjectStoreWriter {
 }
 
 impl ProjectWriteTransaction<'_> {
+    /// Require a domain owner's actual compiled migration list before its SQL.
+    /// This is in-process admission, not authentication of a foreign actor.
+    pub fn require_domain(&self, manifest: &DomainManifest<'_>) -> Result<(), ProjectWriteError> {
+        if !self.domains.matches_domain(manifest) {
+            return Err(StoreRegistryError::IncompatibleHistory.into());
+        }
+        Ok(())
+    }
+
     /// Identity checked under this writer reservation, not domain authorization.
     pub fn identity(&self) -> &StoreIdentity {
         self.identity
