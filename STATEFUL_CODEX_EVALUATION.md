@@ -1070,3 +1070,34 @@ native lock removal, compaction/Forget/MCP, Unicode/offline/HAL/customer and fir
 company-brain milestone remain OPEN. Writer LF and Marathi/final-escaping failures
 remain failures. The separate in-progress knowledge-clock branch is not qualified
 by this witness.
+
+## 2026-10-16 same-guard project knowledge clocks
+
+Inactive PI source2e90c89adc adds332lines: guard-consuming exact manifest/identity,
+lossless project/retirement clocks and complete identity coverage under the final
+writer reservation. No corpus scan or separate fence. Caller ownership/findings/
+source/steering/runtime validation still required; further writes can invalidate
+the check. Windows3/WSL1 each155PASS/1intentional worker skip with passing process
+parent,9568equal maps. Initial missing-parent-method/test-uuid failure retained;
+explicit runtime parent/public identity fixture fixed it. Scoped fix/fmt0 after
+tests; no postcleanup retest. Fresh source/helper approval recorded.
+
+Local locked/offline helper_build1 passes1m22, mutex/jobs2/RAM floor,9568equal
+source/aux maps. Fresh direct_review1 precedes4case component PASS: exact success,
+stale acceptance, late conflict, and synthetic generation1 refusal before runtime
+call. Whole67table/35migration/schema/header/row/lease checks, no actual checker,
+native Forget or production import. Native trial1 UNEXECUTED after review found
+raw payload body/final comparison gap. Bound strict parser+1valid/12refusal probe
+fix it without weakening earlier checks; fault/source-audit probes retained.
+
+Fresh luna_review2 precedes ONE actual unchanged-launcher/gpt-6-luna trial2 PASS:
+2exact sequential custom cells/commands, one-LF literals, raw/public stdout BYTES,
+complete typed replies/raw-public finals/-o, counters2/prohibited0, exact DB deltas,
+native0/Job0. Independent readonly recheck74pins/9568leaves/12closed DBs passes.
+Source-matched external helper, stock provider/requirements/ChatGPT admission;
+normal engine-home writes possible, no native install/judge/cloud build/test.
+Main-docs merge67066be198 preserves Rust treeb9f104f4d72848372d15a290059ca4cd8eedbc35;
+source frame2e90 is now historical. Packet STATEFUL_PROJECT_KNOWLEDGE_CLOCK_WITNESS_20261016.md.
+Exact closeout precedes promotion; no native routing/import/old-writer barrier/
+full certificate/fence removal/compaction/actual Forget/MCP/Unicode/offline/HAL/
+customer or first company-brain milestone acceptance. Old failures stay failures.

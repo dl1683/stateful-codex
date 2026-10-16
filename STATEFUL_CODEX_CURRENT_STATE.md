@@ -31,7 +31,12 @@ recorded Windows/WSL75 runtime+51store gates. Its new
 synthetic component cases and ONE actual unchanged-launcher/Luna success/late-rollback
 trial, including exact tool/final JSON and full database checks. The earlier
 [failed preparation](./STATEFUL_RUNTIME_ADAPTER_PREPARATION_20261016.md) remains failed.
-The component is inactive; exact closeout approval gates its source promotion.
+The component is source-promoted and inactive; its exact closeout is recorded.
+The separate [knowledge clock guard](./STATEFUL_PROJECT_KNOWLEDGE_CLOCK_WITNESS_20261016.md)
+has source approval,155-test Windows/WSL gates, a4case component PASS and ONE
+actual launcher/Luna success/retirement-generation-refusal PASS. It validates
+clock preconditions only, not full ownership/source/steering policy or native
+Forget. Exact closeout approval precedes its source promotion.
 Native completion certification must
 also validate knowledge, eligibility, steering and source bindings in one guard.
 
