@@ -1101,3 +1101,25 @@ source frame2e90 is now historical. Packet STATEFUL_PROJECT_KNOWLEDGE_CLOCK_WITN
 Exact closeout precedes promotion; no native routing/import/old-writer barrier/
 full certificate/fence removal/compaction/actual Forget/MCP/Unicode/offline/HAL/
 customer or first company-brain milestone acceptance. Old failures stay failures.
+
+## 2026-10-16 inactive HAL closed console codec
+
+Closed request codec source1f14bac51bece417712a5821008175bb3de30be2:
+38 mechanical plus482 complex changed lines, nine files/518 net additions.
+Strict original-byte JSON after shape checks, bounded frames/encode, lossless u16,
+explicit nonce/width/non-owning handle refs. No active launcher/worker/OS operation.
+Windows2/WSL2 each5PASS0skip/9574equal inputs; Bazel-lock/scoped fix/fmt0,
+no postcleanup retest. Source/helper review2 approved; locked/offline local helper
+build3.96s under mutex/jobs2/RAM floor. Initial Serde defect and controller1
+preparation failure retained; no helper/model ran in failed preparation1.
+Corrected controller independently computes all bytes. Fresh frozen trial review1
+precedes ONE actual unchanged-launcher/Luna trial2 PASS: two exact one-LF custom
+cells, complete raw/public result/final bytes and typed JSON/-o, counters2/other0,
+eight control/native artifacts match oracle, native0/Job0. Readonly recheck57pins/
+9574source/eight artifacts passes. No judge/cloud/native install. All nine codec
+files unchanged by automatic main merge; frozen whole-source claim is historical.
+Packet STATEFUL_HAL_CONSOLE_CODEC_WITNESS_20261016.md; evidence console_wire_20261016.
+Exact closeout precedes inactive promotion. Stream/responses/worker/lifecycle,
+native Unicode/final escaping, offline/HAL/customer and first project database/
+conversion/old-writer barrier/lock removal remain OPEN. Superseded unmerged draft
+branch retained without blind promotion. No upstream batch approved or touched.

@@ -36,7 +36,11 @@ The separate [knowledge clock guard](./STATEFUL_PROJECT_KNOWLEDGE_CLOCK_WITNESS_
 has source approval,155-test Windows/WSL gates, a4case component PASS and ONE
 actual launcher/Luna success/retirement-generation-refusal PASS. It validates
 clock preconditions only, not full ownership/source/steering policy or native
-Forget. Exact closeout approval precedes its source promotion.
+Forget. Exact closeout is recorded; the source is promoted and inactive.
+The [HAL closed console codec](./STATEFUL_HAL_CONSOLE_CODEC_WITNESS_20261016.md)
+adds an inactive request encoder/decoder, with Windows/WSL gates and one actual
+launcher/Luna artifact/transport PASS. No stream, worker or native console repair
+is delivered. Earlier Unicode/final-escaping failures remain OPEN.
 Native completion certification must
 also validate knowledge, eligibility, steering and source bindings in one guard.
 
