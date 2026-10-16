@@ -22,5 +22,8 @@ filegroup(
 filegroup(
     name = "project-store-migrations",
     srcs = glob(["migrations/**"]),
-    visibility = ["//codex-rs/stateful-memory:__pkg__"],
+    visibility = [
+        "//codex-rs/ext/stateful:__pkg__",
+        "//codex-rs/stateful-memory:__pkg__",
+    ],
 )

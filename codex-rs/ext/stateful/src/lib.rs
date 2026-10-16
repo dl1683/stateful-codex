@@ -699,3 +699,7 @@ mod freshness_tests;
 #[cfg(test)]
 #[path = "packet_budget_tests.rs"]
 mod packet_budget_tests;
+
+#[cfg(test)]
+#[path = "project_completion_tests.rs"]
+mod project_completion_tests;
