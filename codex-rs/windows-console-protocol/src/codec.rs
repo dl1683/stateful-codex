@@ -126,11 +126,15 @@ pub fn decode_request(frame: &[u8], context: &ReceiveContext) -> Result<Request,
     }
     let shape: serde_json::Value =
         serde_json::from_slice(&frame[4..]).map_err(|_| ProtocolError::Payload)?;
-    if ["", "/request", "/request/handles"].iter().any(|path|
-        !shape.pointer(path).is_some_and(serde_json::Value::is_object))
-        || ["/type", "/request/outputMode"].iter().any(|path|
-            !shape.pointer(path).is_some_and(serde_json::Value::is_string))
-    {
+    if ["", "/request", "/request/handles"].iter().any(|path| {
+        !shape
+            .pointer(path)
+            .is_some_and(serde_json::Value::is_object)
+    }) || ["/type", "/request/outputMode"].iter().any(|path| {
+        !shape
+            .pointer(path)
+            .is_some_and(serde_json::Value::is_string)
+    }) {
         return Err(ProtocolError::Payload);
     }
     let envelope: Envelope =

@@ -41,7 +41,9 @@ fn raw(payload: &[u8]) -> Vec<u8> {
 }
 
 fn assert_refused(request: &Request, context: &ReceiveContext) {
-    let payload = serde_json::to_vec(&serde_json::json!({"version":1,"type":"request","request":request})).unwrap();
+    let payload =
+        serde_json::to_vec(&serde_json::json!({"version":1,"type":"request","request":request}))
+            .unwrap();
     assert_eq!(
         encode_request(request, context),
         Err(ProtocolError::Admission)
@@ -53,7 +55,10 @@ fn assert_refused(request: &Request, context: &ReceiveContext) {
 }
 
 fn assert_bad_payload(payload: &[u8], context: &ReceiveContext) {
-    assert_eq!(decode_request(&raw(payload), context), Err(ProtocolError::Payload));
+    assert_eq!(
+        decode_request(&raw(payload), context),
+        Err(ProtocolError::Payload)
+    );
 }
 
 fn assert_roundtrip(request: &Request, context: &ReceiveContext) {
@@ -192,7 +197,11 @@ fn json_direction_version_duplicates_nested_unknowns_and_types_refuse() {
         ("", "type", serde_json::json!({"request":null})),
         ("", "unknown", serde_json::json!(0)),
         ("/request", "unknown", serde_json::json!(0)),
-        ("/request", "outputMode", serde_json::json!({"separate":null})),
+        (
+            "/request",
+            "outputMode",
+            serde_json::json!({"separate":null}),
+        ),
         ("/request/handles", "unknown", serde_json::json!(0)),
         (
             "/request/handles",
@@ -212,11 +221,30 @@ fn json_direction_version_duplicates_nested_unknowns_and_types_refuse() {
     let req = &envelope["request"];
     let handles = &req["handles"];
     for (path, array) in [
-        ("", serde_json::json!([1,"request",req])),
-        ("/request", serde_json::json!([req["nonce"],req["application"],req["commandLine"],req["cwd"],
-            req["startupDesktop"],req["environmentBlock"],req["handles"],req["outputMode"]])),
-        ("/request/handles", serde_json::json!([handles["restrictedToken"],handles["innerJob"],
-            handles["stdin"],handles["stdout"],handles["stderr"]])),
+        ("", serde_json::json!([1, "request", req])),
+        (
+            "/request",
+            serde_json::json!([
+                req["nonce"],
+                req["application"],
+                req["commandLine"],
+                req["cwd"],
+                req["startupDesktop"],
+                req["environmentBlock"],
+                req["handles"],
+                req["outputMode"]
+            ]),
+        ),
+        (
+            "/request/handles",
+            serde_json::json!([
+                handles["restrictedToken"],
+                handles["innerJob"],
+                handles["stdin"],
+                handles["stdout"],
+                handles["stderr"]
+            ]),
+        ),
     ] {
         let mut invalid = envelope.clone();
         *invalid.pointer_mut(path).unwrap() = array;
