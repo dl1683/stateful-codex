@@ -113,17 +113,10 @@ async fn auth_free_subprocess_reads_two_projects_and_roundtrips_escaped_content(
             let cap_output = discovery.output().unwrap();
             assert!(cap_output.status.success() && cap_output.stderr.is_empty());
             let cap: Value = serde_json::from_slice(&cap_output.stdout).unwrap();
+            let labels = ["projection", "verification", "omissions"];
             assert_eq!(
-                json!([
-                    cap["result"]["contentRead"]["projection"],
-                    cap["result"]["contentRead"]["verification"],
-                    cap["result"]["contentRead"]["omissions"]
-                ]),
-                json!([
-                    reply["result"]["projection"],
-                    reply["result"]["verification"],
-                    reply["result"]["omissions"]
-                ]),
+                labels.map(|field| &cap["result"]["contentRead"][field]),
+                labels.map(|field| &reply["result"][field]),
             );
             let mut normalized = reply;
             normalized["capabilitiesWire"] = String::from_utf8(cap_output.stdout).unwrap().into();
