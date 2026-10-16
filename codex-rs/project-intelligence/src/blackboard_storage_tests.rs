@@ -39,6 +39,9 @@ use crate::ProjectRelativePath;
 use crate::RegionAnchor;
 use crate::RootBlackboardQuery;
 
+#[path = "blackboard_storage/effective_hit_tests.rs"]
+mod effective_hit_tests;
+
 fn fingerprint(value: &str) -> SourceFingerprint {
     SourceFingerprint::parse(value).expect("valid fingerprint")
 }

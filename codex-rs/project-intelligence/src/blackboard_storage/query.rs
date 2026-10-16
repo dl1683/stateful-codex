@@ -42,22 +42,7 @@ impl BlackboardStore {
         entry_id: &BlackboardEntryId,
     ) -> Result<Option<BlackboardHit>, BlackboardStoreError> {
         let mut transaction = self.pool.begin().await?;
-        let hit =
-            if super::identity::entry_source_eligible_on(&mut transaction, project_id, entry_id)
-                .await?
-            {
-                Some(
-                    load_hit(
-                        &mut transaction,
-                        project_id,
-                        entry_id.to_string(),
-                        EntryReader::ModelTool,
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
+        let hit = super::effective_hit::read_on(&mut transaction, project_id, entry_id).await?;
         transaction.commit().await?;
         Ok(hit)
     }

@@ -34,6 +34,7 @@ mod capsule_generation_tests;
 mod capture_write;
 mod context_bounds;
 mod current_words;
+mod effective_hit;
 mod fence;
 mod identity;
 mod knowledge;
