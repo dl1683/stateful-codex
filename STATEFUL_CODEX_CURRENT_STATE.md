@@ -8,7 +8,7 @@ execution order is the owner-invoked
 [Codex/Droid rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md):
 S0/S1, then M0-M3, then S2/S3 before native activation.
 
-Code checkpoint4216c2c85 contains reviewed project-local resolution, bootstrap
+Code checkpoint cc8fc834b contains reviewed project-local resolution, bootstrap
 identity/registry, filesystem admission, closed-stage publication and bounded
 metadata CLI reads/explicit initialization, plus format2 compiled-domain
 preparation, atomic installation, an owned registered read connection and admitted
@@ -16,7 +16,12 @@ read-snapshot guards. Real
 intelligence/runtime schemas were installed together in fresh scratch stores and
 read by separate frozen helpers. These are inert components; native
 knowledge/runtime still use the legacy stores. Effective neutral knowledge reads,
-application facades, populated conversion and atomic completion are not active.
+effective content facades, populated conversion and atomic completion are not active.
+The additive ProjectKnowledgeReader now validates fresh intelligence ownership,
+clocks and coverage under admitted snapshots; it returns metadata only. Its
+[separate helper/Luna witness](./STATEFUL_PROJECT_KNOWLEDGE_WITNESS_20261016.md)
+passed with large clocks and incomplete coverage. Windows142 passed; full Linux
+qualification remains held on two baseline-reproduced timeouts.
 The owner's first milestone is NOT fulfilled. See the latest appended entries in
 [the evaluation ledger](./STATEFUL_CODEX_EVALUATION.md), the
 [independent frozen-reader witness](./STATEFUL_PROJECT_STORE_WITNESS_20261015.md),
@@ -38,13 +43,17 @@ HAL H1 transport remains FAILED; the bounded ASCII CLI is not a repair for it.
 retains the failures and diagnostic controls. Customer/offline acceptance is open.
 
 The [next-read handoff](./STATEFUL_PROJECT_STORE_READS_NEXT_20261015.md) marks which
-earlier bootstrap limitations have been superseded. Prototype console inheritance
-is current-user/self-imposed CLM evidence only, not a native policy or transport
-repair. All clean active rebuild/feature worktrees were fast-forwarded to reviewed
+earlier bootstrap limitations have been superseded. The [restricted-token console mechanism](./STATEFUL_HAL_RESTRICTED_CONSOLE_WITNESS_20261016.md)
+now reproduces CP437 corruption versus exact CP65001 inheritance under natural
+CLM and a denied write canary. It is separate from native policy/transport repair;
+full ACL/WFP/IPC/package/cancellation/normal-descendant acceptance remains open. All clean active rebuild/feature worktrees were fast-forwarded to reviewed
 main during this run; the dirty upstream branch remains separately owned.
 The [next effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
 is a staged source plan. Stage1's snapshot guard is now landed and witnessed;
-the later effective facade and CLI remain unimplemented.
+the behavior-preserving exact-hit extraction and metadata-only domain admission
+are landed and witnessed. Bounded attributed-content projection and its neutral
+CLI remain unimplemented; the [scalar contract](./STATEFUL_PROJECT_STORE_SCALAR_READ_CONTRACT.md)
+freezes their required bounds and explicit omissions.
 
 Updated 2026-10-12 (a snapshot: landings of 2026-10-13 and 2026-10-14 are summarised in the note at the top of `STATEFUL_CODEX_EVALUATION.md`, which is the current pointer until this page is refreshed). This page says what the published code does, what has and
 has not been measured, where unmerged work lives, and how to operate the

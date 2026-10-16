@@ -10,8 +10,11 @@ domain matching. See DOMAIN_INSTALL, DOMAIN_WITNESS and REGISTERED_READER/READER
 packets. The old bootstrap CLI still refuses application stores as designed; no
 effective knowledge read command or native attachment has been activated.
 
-Next implement step3's narrow application-domain facade, then step4's effective
-CLI reads with existing eligibility/snapshot/retirement logic and escaped envelopes.
+Step3 now has metadata-only ProjectKnowledgeReader admission with a separate
+[full-schema helper/Luna witness](./STATEFUL_PROJECT_KNOWLEDGE_WITNESS_20261016.md).
+Next add the bounded attributed-content loader/facade frozen in the
+[scalar contract](./STATEFUL_PROJECT_STORE_SCALAR_READ_CONTRACT.md), then step4's
+neutral CLI. It must preserve eligibility/snapshot/retirement logic and escaped bounds.
 The kernel project UUID versus legacy intelligence project_id mapping remains an
 explicit design decision; schema installation did not solve populated ownership.
 Domain upgrades, M0/B0 cohort qualification, S2 and S3 remain separate gates. The
@@ -21,8 +24,12 @@ as current limitations of the new API.
 The staged [effective-read design](./STATEFUL_PROJECT_STORE_EFFECTIVE_READ_DESIGN_20261016.md)
 selected an admitted snapshot guard, now landed at4216c2c85 with its
 [separate witness](./STATEFUL_PROJECT_STORE_SNAPSHOT_WITNESS_20261016.md).
-Next is behavior-preserving eligibility extraction and separately reviewed bounded
-projection/CLI contracts; those stages remain unimplemented.
+Behavior-preserving exact-hit extraction and metadata admission are now landed;
+Windows gates and separate helper/Luna witnesses pass, while the metadata full
+Linux gate is held on two baseline-reproduced timeouts. Bounded content projection
+and CLI are still unimplemented. Fresh stores use canonical kernel UUID ownership;
+populated legacy mapping remains an S3 decision. The next content operation is
+attributed historical content with explicit omissions, not full effective truth.
 
 This is an implementation handoff, not an implemented feature or permission to
 activate native storage. The converged rebuild strategy remains the authority.
