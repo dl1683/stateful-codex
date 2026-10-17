@@ -10,7 +10,9 @@
 > launcher Luna component journey passes39 calls/two67-table stores. Executed
 > source31aebbd has9622 Git-object-verified leaves; later Rust cleanup is exact
 > pinned formatter output. Component checks and installed-native behavior have
-> separate scopes. HAL custody/factory approvals are design-only. Native routing,
+> separate scopes. HAL's external creation probe also passes five positive native
+> cases and its owning-user Luna check; production factory/transport/guardian and
+> full native policy remain open. Native routing,
 > populated import, old-writer exclusion and the first database milestone remain open.
 
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
@@ -1486,3 +1488,27 @@ approvals only; factory, parent-death guardian, native Marathi/offline/customer
 qualification remain unimplemented/open. Exact fresh closeout/promotion receipts
 govern landing. See STATEFUL_PROJECT_REQUEST_WITNESS_20261017.md and
 bounded_request_20261017/{witness_manifest.json,luna1/score.json,cleanup_proof.json}.
+
+## 2026-10-17 — HAL external restricted creation positives
+
+External probe accepts an ordered pair of owned armed/nonbreakaway jobs with a
+suspended original target result, actual production readonly-token constructor/
+inert fixture SID and private desktop. Exact memberships/8192flags precede resume;
+only readiness-event signal authority is inherited. Genuine0/7/259/high-bit exits
+and retained-root signal after job closure pass; voluntaryMAX timeout is excluded.
+Build1 and two one-test native integration gates pass with no skips. Source main
+and binary remain identical; final test-import placement is separately attested.
+Companion15e43e73a3 has9623 Git-object-verified leaves; native binary SHAa22d1cea24c9
+is identical before/after Test2.665 reused package identities/checksums unchanged.
+Exact prospective witness review precedes59-binding freeze. Direct1 and sole
+original-launcher Luna1 pass3processes/5native positive cases, full strict receipt
+oracle, literal controlled codes,13synthetic refusals and raw provenance checks.
+Luna1:13.890seconds/81bindings; trusted owning-user creator's Disabled profile is
+verified, child is actually readonly restricted. Both creators are unpackaged.
+This is external creation evidence only: no production factory, complete native
+policy, failure paths, preservation, transport/guardian/Marathi/offline/customer
+repair. Metadata/post-Cargo display failures and no-Rust-PID-stop custody retained;
+final pinned format check passes, no further Rust test follows. Exact closeout/
+promotion governs landing. See STATEFUL_HAL_CREATION_PROBE_WITNESS_20261017.md and
+hal_creation_probe_20261017/{witness_manifest.json,luna1/score.json}. First DB and
+all native import/old-writer/lock/B0/S2-S6/publication/Forget/downstream gates OPEN.
