@@ -3,8 +3,9 @@
 > **Launcher compatibility (2026-10-17).** Unicode Git paths are decoded as UTF-8,
 > and the native `sqlite_home` argument preserves Unicode scalars instead of JSON
 > surrogate escapes that TOML rejects. Both Git and non-Git index ignore policies
-> precede private-home seeding. Combined launcher tests pass6/6, including the
-> attached-directory routing repair, real Unicode Git roots and TOML round trips;
+> publish atomically before private-home seeding and stay untouched on restart.
+> Combined launcher tests pass8/8: attached-directory routing, Unicode Git roots,
+> TOML round trips and competing policy initializers are covered;
 > final `just fmt` passes with no subsequent test run. No Rust/schema change,
 > rebuild or additional Luna journey belongs to this compatibility repair.
 > The superseded old-client-exclusion proposal was archived without promotion;

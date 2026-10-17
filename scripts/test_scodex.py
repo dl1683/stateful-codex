@@ -143,6 +143,62 @@ class ProjectHomeTests(unittest.TestCase):
             scodex.prepare_home(root, Path(directory) / "template")
             self.assertEqual((root / "config.toml").read_text(), text)
 
+    def test_existing_ignore_policy_is_untouched_on_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / ".stateful"
+            scodex.prepare_home(root, Path(directory) / "template")
+            policies = [root / name for name in (".gitignore", ".ignore")]
+            for policy in policies:
+                os.utime(policy, (1, 1))
+            before = [
+                (p.read_bytes(), p.stat().st_ino, p.stat().st_mtime_ns)
+                for p in policies
+            ]
+            scodex.prepare_home(root, Path(directory) / "template")
+            self.assertEqual(
+                [
+                    (p.read_bytes(), p.stat().st_ino, p.stat().st_mtime_ns)
+                    for p in policies
+                ],
+                before,
+            )
+
+    def test_atomic_ignore_publication_preserves_a_concurrent_winner(self):
+        real_link = os.link
+        for name, policy in (
+            (name, policy)
+            for name in (".gitignore", ".ignore")
+            for policy in (b"*\n", b"!auth.json\n")
+        ):
+            with (
+                self.subTest(name=name, policy=policy),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root, template = (
+                    Path(directory) / ".stateful",
+                    Path(directory) / "template",
+                )
+                template.mkdir()
+                (template / "auth.json").write_bytes(b"fixture-not-a-token")
+                ignore = root / name
+
+                def concurrent_link(source, destination):
+                    if destination == ignore:
+                        self.assertEqual(Path(source).read_bytes(), b"*\n")
+                        self.assertFalse((root / "auth.json").exists())
+                        ignore.write_bytes(policy)
+                        raise FileExistsError()
+                    return real_link(source, destination)
+
+                with patch.object(scodex.os, "link", side_effect=concurrent_link):
+                    if policy == b"*\n":
+                        scodex.prepare_home(root, template)
+                    else:
+                        with self.assertRaises(ValueError):
+                            scodex.prepare_home(root, template)
+                self.assertEqual(ignore.read_bytes(), policy)
+                self.assertEqual((root / "auth.json").exists(), policy == b"*\n")
+
     def test_store_override_cannot_turn_the_project_or_an_ancestor_into_a_home(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory).resolve()

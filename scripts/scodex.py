@@ -1,5 +1,6 @@
 """Launch Stateful Codex with its unchanged native home inside the project."""
 
+import io
 import json
 import os
 from pathlib import Path
@@ -98,30 +99,36 @@ def store_directory(project, environ):
     return root
 
 
+def publish_missing(destination, source):
+    descriptor, name = tempfile.mkstemp(dir=destination.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as target:
+            shutil.copyfileobj(source, target)
+        try:
+            os.link(temporary, destination)
+        except FileExistsError:
+            pass
+    finally:
+        temporary.unlink()
+
+
 def prepare_home(root, template):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Ignore private configuration/credentials and all native data before seeding.
     for name in (".gitignore", ".ignore"):
         ignore = root / name
-        if ignore.exists() and ignore.read_text(encoding="utf-8") != "*\n":
+        if not ignore.exists():
+            publish_missing(ignore, io.BytesIO(b"*\n"))
+        if ignore.read_text(encoding="utf-8") != "*\n":
             raise ValueError(
                 f"The store's existing {name} must contain exactly '*' before launch"
             )
-        ignore.write_text("*\n", encoding="utf-8")
     for name in ("config.toml", "auth.json"):
         source, destination = template / name, root / name
         if source.is_file() and not destination.exists():
-            # Publish complete seeds atomically without overwriting another launch.
-            with tempfile.NamedTemporaryFile(dir=root, delete=False) as target:
-                temporary = Path(target.name)
-                with source.open("rb") as seed:
-                    shutil.copyfileobj(seed, target)
-            try:
-                os.link(temporary, destination)
-            except FileExistsError:
-                pass
-            finally:
-                temporary.unlink()
+            with source.open("rb") as seed:
+                publish_missing(destination, seed)
     (root / "README.md").write_text(README, encoding="utf-8")
 
 
