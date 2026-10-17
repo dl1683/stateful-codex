@@ -35,7 +35,10 @@ pub enum SequenceError {
     #[error("console response order refused")]
     Order,
     #[error("console worker reported failure")]
-    WorkerFailed { stage: FailureStage, win32_code: u32 },
+    WorkerFailed {
+        stage: FailureStage,
+        win32_code: u32,
+    },
 }
 
 impl WorkerResponseSequence {
