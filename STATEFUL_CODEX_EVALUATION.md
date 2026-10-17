@@ -1638,3 +1638,8 @@ One local jobs2 build passed. Initial scoped Rust:177 passed,1 fixture setup fai
 The sole launcher/Luna journey wrote a rule; a different process/thread recalled CIRRUS-4827 without it in the prompt, and neutral exact read passed. Overall script exit1 remains RETAINED: EXTRA shared-empty assertion failed. Recreated shared files predate this check (16:56 vs17:18), creator unestablished; canary project1/shared0. No second model journey, exclusion barrier or HAL claim.
 
 Reviews led to attached-CD routing, atomic ignore publication, memory-text boundaries, UTF8 Git paths and PATH-only tool resolution. Earlier fixture, encoding-probe and review failures remain retained; approval gates promotion. Parent Python8/8 passed; combined Python9/9 PASS (launcher_unicode_20261017/security_joint.log), also covering caller models, optional Stateful modes, Unicode/NBSP/TOML and dual policies. Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/{store_root_20261017,launcher_unicode_20261017}/; exact approved source/integration is in stateful_rebuild_latest.md.
+
+A follow-up confidentiality repair refuses repository-tracked home files before
+private policies/config/login are seeded; Git errors inside a repository refuse
+startup too. Existing legitimate untracked home files stay untouched. The real
+Git regression and all joint launcher checks pass10/10 (home_guard_joint.log).

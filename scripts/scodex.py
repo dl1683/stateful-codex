@@ -136,6 +136,17 @@ def publish_missing(destination, source):
 
 def prepare_home(root, template):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tracked = subprocess.run(
+        [path_command("git"), "-C", str(root), "ls-files", "--cached", "--", "."],
+        capture_output=True,
+        check=False,
+    )
+    if tracked.returncode == 0 and tracked.stdout:
+        raise ValueError("Tracked files cannot be used as a private store home")
+    if tracked.returncode and any(
+        (parent / ".git").exists() for parent in (root, *root.parents)
+    ):
+        raise ValueError("Git cannot establish that this home is untracked")
     # Ignore private configuration/credentials and all native data before seeding.
     for name in (".gitignore", ".ignore"):
         ignore = root / name
