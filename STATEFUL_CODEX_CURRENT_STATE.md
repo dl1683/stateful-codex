@@ -34,6 +34,11 @@ and WSL each pass 56 tests; a separate Luna check compares 68 tables in each of
 two project fixtures. Production runtime-index/cohort/native-client qualification
 remains open; exact promotion governs landing.
 
+The [canonical owner manifests](./STATEFUL_PROJECT_OWNER_MANIFEST_WITNESS_20261017.md)
+preserve native history while isolating canonical runtime lineage. Scoped Windows/
+WSL gates and a two-project Luna component check pass; exact closeout/promotion
+govern landing. Native conversion and the first database milestone remain open.
+
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
 and runtime schema installation, owned readonly snapshots, bounded attributed
