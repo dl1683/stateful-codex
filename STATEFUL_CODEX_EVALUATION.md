@@ -1461,3 +1461,26 @@ custody and retained failed attempts are in the dated witness and RECORD.md.
 Exact fresh closeout/promotion receipts govern landing. Native activation,
 shared-store migration, old-client exclusion, lock cutover and the first database
 milestone remain OPEN. HAL parent-authority review approves design only.
+
+## 2026-10-17 — Inactive bounded project request
+
+Project/run-bound metadata preflight, complete65536-byte accounting and original
+append-only materializer return provisional text/ranges plus the uncommitted guard.
+All-status/part binding, sparse ordinal128 and final-population limits are enforced;
+legacy/native routes, migrations, dependencies and model context stay unchanged.
+Windows/WSL runtime105/105, CLI11/11 and extension338/339 pass. First Windows
+extension gate retains one existing history fan-in timeout; identical full retry
+passes without check/time/population changes. Other fixture/helper/cleanup failures
+remain retained. Scoped runtime fix/fmt pass; no Rust retests afterward.
+Direct1 and sole original-launcher Luna1 pass39 calls over two67-table canonical
+fixtures with complete typed allowed deltas, literal boundaries/spans, prior PI
+atomicity, cancellation/contention and fresh-close uncertain-commit recovery.
+Luna1:23.512seconds/264bindings; actual raw call/model/output verified. Executed
+31aebbd source has9622 Git-object-verified leaves; later Rust cleanup is proven
+exact pinned formatter output, not a newly executed binary. First DB milestone
+and native import/old writers/lock, B0/M0-M3/S2-S6 and all downstream gates OPEN.
+HAL eleven-file custody inventory and Win32 factory brief receive fresh DESIGN
+approvals only; factory, parent-death guardian, native Marathi/offline/customer
+qualification remain unimplemented/open. Exact fresh closeout/promotion receipts
+govern landing. See STATEFUL_PROJECT_REQUEST_WITNESS_20261017.md and
+bounded_request_20261017/{witness_manifest.json,luna1/score.json,cleanup_proof.json}.
