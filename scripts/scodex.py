@@ -77,7 +77,9 @@ def project_directory(directory):
         check=False,
     )
     return (
-        Path(result.stdout.strip()).resolve() if result.returncode == 0 else directory
+        Path(result.stdout.removesuffix("\n")).resolve()
+        if result.returncode == 0
+        else directory
     )
 
 

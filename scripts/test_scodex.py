@@ -37,7 +37,7 @@ class ProjectHomeTests(unittest.TestCase):
 
     def test_git_subdirectory_and_cd_select_one_project_home(self):
         with tempfile.TemporaryDirectory() as directory:
-            project = (Path(directory) / "भारत-🙂").resolve()
+            project = (Path(directory) / "भारत-🙂\N{NO-BREAK SPACE}").resolve()
             project.mkdir()
             subprocess.run(["git", "init", "-q", str(project)], check=True)
             nested = project / "nested"
