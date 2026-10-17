@@ -87,17 +87,26 @@ pub async fn materialize_project_request<'a>(
     }
     let project = transaction.identity().project_uuid.to_string();
     let (valid, mut bytes): (i64, i64) = sqlx::query_as(RUN)
-        .bind(&project).bind(run_id.as_str()).fetch_optional(transaction.connection()).await?
+        .bind(&project)
+        .bind(run_id.as_str())
+        .fetch_optional(transaction.connection())
+        .await?
         .ok_or_else(|| StatefulRunStoreError::RunNotFound(run_id.to_string()))?;
     if valid != 1 {
         return Err(ProjectRequestError::InvalidBinding);
     }
     let steering: Vec<(i64, i64, Option<i64>)> = sqlx::query_as(STEERING)
-        .bind(run_id.as_str()).bind(&project).bind(run_id.as_str())
-        .fetch_all(transaction.connection()).await?;
+        .bind(run_id.as_str())
+        .bind(&project)
+        .bind(run_id.as_str())
+        .fetch_all(transaction.connection())
+        .await?;
     let parts: Vec<(Option<i64>, i64)> = sqlx::query_as(PARTS)
-        .bind(run_id.as_str()).bind(&project).bind(run_id.as_str())
-        .fetch_all(transaction.connection()).await?;
+        .bind(run_id.as_str())
+        .bind(&project)
+        .bind(run_id.as_str())
+        .fetch_all(transaction.connection())
+        .await?;
     if steering.len() > 128 || parts.len() > 128 {
         return Err(ProjectRequestError::Limit);
     }
@@ -123,21 +132,36 @@ pub async fn materialize_project_request<'a>(
         last = last.max(part.ok_or(ProjectRequestError::InvalidBinding)?);
         bytes = bytes.checked_add(*size).ok_or(ProjectRequestError::Limit)?;
     }
-    if parts.len() + new_count > 128 || last + i64::try_from(new_count).map_err(|_| ProjectRequestError::Limit)? > 128 {
+    if parts.len() + new_count > 128
+        || last + i64::try_from(new_count).map_err(|_| ProjectRequestError::Limit)? > 128
+    {
         return Err(ProjectRequestError::Limit);
     }
     for offset in 1..=new_count {
         let ordinal = last + i64::try_from(offset).map_err(|_| ProjectRequestError::Limit)?;
-        bytes = bytes.checked_add(i64::try_from(ordinal.to_string().len()).map_err(|_| ProjectRequestError::Limit)?)
+        bytes = bytes
+            .checked_add(
+                i64::try_from(ordinal.to_string().len()).map_err(|_| ProjectRequestError::Limit)?,
+            )
             .ok_or(ProjectRequestError::Limit)?;
     }
     if !(0..=65_536).contains(&bytes) {
         return Err(ProjectRequestError::Limit);
     }
     let goal: String = sqlx::query_scalar("SELECT goal FROM stateful_runs WHERE id=?")
-        .bind(run_id.as_str()).fetch_one(transaction.connection()).await?;
-    let request = crate::acceptance_request::acceptance_request(transaction.connection(), run_id, &goal).await?;
-    Ok((transaction, ProjectAcceptanceRequest { text: request.text, parts: request.parts }))
+        .bind(run_id.as_str())
+        .fetch_one(transaction.connection())
+        .await?;
+    let request =
+        crate::acceptance_request::acceptance_request(transaction.connection(), run_id, &goal)
+            .await?;
+    Ok((
+        transaction,
+        ProjectAcceptanceRequest {
+            text: request.text,
+            parts: request.parts,
+        },
+    ))
 }
 
 #[cfg(test)]

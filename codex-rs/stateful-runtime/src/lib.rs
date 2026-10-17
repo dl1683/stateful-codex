@@ -18,10 +18,10 @@ mod obligation_operations;
 mod project_acceptance;
 mod project_completion;
 mod project_domain;
-mod project_request;
 #[cfg(test)]
 #[path = "project_index_tests.rs"]
 mod project_index_tests;
+mod project_request;
 mod project_verification;
 mod run;
 mod run_history_storage;
