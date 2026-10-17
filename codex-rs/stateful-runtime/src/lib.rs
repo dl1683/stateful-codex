@@ -17,6 +17,7 @@ mod measurement_storage;
 mod obligation_operations;
 mod project_acceptance;
 mod project_completion;
+mod project_creation;
 mod project_domain;
 #[cfg(test)]
 #[path = "project_index_tests.rs"]
@@ -92,6 +93,8 @@ pub use project_completion::ProjectRunCompletion;
 pub use project_completion::ProjectRunCompletionError;
 pub use project_completion::commit_project_run;
 pub use project_completion::revalidate_project_run_start;
+pub use project_creation::ProjectRunCreationError;
+pub use project_creation::commit_project_run_creation;
 pub use project_domain::project_store_base_domain;
 pub use project_domain::project_store_domain;
 pub use project_request::ProjectAcceptanceRequest;

@@ -83,51 +83,7 @@ impl StatefulRunStore {
     ) -> Result<StatefulRun, StatefulRunStoreError> {
         value.validate()?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if let Some(existing) = load_run(&mut transaction, &id).await? {
-            if existing.value != value {
-                return Err(StatefulRunStoreError::RunIdentityConflict(id.to_string()));
-            }
-            transaction.commit().await?;
-            return Ok(existing);
-        }
-        let now = unix_timestamp_millis()?;
-        let status = match value.mode {
-            WorkflowMode::Socratic => StatefulRunStatus::Pending,
-            WorkflowMode::Autonomous | WorkflowMode::Collaborative => StatefulRunStatus::Running,
-        };
-        sqlx::query(
-            "INSERT INTO stateful_runs (
-                id, project_id, goal, mode, status, strategy, strategy_revision,
-                result, revision, created_at_ms, updated_at_ms, max_continuations,
-                max_elapsed_seconds, continuations_used
-             ) VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?, ?, ?, 0)",
-        )
-        .bind(id.as_str())
-        .bind(&value.project_id)
-        .bind(&value.goal)
-        .bind(mode_name(value.mode))
-        .bind(status_name(status))
-        .bind(INITIAL_REVISION)
-        .bind(now)
-        .bind(now)
-        .bind(i64::from(value.budget.max_continuations))
-        .bind(i64::from(value.budget.max_elapsed_seconds))
-        .execute(&mut *transaction)
-        .await?;
-        for (position, thread_id) in value.thread_ids.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO stateful_run_threads (run_id, position, thread_id)
-                 VALUES (?, ?, ?)",
-            )
-            .bind(id.as_str())
-            .bind(i64::try_from(position).map_err(|_| StatefulRunStoreError::CountOverflow)?)
-            .bind(thread_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        let run = load_run(&mut transaction, &id)
-            .await?
-            .ok_or_else(|| StatefulRunStoreError::RunNotFound(id.to_string()))?;
+        let run = crate::project_creation::create_on(&mut transaction, id, value).await?;
         transaction.commit().await?;
         Ok(run)
     }
