@@ -15,6 +15,14 @@
 > records. Native attachment, populated import, old-writer exclusion, lock cutover,
 > guardian, full native HAL policy and offline/customer qualification remain OPEN.
 
+> Latest additional 2026-10-17: opt-in runtime quiescence source b17440e637 has
+> Windows/WSL116/116 and fresh source approval; no automatic caller. Its distinct
+> native fixture assertions pass, while both actual Luna journeys remain FAILED:
+> original literal-copy JavaScript parse failure (no native run), then a separately
+> reviewed locked transport failed on cp1252 stdout after native assertions passed.
+> Exact final delivery is unqualified; originals remain sealed, no retry/regrade.
+> See [runtime quiescence record](STATEFUL_RUNTIME_QUIESCENCE_20261017.md).
+
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
 > **Evidence in hand.** Ten ordinary Autonomous prompts on Gemma 4 31B end Answered in both registered checks (before and after A1 and A2: Completed 0, Answered 10, Partial 0, Blocked 0, nonzero 0); eight of ten first completion calls were refused for a missing `openIssues` before the fix and none after, but only three of ten sessions called the completion tool after the fix, so the guidance change and the field change are not separated. Luna hands-on runs show correct work and mostly Partial endings for checked tasks, a visible outcome footer, and a model that rewrites a failing checker and then says the check passes (see the hunt-corrected entries and `campaign2/FINDINGS.md`).
 > **On hold with the design filed.** Open-model usability stages A3 to A9 (the UNVERIFIABLE state, the bad-directory repair path, the observation provenance fix; frozen design `sc_dogfood/integrate/briefs/open_model_usability_freeze.md`, revision 3) and Part B (host-enforced constrained repair; owner constraints: check identity is host-held, a repaired check must be at least as strict, no wrapper scripts); slice 3 opt-in Work verification (drafts v1 to v3 and two REDRAFT reviews in `sc_dogfood/integrate/briefs/` and `reviews/`; v3 is unreviewed); slices 4 and 5 and lean 3a (`step3a_freeze.md`). The release check (the matched 216-session rerun with floors and a Luna non-git journey) has not been run, so the effect of slice 1 on the open-model regression is not measured.
@@ -1593,3 +1601,27 @@ separate Luna run: SQLite engine3cases PASS2.809s; delivery FAIL_RETAINED26.344s
 on malformed final, no retry/regrade. Clock-only bypass and persistent committed
 refusals plus rollback/worker exits retained. No native barrier/firstDB/HAL claim.
 See [current cutover handoff](STATEFUL_CUTOVER_HANDOFF_20261017.md).
+
+
+## 2026-10-17 — Runtime row-write quiescence; hosted failure retained
+
+Opt-in source b17440e637 adds complete runtime schema/history admission, atomic
+persistent row/registry guards, ownership/conflict-victim enforcement and explicit
+close/reconciliation. No native attachment/cutover caller. Windows/WSL116/116 pass,
+zero skips/retries; scoped fix/fmt pass, no Rust retest. Fresh source approval binds
+exact799-line diff and29inputs;9,637 native-helper source blobs match b174.
+
+Original Luna1 FAIL18.087s: changed literal/parse error, zero native commands.
+Separate locked-transport Luna1 FAIL23.125s: exact code/allowlisted command but
+exit1, cp1252 UnicodeEncodeError after writing the native report. Model honestly
+reported failure; no exact successful final. Native assertions only PASS: warmed
+native/SQLx target refusal1811, replay/unrelated progress, whole rows/45guards,
+integrity/FKs/Marathi goal preservation, worker0/installer23, both reaped. All87
+retained identities/postflights and84new/69old input hashes agree. No packet
+retry/regrade or encoding fix. Source controls are separate from actual evidence.
+
+FirstDB/full old-writer exclusion remains OPEN: PI/metadata, execution stopping,
+coherent import, native routing and cutover/recovery still gated. HAL read-only
+source diagnosis locates11empty partition dispositions (3tables/8cells), not new
+accepted identity edges/human decisions; all315OPEN, dateUNRESOLVED, offline and
+customer qualification absent. See [scope and receipts](STATEFUL_RUNTIME_QUIESCENCE_20261017.md).
