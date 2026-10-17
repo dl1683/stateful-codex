@@ -134,7 +134,9 @@ impl Fixture {
                         }
                         "text" | "blob" => row.try_get::<String, _>(index * 2 + 1)?,
                         _ => {
-                            return Err(format!("unexpected SQLite storage class: {storage}").into());
+                            return Err(
+                                format!("unexpected SQLite storage class: {storage}").into()
+                            );
                         }
                     };
                     cells.push(format!("{storage}:{value}"));

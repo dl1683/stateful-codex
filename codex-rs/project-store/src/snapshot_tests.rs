@@ -87,12 +87,20 @@ async fn snapshot_requires_exact_compiled_domain_history() -> TestResult {
     let mut changed = migrations();
     changed.migrations.to_mut()[0].sql = sqlx::SqlStr::from_static("SELECT 1;");
     for manifest in [
-        DomainManifest { domain: "other", migrations: &compiled },
-        DomainManifest { domain: "snapshot", migrations: &changed },
+        DomainManifest {
+            domain: "other",
+            migrations: &compiled,
+        },
+        DomainManifest {
+            domain: "snapshot",
+            migrations: &changed,
+        },
     ] {
         assert!(matches!(
             snapshot.require_domain(&manifest),
-            Err(ProjectReadError::Registry(StoreRegistryError::IncompatibleHistory))
+            Err(ProjectReadError::Registry(
+                StoreRegistryError::IncompatibleHistory
+            ))
         ));
     }
     snapshot.finish().await?;
