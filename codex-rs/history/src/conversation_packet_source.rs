@@ -164,9 +164,18 @@ struct Gaps {
 pub fn assemble_conversation_packet(
     source: ConversationPacketSource<'_>,
 ) -> Result<Option<ConversationPacket>, ConversationPacketError> {
-    let previous = source.previous.map_or(&[][..], ConversationPacket::records);
-    let mut gaps = Gaps::default();
-    let mut fresh = history_candidates(source.history, &mut gaps);
+    // A rejected previous packet must never reach the caller's error-to-CarryForward path.
+    let previous = source
+        .previous
+        .filter(|packet| valid_previous(packet, source.thread_id));
+    let invalid_previous = source.previous.is_some() && previous.is_none();
+    let source = ConversationPacketSource { previous, ..source };
+    let previous = previous.map_or(&[][..], ConversationPacket::records);
+    let mut gaps = Gaps {
+        missing_provenance: invalid_previous,
+        ..Default::default()
+    };
+    let mut fresh = history_candidates(source.thread_id, source.history, &mut gaps);
     fresh.extend(retained_candidates(&source, &fresh, previous, &mut gaps));
     fresh.retain(|candidate| !candidate.carried_by(previous));
     // A shortened or partly non-text source is a known omission from the evidence.
@@ -198,7 +207,7 @@ pub fn assemble_conversation_packet(
     } else {
         ConversationInputCoverage::CompleteThroughCutoff
     };
-    pack_conversation_packet(
+    let packed = pack_conversation_packet(
         ConversationPacketInput {
             boundary: ConversationPacketBoundary::new(source.thread_id, through_sequence),
             input_coverage,
@@ -207,8 +216,54 @@ pub fn assemble_conversation_packet(
         },
         PACKET_BUDGET,
         measure,
+    );
+    match packed {
+        // Fresh conflicting evidence must not preserve a previous packet we already rejected.
+        Err(_) if invalid_previous => Ok(None),
+        result => result.map(Some),
+    }
+}
+
+/// Validate before selection can hide a bad carried record. Reuse native admission rather than
+/// repacking an invalid packet into a seemingly valid one. This does not activate restoration.
+fn valid_previous(packet: &ConversationPacket, thread_id: ThreadId) -> bool {
+    let coverage = packet.coverage();
+    if packet.version() != crate::CONVERSATION_PACKET_VERSION
+        || packet.boundary().thread_id() != thread_id
+        || packet
+            .records()
+            .iter()
+            .any(|record| record.origin_thread_id() != thread_id || !record.source().complete)
+        || coverage.included_records() != packet.records().len()
+        || coverage
+            .included_records()
+            .checked_add(coverage.omitted_by_budget())
+            != Some(coverage.considered_records())
+        || coverage
+            .considered_records()
+            .checked_add(coverage.omitted_incomplete())
+            .is_none_or(|count| count > MAX_PACKET_CANDIDATES)
+    {
+        return false;
+    }
+    pack_conversation_packet(
+        ConversationPacketInput {
+            boundary: packet.boundary(),
+            input_coverage: coverage.input_coverage(),
+            previous: None,
+            candidates: packet.records(),
+        },
+        PACKET_BUDGET,
+        measure,
     )
-    .map(Some)
+    .is_ok_and(|admitted| {
+        if admitted.records() != packet.records() {
+            return false;
+        }
+        let size = measure(packet);
+        size.rendered_bytes <= PACKET_BUDGET.max_rendered_bytes
+            && size.rendered_tokens <= PACKET_BUDGET.max_rendered_tokens
+    })
 }
 
 /// A record offered to the packer: carried unchanged from the previous packet, or fresh.
@@ -322,6 +377,7 @@ fn admit_by_priority(
 
 /// Original messages the host captured as retained sources, in their recorded form.
 fn history_candidates<'a>(
+    thread_id: ThreadId,
     history: &'a [ResponseItemEnvelope],
     gaps: &mut Gaps,
 ) -> Vec<Candidate<'a>> {
@@ -350,6 +406,15 @@ fn history_candidates<'a>(
             gaps.missing_provenance |= role == "assistant";
             continue;
         };
+        let actual_role = match role.as_str() {
+            "user" => Some(RetainedSourceRole::User),
+            "assistant" => Some(RetainedSourceRole::Assistant),
+            _ => None,
+        };
+        if actual_role != Some(source.id.role) {
+            gaps.missing_provenance = true;
+            continue;
+        }
         if metadata.inherited_user_message {
             // Copied parent context has no position in this thread's delivery order.
             gaps.bounded = true;
@@ -362,6 +427,10 @@ fn history_candidates<'a>(
             gaps.missing_provenance = true;
             continue;
         };
+        if origin != thread_id {
+            gaps.bounded = true;
+            continue;
+        }
         let Some(kind) = record_kind(
             source.id.role,
             phase.as_ref(),
@@ -391,9 +460,11 @@ fn retained_candidates<'a>(
 ) -> Vec<Candidate<'a>> {
     let mut candidates = Vec::new();
     for (order, entry) in source.retained.ordered_entries() {
-        let message = match entry {
-            RetainedContextEntry::UserMessage(message)
-            | RetainedContextEntry::AssistantMessage(message) => message,
+        let (message, actual_role) = match entry {
+            RetainedContextEntry::UserMessage(message) => (message, RetainedSourceRole::User),
+            RetainedContextEntry::AssistantMessage(message) => {
+                (message, RetainedSourceRole::Assistant)
+            }
             RetainedContextEntry::VerifiedAnswer(_) => continue,
         };
         let RetainedContextOrder::Local(order) = order else {
@@ -404,6 +475,18 @@ fn retained_candidates<'a>(
             gaps.missing_provenance = true;
             continue;
         };
+        if retained_source.id.role != actual_role {
+            gaps.missing_provenance = true;
+            continue;
+        }
+        let Some(origin) = message.origin_thread_id else {
+            gaps.missing_provenance = true;
+            continue;
+        };
+        if origin != source.thread_id {
+            gaps.bounded = true;
+            continue;
+        }
         if found
             .iter()
             .any(|candidate| candidate.source.as_ref() == &retained_source)
@@ -413,10 +496,6 @@ fn retained_candidates<'a>(
         {
             continue;
         }
-        let Some(origin) = message.origin_thread_id else {
-            gaps.missing_provenance = true;
-            continue;
-        };
         let Some(kind) = record_kind(
             retained_source.id.role,
             message.phase.as_ref(),

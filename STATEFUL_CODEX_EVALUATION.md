@@ -1643,3 +1643,20 @@ A follow-up confidentiality repair refuses repository-tracked home files before
 private policies/config/login are seeded; Git errors inside a repository refuse
 startup too. Existing legitimate untracked home files stay untouched. The real
 Git regression and all joint launcher checks pass10/10 (home_guard_joint.log).
+
+## 2026-10-17 — Placement assertion scope reconciliation
+
+An independent fresh Codex CLI audit checked retained executor bytes and hashes.
+The original whole journey remains **EXIT1**: its final assertion tests whether
+any top-level `*.sqlite*` filename exists in the shared home, without a baseline,
+project filter or writer attribution. The eight SQLite sets were created before
+the project journey. A retained old-launcher run has matching times, a raw shared
+home rollout and a launcher binding that sets the shared `CODEX_HOME`; it is a
+supported attribution confounder. Unique OS-level creator and later SHM-write
+cause remain unknown. Timestamp evidence does not establish write-free operation.
+
+The retained canary counts project1/shared0 support that canary's scoped placement;
+they were not recomputed and do not establish global emptiness or general isolation.
+This audit opened no live database, ran no product journey and performed no cleanup
+or regrade. Raw support and recomputed hashes are recorded in
+`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/behavior_20261017/placement_recheck.md`.

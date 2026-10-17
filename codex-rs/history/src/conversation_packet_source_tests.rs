@@ -455,3 +455,161 @@ fn phase_less_deliveries_use_host_classification_and_pending_ones_stay_out() {
     // The unresolved delivery is a known omission, not a complete window.
     assert_eq!(coverage(&packet), (BoundedWindow, 5, 5, 0, 0));
 }
+
+#[test]
+fn history_role_and_thread_must_match_the_capture() {
+    let mut mismatched_user = delivered("wrong-user", 1, User, "not an assistant");
+    mismatched_user.metadata.as_mut().unwrap().retained_source =
+        Some(source("wrong-user", AssistantFinal));
+    let mut mismatched_assistant = delivered("wrong-assistant", 2, AssistantFinal, "not a user");
+    mismatched_assistant.metadata.as_mut().unwrap().retained_source =
+        Some(source("wrong-assistant", User));
+    let mut developer = delivered("developer", 3, User, "context");
+    if let ResponseItem::Message { role, .. } = &mut developer.item {
+        *role = "developer".into();
+    }
+    let foreign = edited(
+        delivered("parent", 4, AssistantFinal, "parent answer"),
+        |metadata| metadata.conversation_origin_thread_id = Some(ThreadId::from_u128(8)),
+    );
+    let inherited = edited(delivered("inherited", 5, User, "parent request"), |metadata| {
+        metadata.inherited_user_message = true;
+    });
+    let packet = first_packet(&[
+        mismatched_user,
+        mismatched_assistant,
+        developer,
+        foreign.clone(),
+        inherited,
+        delivered("child", 6, AssistantFinal, "child answer"),
+    ]);
+    assert_eq!(
+        packet.records(),
+        &[record("child", 6, AssistantFinal, "child answer")]
+    );
+    assert_eq!(coverage(&packet), (Unknown, 1, 1, 0, 0));
+    let bounded = first_packet(&[foreign, delivered("child", 6, User, "child request")]);
+    assert_eq!(coverage(&bounded), (BoundedWindow, 1, 1, 0, 0));
+}
+
+#[test]
+fn retained_deliveries_require_local_thread_origin_in_both_roles() {
+    let mut retained = RetainedContext::default();
+    let mut expected = Vec::new();
+    for (order, origin_thread_id) in [Some(ThreadId::from_u128(8)), None, Some(thread())]
+        .into_iter()
+        .enumerate()
+    {
+        for role in [RetainedSourceRole::User, RetainedSourceRole::Assistant] {
+            let message = RetainedUserMessage {
+                turn_id: "turn".into(),
+                message_id: Some(format!("{order}-{role:?}")),
+                text: format!("delivery {order}"),
+                complete: true,
+                origin: UserInputOrigin::User,
+                phase: Some(MessagePhase::FinalAnswer),
+                origin_thread_id,
+                classification: None,
+            };
+            let sequence = (order * 2 + usize::from(role == RetainedSourceRole::Assistant)) as u64;
+            let local = RetainedInputSource::Local(Some(sequence));
+            let (source, kind) = match role {
+                RetainedSourceRole::User => (retained.record_user_message(message, local), User),
+                RetainedSourceRole::Assistant => (
+                    retained.record_assistant_message(message, local),
+                    AssistantFinal,
+                ),
+            };
+            if origin_thread_id == Some(thread()) {
+                expected.push(ConversationPacketRecord::new(
+                    thread(),
+                    source.expect("source"),
+                    sequence,
+                    kind,
+                    format!("delivery {order}"),
+                ));
+            }
+        }
+    }
+    let packet = assemble(&[], &retained, None, SinceThreadStart);
+    assert_eq!(packet.records(), expected.as_slice());
+    assert_eq!(coverage(&packet), (Unknown, 2, 2, 0, 0));
+}
+
+#[test]
+fn invalid_previous_packets_are_dropped_before_reuse_and_fresh_errors() {
+    let previous = first_packet(&[
+        delivered("request", 1, User, "original request"),
+        delivered("answer", 2, AssistantFinal, "original answer"),
+    ]);
+    let value = serde_json::to_value(&previous).expect("serialize");
+    let foreign = serde_json::json!(ThreadId::from_u128(8));
+    let mut variants = Vec::new();
+    for path in [
+        "boundary", "origin", "role", "cutoff", "version", "coverage", "order", "complete", "size",
+    ] {
+        let mut invalid = value.clone();
+        match path {
+            "boundary" => invalid["boundary"]["thread_id"] = foreign.clone(),
+            "origin" => invalid["records"][0]["origin_thread_id"] = foreign.clone(),
+            "role" => {
+                invalid["records"][0]["source"]["id"]["role"] = serde_json::json!("assistant");
+            }
+            "cutoff" => invalid["boundary"]["through_sequence"] = serde_json::json!(0),
+            "version" => invalid["version"] = serde_json::json!(0),
+            "coverage" => invalid["coverage"]["included_records"] = serde_json::json!(0),
+            "order" => invalid["records"].as_array_mut().unwrap().reverse(),
+            "complete" => {
+                invalid["records"][0]["source"]["complete"] = serde_json::json!(false);
+            }
+            "size" => {
+                invalid["records"][0]["text"] =
+                    serde_json::json!("x".repeat(PACKET_BUDGET.max_rendered_bytes));
+            }
+            _ => unreachable!(),
+        }
+        variants.push((
+            path,
+            serde_json::from_value::<ConversationPacket>(invalid).expect("shape"),
+        ));
+    }
+    let retained = RetainedContext::default();
+    let fresh = [delivered("fresh", 3, User, "fresh request")];
+    let conflicting = [
+        delivered("conflict", 4, User, "first"),
+        delivered("conflict", 4, User, "different"),
+    ];
+    for (label, invalid) in variants {
+        let packet = assemble(&fresh, &retained, Some(&invalid), SinceThreadStart);
+        assert_eq!(
+            packet.records(),
+            &[record("fresh", 3, User, "fresh request")],
+            "{label}"
+        );
+        assert_eq!(coverage(&packet), (Unknown, 1, 1, 0, 0), "{label}");
+        for history in [&[][..], conflicting.as_slice()] {
+            assert_eq!(
+                assemble_conversation_packet(ConversationPacketSource {
+                    thread_id: thread(),
+                    history,
+                    retained: &retained,
+                    previous: Some(&invalid),
+                    continuity: Rewritten,
+                }),
+                Ok(None),
+                "must not return an error that carries invalid {label}"
+            );
+        }
+    }
+    assert!(
+        assemble_conversation_packet(ConversationPacketSource {
+            thread_id: thread(),
+            history: &conflicting,
+            retained: &retained,
+            previous: Some(&previous),
+            continuity: Rewritten,
+        })
+        .is_err(),
+        "fresh conflicts still preserve a valid previous packet through the caller"
+    );
+}

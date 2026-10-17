@@ -98,3 +98,26 @@ fn destructive_replacement_clears_the_packet() {
 
     assert_eq!(live.conversation_packet(), None);
 }
+
+#[test]
+fn invalid_previous_is_cleared_even_when_fresh_evidence_conflicts() {
+    let thread_id = ThreadId::new();
+    let mut live = ContextManager::new();
+    record(&mut live, "first", 0, thread_id);
+    let capture = live.capture_conversation_packet(thread_id);
+    let installed = live.update_conversation_packet(capture).expect("installed");
+    let mut invalid = serde_json::to_value(installed.as_ref()).expect("serialize");
+    invalid["boundary"]["thread_id"] = serde_json::json!(ThreadId::new());
+    live.conversation_packet = Some(Arc::new(serde_json::from_value(invalid).expect("shape")));
+    let mut conflict = live.items[0].clone();
+    if let ResponseItem::Message { content, .. } = &mut conflict.item {
+        *content = vec![ContentItem::OutputText {
+            text: "conflicting answer".into(),
+        }];
+    }
+    Arc::make_mut(&mut live.items).push(conflict);
+
+    let capture = live.capture_conversation_packet(thread_id);
+    assert!(matches!(capture, ConversationPacketUpdate::Captured(_)));
+    assert_eq!(live.update_conversation_packet(capture), None);
+}
