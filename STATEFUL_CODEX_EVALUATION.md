@@ -1,6 +1,6 @@
 # Stateful Codex evaluation record
 
-> **Rebuild active (2026-10-15).** The current owner directive supersedes the
+> **Rebuild active (2026-10-17).** The current owner directive supersedes the
 > historical hold below. S0 evidence is landed; S1a is an inert placement foundation,
 > with native project ownership, migration and atomic completion still gated.
 > See the rebuild entries at the end and the linked baseline/custody receipt.
@@ -1512,3 +1512,22 @@ final pinned format check passes, no further Rust test follows. Exact closeout/
 promotion governs landing. See STATEFUL_HAL_CREATION_PROBE_WITNESS_20261017.md and
 hal_creation_probe_20261017/{witness_manifest.json,luna1/score.json}. First DB and
 all native import/old-writer/lock/B0/S2-S6/publication/Forget/downstream gates OPEN.
+
+
+## SC-REBUILD-20261017-PROJECT-RUN-CREATION
+
+Inactive project-bound atomic creation shares legacy creation/replay policy. Native
+attachment/import/oldwriter/lock and first database milestone remain OPEN. Scoped
+Windows/WSL runtime110/110,CLI11/11,extension338/339 PASS with0skips/retries; slow
+markers retained. Scoped fix/fmtpass, no Rust retest; exact pinned-format-only proof.
+Final333902 source and all9626members freshly reviewed; exact promotion governs landing.
+Direct1 and sole original-launcher gpt-6-luna Luna1 PASS24.983s/234bindings,29calls
+per inspector/two67-table stores. Whole typed rows/rowids/schema/stable headers,
+all modes/Answered replay, complete replies,131072/131073byte and64/65bounds,
+identity/refusal/partial-insert/priorPI/cancellation/contention/uncertain-COMMIT
+reconciliation verified. Raw model/call/output/final and durable postflight pass.
+Original binary/config/launcher unchanged; component evidence, not native/offline
+qualification. Failed source/oracle/parser preparations and provisional1 retained.
+HAL custody source still unexecuted; no guardian/customer claim. See
+[dated witness](./STATEFUL_PROJECT_CREATION_WITNESS_20261017.md) and
+stateful_rebuild/run_creation_20261017/RECORD.md with exact landing receipts.
