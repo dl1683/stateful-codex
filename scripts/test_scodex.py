@@ -9,6 +9,24 @@ import scodex
 
 
 class ProjectHomeTests(unittest.TestCase):
+    def test_tracked_home_configuration_refuses_before_credential_seeding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory).resolve()
+            root = project / ".stateful"
+            root.mkdir()
+            config = root / "config.toml"
+            config.write_bytes(b"untrusted provider configuration")
+            template = project / "template"
+            template.mkdir()
+            (template / "auth.json").write_bytes(b"fixture-not-a-token")
+            git = scodex.path_command("git")
+            subprocess.run([git, "init", "-q", str(project)], check=True)
+            subprocess.run([git, "-C", str(project), "add", ".stateful"], check=True)
+            with self.assertRaises(ValueError):
+                scodex.prepare_home(root, template)
+            self.assertEqual(config.read_bytes(), b"untrusted provider configuration")
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["config.toml"])
+
     def test_executables_require_absolute_path_entries_outside_the_project(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

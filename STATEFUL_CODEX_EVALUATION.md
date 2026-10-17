@@ -1637,34 +1637,9 @@ customer qualification absent. See [scope and receipts](STATEFUL_RUNTIME_QUIESCE
 
 ## SC-REBUILD-20261017-STORE-ROOT
 
-The simplified placement change gives `scodex` a native home at the selected Git
-root/plain folder's `.stateful`; `STATEFUL_STORE_ROOT` overrides its location.
-Existing files, schemas, migrations and locks remain unchanged. Only login/config
-seed a fresh private ignored home; no knowledge import. Original shared home is
-retained at C:/Users/devan/.codex-stateful-archive-20261017-store-root.
-The generated SQLite README lists tables/schema inspection. `stateful-memory
-root` detects native layout; `native-read` reuses native eligibility/retirement
-through a read-only SQLite shim. Existing reader fixtures remain supported.
-Ordinary direct Codex defaults are unchanged; this is launcher-scoped placement.
-
-One local jobs=2 build passed. Initial scoped Rust run:177 passed,1 fixture setup
-failure,2 existing PI timeouts,1 existing skipped case. The fixture mistakenly
-used the combined installer; compiled native migrations fix it, reader13/13 PASS.
-Both timeouts occur on clean9fa6256bcd; its third timeout passed in our run.
-No assertion/timeout weakened. Scoped fix/final fmt pass; no Rust reruns afterward.
-
-The sole launcher/Luna journey saved a rule, then a different process/thread
-recalled CIRRUS-4827 without that value in its prompt; neutral exact read passed.
-Overall script exit1 is RETAINED: EXTRA shared-empty assertion failed. Recreated
-shared files predate this check (16:56 vs17:18); creator unestablished. Canary is
-project1/shared0. No second model journey or old-client exclusion; no HAL claim.
-
-Reviews requested attached-CD routing and atomic ignore publication, then memory
-trailing-text and explicit UTF8 Git decoding. All addressed; existing valid ignore
-policies remain untouched and conflicting concurrent winners refuse before seeding.
-Final Python8/8 PASS under cp1252; PATH-only Python/Git defeats executable planting.
-Initial fixture/review failures and the failed encoding probe remain retained.
-Final review verdict/source/integration are in the run report; approval gates push.
+`scodex` uses Git-root/plain-folder `.stateful`, with `STATEFUL_STORE_ROOT` override. Native schemas/layout/migrations/locking stay unchanged; direct Codex defaults unchanged. Only config/login seed a private ignored home; tracked home files refuse before credentials. No knowledge import; original archive: C:/Users/devan/.codex-stateful-archive-20261017-store-root.
+`stateful-memory root`/`native-read` expose read-only native eligibility/retirement; old fixtures work. Generated SQLite README explains native tables/schema and plain read-only inspection.
+One jobs2 build PASS. Initial scoped Rust:177pass/1fixtureFAIL/2baseline PI timeouts/1skip. Compiled native migrations fix fixture: reader13/13PASS. Both timeouts reproduce on clean9fa (its third passed here); no checks weakened. Scoped fix/final fmt PASS; no Rust reruns afterward.
+Sole launcher/Luna native write/restart/different-thread CIRRUS-4827 recall and neutral read PASS. Whole script exit1 RETAINED for EXTRA shared-empty assertion; shared files predate check16:56vs17:18, canary project1/shared0. No second model journey, exclusion, compaction-survival or HAL/offline qualification.
+Review fixes: attached-CD, literal memory text, UTF8 paths, atomic ignore, trusted executables, rejection of tracked home files. Python regressions and actual planting probe PASS. Initial fixture, encoding, review and journey failures retained; final verdict/source/integration in run report.
 Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/store_root_20261017/
-(Build/Tests/ReaderTests/Fix/Format logs, Python regression logs, archive.json,
-journey-assessment.json, raw journey outputs, encoding probes and review verdicts).
