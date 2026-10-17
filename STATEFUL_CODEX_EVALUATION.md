@@ -1311,3 +1311,33 @@ native product behavior. Earlier helper/controller failures remain retained.
 See [the witness](./STATEFUL_PROJECT_VERIFICATION_WITNESS_20261016.md).
 The first project-database milestone, migration, old-writer exclusion, real
 acceptance/source freshness, neutral MCP writes and offline/customer gates stay open.
+
+## 2026-10-17 — inactive bounded project acceptance reader
+
+Source units15b0024a6c/6bae03f2f8/2a30378852/156cc64284/a8835976e6 add actual
+compiled-domain admission to read snapshots and guard-consuming runtime ledger
+reads. Exact project/run binding and cap+one metadata scans precede allocation;
+complete32criteria/128history/64reconciliations/4096pending/1MiB stored-field
+budgets refuse valid legacy excess rather than silently omit binding state.
+The hidden reconciled_at_ms sort-key regression first failed; the fix includes
+it. Public legacy writers prove boundary/excess behavior without weaker checks.
+No native routing, acceptance_request write, checker or knowledge authority added.
+
+Windows/WSL project-store52/52 and runtime95/95 PASS, zero skips/retries. Runtime
+and helper whole9601-file frames match and all executed bytes verify against
+retained a883 Git objects. Store gates changed unrelated runtime preparation
+only; project-store inputs match. Earlier compile/controller/coverage failures
+remain retained. Scoped fix and final fmt PASS; no Rust tests after cleanup.
+
+Direct1 failed CP1252 despite a stale PASS report; direct2/direct3 pass after
+explicit UTF8 stdout. Successful bound exit/stdout/stderr/typed report now gate
+Luna;15controls pass. Actual Luna1 remains FAIL_RETAINED for shell-rendering
+allowlist mismatch,31inputs archived. Corrected prospective Luna2 PASS12.934s,
+one command,34archived bindings,14unchanged reads/eight refusals/two stores,
+exact whole tool/final JSON and complete durable snapshots. This is the a883
+external helper through the unchanged launcher, not an installed cleanup binary.
+
+Exact closeout/promotion receipts govern landing. First database/import/old-writer,
+real acceptance/source freshness, Forget/compaction/MCP/offline/customer gates
+remain open; B0 stays separate/unqualified. See the root acceptance-reader
+witness and stateful_rebuild/acceptance_20261017 raw logs/frozen sessions/reviews.
