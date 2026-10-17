@@ -7,7 +7,6 @@ use std::ops::Range;
 
 use sqlx::SqliteConnection;
 
-use crate::StatefulRun;
 use crate::StatefulRunId;
 use crate::StatefulRunStore;
 use crate::StatefulRunStoreError;
@@ -31,7 +30,7 @@ impl StatefulRunStore {
         let run = load_run(&mut transaction, run_id)
             .await?
             .ok_or_else(|| StatefulRunStoreError::RunNotFound(run_id.to_string()))?;
-        let request = acceptance_request(&mut transaction, &run).await?;
+        let request = acceptance_request(&mut transaction, &run.id, &run.value.goal).await?;
         transaction.commit().await?;
         Ok(request.text)
     }
@@ -41,17 +40,18 @@ impl StatefulRunStore {
 /// run inside a write transaction.
 pub(crate) async fn acceptance_request(
     connection: &mut SqliteConnection,
-    run: &StatefulRun,
+    run_id: &StatefulRunId,
+    goal: &str,
 ) -> Result<AcceptanceRequest, StatefulRunStoreError> {
-    ensure_ledger(connection, &run.id).await?;
+    ensure_ledger(connection, run_id).await?;
     let unrecorded = sqlx::query_scalar::<_, String>(
         "SELECT id FROM stateful_steering
          WHERE run_id = ? AND status = 'applied' AND id NOT IN (
              SELECT steering_id FROM stateful_acceptance_request_parts WHERE run_id = ?
          ) ORDER BY resulting_strategy_revision, created_at_ms, id",
     )
-    .bind(run.id.as_str())
-    .bind(run.id.as_str())
+    .bind(run_id.as_str())
+    .bind(run_id.as_str())
     .fetch_all(&mut *connection)
     .await?;
     for steering_id in unrecorded {
@@ -60,9 +60,9 @@ pub(crate) async fn acceptance_request(
              SELECT ?, COALESCE(MAX(part), 0) + 1, ?
              FROM stateful_acceptance_request_parts WHERE run_id = ?",
         )
-        .bind(run.id.as_str())
+        .bind(run_id.as_str())
         .bind(&steering_id)
-        .bind(run.id.as_str())
+        .bind(run_id.as_str())
         .execute(&mut *connection)
         .await?;
     }
@@ -72,10 +72,10 @@ pub(crate) async fn acceptance_request(
          JOIN stateful_steering AS steering ON steering.id = parts.steering_id
          WHERE parts.run_id = ? ORDER BY parts.part",
     )
-    .bind(run.id.as_str())
+    .bind(run_id.as_str())
     .fetch_all(&mut *connection)
     .await?;
-    let mut text = run.value.goal.clone();
+    let mut text = goal.to_owned();
     let mut parts = Vec::with_capacity(inputs.len());
     for (steering_id, input) in inputs {
         text.push('\n');
@@ -85,3 +85,7 @@ pub(crate) async fn acceptance_request(
     }
     Ok(AcceptanceRequest { text, parts })
 }
+
+#[cfg(test)]
+#[path = "acceptance_request_tests.rs"]
+mod tests;

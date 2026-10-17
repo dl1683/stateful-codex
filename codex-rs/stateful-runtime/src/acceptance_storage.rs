@@ -82,7 +82,7 @@ impl StatefulRunStore {
             });
         }
         let now = unix_timestamp_millis()?;
-        let request = acceptance_request(&mut transaction, &run).await?;
+        let request = acceptance_request(&mut transaction, &run.id, &run.value.goal).await?;
         let mut changed = false;
         for change in changes {
             let ledger = load_ledger(&mut transaction, run_id).await?;
@@ -123,7 +123,7 @@ impl StatefulRunStore {
         if run.status.is_terminal() {
             return Err(StatefulRunStoreError::AcceptanceRunState(run.status));
         }
-        let request = acceptance_request(&mut transaction, &run).await?;
+        let request = acceptance_request(&mut transaction, &run.id, &run.value.goal).await?;
         let ledger = load_ledger(&mut transaction, run_id).await?;
         let uncovered = uncovered_sentences(&request.text, &ledger);
         let slots = MAX_ACCEPTANCE_CRITERIA
@@ -356,7 +356,7 @@ pub(crate) async fn enforce_acceptance_gate(
         .into_iter()
         .map(|(ordinal, reason)| format!("C{ordinal}: {reason}"))
         .collect::<Vec<_>>();
-    let request = acceptance_request(connection, run).await?;
+    let request = acceptance_request(connection, &run.id, &run.value.goal).await?;
     let uncovered = uncovered_sentences(&request.text, &ledger).len();
     if uncovered > 0 {
         unmet.push(format!(

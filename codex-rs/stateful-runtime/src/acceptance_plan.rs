@@ -237,7 +237,7 @@ pub(crate) async fn reconcile_steering(
     // The steering input is part of the acceptance request; it is incorporated only when
     // each of its sentences is covered by a user criterion (or an omission proposal, which
     // gates on its own) quoting it.
-    let request = crate::acceptance_request::acceptance_request(connection, context.run).await?;
+    let request = crate::acceptance_request::acceptance_request(connection, &context.run.id, &context.run.value.goal).await?;
     let Some((_, range)) = request.parts.iter().find(|(id, _)| id == steering_id) else {
         return Err(AcceptanceError::Refused(format!(
             "steering {steering_id} is not part of this run's acceptance request"
