@@ -13,6 +13,11 @@ records bounded same-snapshot reads, explicit valid-legacy refusals, Windows/WSL
 52/95-test gates and a separate Luna component pass. Its exact closeout/promotion
 receipts determine landing; native routing and request materialization stay open.
 
+The [inactive HAL response sequence](./STATEFUL_HAL_SEQUENCE_WITNESS_20261017.md)
+records ordered assertions and sticky refusal with 24-test Windows/WSL gates and
+one Luna component check. It grants no process, job, drain or native authority;
+its exact closeout/promotion receipts separately determine landing.
+
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
 and runtime schema installation, owned readonly snapshots, bounded attributed

@@ -1341,3 +1341,29 @@ Exact closeout/promotion receipts govern landing. First database/import/old-writ
 real acceptance/source freshness, Forget/compaction/MCP/offline/customer gates
 remain open; B0 stays separate/unqualified. See the root acceptance-reader
 witness and stateful_rebuild/acceptance_20261017 raw logs/frozen sessions/reviews.
+
+
+## 2026-10-17 — inactive HAL response ordering
+
+Source657d5285d1 adds fixed-size Ready->Spawned->RootExited assertion ordering,
+parent nonce/worker identity checks and permanent refusal after any error.
+Reported failure after root observation still refuses; no terminal, preservation,
+drain, process trust or native launch authority is minted. Existing codec and
+stream behavior remain unchanged; no dependencies/schema/context/UI changes.
+
+Windows/WSL protocol24/24 PASS each, zero skips/retries. All9600 executed source
+leaves recover from retained657d Git objects; locked/offline local helper build
+before/after source+aux frames match. Thirteen independent complete typed JSON
+cases and static IO failure pass. Prospective literal shell correction/controls
+were reviewed before the sole HAL Luna session; no past grade changed.
+
+Actual unchanged-launcher gpt-6-luna PASS12.150s/one inspector command/44archived
+bindings, exact whole tool/final/case outputs, isolated home/trial inventories.
+This is657d external-helper evidence, not a later cleanup/native binary.
+Scoped fix/fmt PASS; no Rust retest afterward. Conflict-free approved-main merge
+preserves exact three component trees, not combined native qualification.
+
+Exact closeout/promotion receipts determine landing. Worker auth/jobs/lifetime/
+EOF/drain/packaging, native405-to329Marathi/image/offline/customer gaps remain
+OPEN, as does first project database/import/old-writer acceptance. B0 is separate
+and unqualified. Root HAL sequence witness and sequence_20261017 retain evidence.
