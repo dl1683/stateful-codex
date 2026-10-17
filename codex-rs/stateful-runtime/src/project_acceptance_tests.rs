@@ -67,7 +67,7 @@ impl Fixture {
     async fn seed(&self) -> Result<AcceptanceLedger> {
         Ok(self.store.revise_acceptance(&self.run, /*expected_revision*/ 0, vec![AcceptanceChange::Add {
             origin: AcceptanceOrigin::Derived, kind: AcceptanceKind::Manual,
-            statement: "मराठी report".into(), request_span: None,
+            statement: "à¤®à¤°à¤¾à¤ à¥€ report".into(), request_span: None,
             terms: CriterionTerms { required: false, ..CriterionTerms::default() },
         }], "seed", /*project_root*/ None).await?)
     }
@@ -80,7 +80,7 @@ impl Fixture {
     // Observe every durable cell including NULs, storage classes and REAL bits.
     async fn durable(&self) -> Result<std::collections::BTreeMap<String, Vec<Vec<String>>>> {
         let mut connection = self.store.pool.acquire().await?;
-        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        let names: Vec<String> = sqlx::query_scalar("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
             .fetch_all(&mut *connection).await?;
         let quoted = |name: &str| format!("\"{}\"", name.replace('"', "\"\""));
         let mut tables = std::collections::BTreeMap::new();
@@ -192,6 +192,7 @@ async fn identically_shaped_foreign_domain_does_not_authorize_runtime() -> Resul
 #[tokio::test]
 async fn excess_rows_or_bytes_refuse_instead_of_hiding_binding_state() -> Result {
     for mutation in [
+        "INSERT INTO stateful_acceptance_steering VALUES ('acceptance','s','reason',CAST(zeroblob(1048577) AS TEXT))",
         "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<65) INSERT INTO stateful_acceptance_steering SELECT 'acceptance','s'||i,'reason',i FROM n",
         "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<4097) INSERT INTO stateful_acceptance_pending SELECT 'acceptance','p'||i,i FROM n",
         "UPDATE stateful_acceptance_criteria SET statement=CAST(zeroblob(1048577) AS TEXT)",
@@ -212,3 +213,6 @@ async fn excess_rows_or_bytes_refuse_instead_of_hiding_binding_state() -> Result
     }
     Ok(())
 }
+
+#[path = "project_acceptance_legacy_tests.rs"]
+mod legacy;

@@ -30,6 +30,12 @@ pub enum ProjectAcceptanceReadError {
 /// or request parts are created; acceptance_request remains a write operation.
 /// This is trusted domain access, not an effective-memory or neutral read API.
 ///
+/// Complete-read limits: one ledger, 32 criteria, 128 evidence-history rows,
+/// 64 reconciliations, 4,096 pending commands and 1 MiB aggregate stored field
+/// bytes (including numeric fields and sort keys). Legacy writers can produce
+/// valid populations beyond these budgets. Those refuse with ReadLimit; unlike
+/// the legacy reader, excess reconciliations are never silently truncated.
+///
 /// Refusal/cancellation drops the snapshot and leaves its owner close-only;
 /// await close before reopening. No native routing or acceptance is activated.
 pub async fn read_project_acceptance_ledger(
@@ -86,7 +92,7 @@ pub async fn read_project_acceptance_ledger(
                 +COALESCE(octet_length(checker_digest),0)+COALESCE(octet_length(detail),0) AS bytes
             FROM stateful_acceptance_evidence WHERE run_id=? LIMIT ?)", 128_i64),
         ("SELECT COALESCE(SUM(bytes),0), COUNT(*) FROM (
-            SELECT octet_length(steering_id)+octet_length(reason) AS bytes
+            SELECT octet_length(steering_id)+octet_length(reason)+octet_length(reconciled_at_ms) AS bytes
             FROM stateful_acceptance_steering WHERE run_id=? LIMIT ?)", 64_i64),
         ("SELECT 0, COUNT(*) FROM (
             SELECT 1 FROM stateful_acceptance_pending WHERE run_id=? LIMIT ?)", MAX_PENDING_COMMANDS),
