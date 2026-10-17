@@ -1,13 +1,6 @@
 # Stateful Codex evaluation record
 
-> **Current placement (2026-10-17 simplification directive).** `scodex` now selects
-> `<project>/.stateful` as its native home; `STATEFUL_STORE_ROOT` overrides that
-> location. Existing files, SQLite schemas and locks remain unchanged. The old
-> shared home was archived without importing knowledge. The reader supports the
-> native layout, including effective eligible reads without an engine login.
-> The earlier combined-database/import milestones below are historical for this
-> placement change. Exact published-answer survival and HAL qualification remain
-> separate work. See the store-root entry at the end for results and limitations.
+> **Current placement (2026-10-17 simplification).** `scodex` selects `<project>/.stateful` or `STATEFUL_STORE_ROOT`, preserving native layout/schema/locks. The shared home is archived without knowledge import; the neutral reader supports native eligible reads. Earlier combined-store/import milestones are historical for placement; answer-survival and HAL qualification remain separate. See the final store-root entry for results and limitations.
 
 > **Rebuild active (2026-10-17).** The current owner directive supersedes the
 > historical hold below. S0 evidence is landed; S1a is an inert placement foundation,
@@ -1637,36 +1630,11 @@ customer qualification absent. See [scope and receipts](STATEFUL_RUNTIME_QUIESCE
 
 ## SC-REBUILD-20261017-STORE-ROOT
 
-The simplified placement change gives `scodex` a native home at the selected Git
-root/plain folder's `.stateful`; `STATEFUL_STORE_ROOT` overrides its location.
-Existing files, schemas, migrations and locks remain unchanged. Only login/config
-seed a fresh private ignored home; no knowledge import. Original shared home is
-retained at C:/Users/devan/.codex-stateful-archive-20261017-store-root.
-The generated SQLite README lists tables/schema inspection. `stateful-memory
-root` detects native layout; `native-read` reuses native eligibility/retirement
-through a read-only SQLite shim. Existing reader fixtures remain supported.
-Ordinary direct Codex defaults are unchanged; this is launcher-scoped placement.
+`scodex` selects the Git root/plain folder's `.stateful`, overridden by `STATEFUL_STORE_ROOT`. Files, schemas, migrations and locks stay native. Only login/config seed a fresh ignored home. The original shared home is retained at C:/Users/devan/.codex-stateful-archive-20261017-store-root; no knowledge import or fallback. Direct Codex defaults stay unchanged.
+A generated README explains schema/tables/plain SQLite. `stateful-memory root/native-read` detects native layout and reuses eligible/retirement reads without engine authentication; old reader fixtures still work.
 
-One local jobs=2 build passed. Initial scoped Rust run:177 passed,1 fixture setup
-failure,2 existing PI timeouts,1 existing skipped case. The fixture mistakenly
-used the combined installer; compiled native migrations fix it, reader13/13 PASS.
-Both timeouts occur on clean9fa6256bcd; its third timeout passed in our run.
-No assertion/timeout weakened. Scoped fix/final fmt pass; no Rust reruns afterward.
+One local jobs2 build passed. Initial scoped Rust:177 passed,1 fixture setup failure,2 PI timeouts,1 skipped. Compiled native migrations fixed the fixture; reader13/13 PASS. Both timeouts reproduce on unchanged9fa6256bcd, whose third timeout passed here. No assertions/timeouts weakened. Scoped fix/fmt passed; no Rust reruns afterward.
 
-The sole launcher/Luna journey saved a rule, then a different process/thread
-recalled CIRRUS-4827 without that value in its prompt; neutral exact read passed.
-Overall script exit1 is RETAINED: EXTRA shared-empty assertion failed. Recreated
-shared files predate this check (16:56 vs17:18); creator unestablished. Canary is
-project1/shared0. No second model journey or old-client exclusion; no HAL claim.
+The sole launcher/Luna journey wrote a rule; a different process/thread recalled CIRRUS-4827 without it in the prompt, and neutral exact read passed. Overall script exit1 remains RETAINED: EXTRA shared-empty assertion failed. Recreated shared files predate this check (16:56 vs17:18), creator unestablished; canary project1/shared0. No second model journey, exclusion barrier or HAL claim.
 
-Reviews requested attached-CD routing and atomic ignore publication, then memory
-trailing-text and explicit UTF8 Git decoding. All addressed; existing valid ignore
-policies remain untouched and conflicting concurrent winners refuse before seeding.
-Final Python7/7 PASS under cp1252, including Unicode Git paths and TOML arguments.
-Initial fixture/review failures and the failed encoding probe remain retained.
-Final review verdict/source/integration are in the run report; approval gates push.
-Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/store_root_20261017/
-(Build/Tests/ReaderTests/Fix/Format logs, Python regression logs, archive.json,
-journey-assessment.json, raw journey outputs, encoding probes and review verdicts).
-
-Combined regressions:8/8 PASS (launcher_unicode_20261017/caller_args.log): bare/valued Stateful modes, caller models, Unicode paths, memory text and dual atomic policies; prior failures retained.
+Reviews led to attached-CD routing, atomic ignore publication, memory-text boundaries, UTF8 Git paths and PATH-only tool resolution. Earlier fixture, encoding-probe and review failures remain retained; approval gates promotion. Parent Python8/8 passed; combined Python9/9 PASS (launcher_unicode_20261017/security_joint.log), also covering caller models, optional Stateful modes, Unicode/NBSP/TOML and dual policies. Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/{store_root_20261017,launcher_unicode_20261017}/; exact approved source/integration is in stateful_rebuild_latest.md.

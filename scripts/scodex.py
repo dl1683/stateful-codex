@@ -75,9 +75,23 @@ def selected_directory(args, cwd):
     return (cwd / selected).resolve(strict=True)
 
 
+def path_command(name):
+    filename = name + ".exe" if os.name == "nt" else name
+    for folder in os.get_exec_path():
+        base = Path(folder.strip('"'))
+        if not base.is_absolute() or base.resolve() == Path.cwd().resolve():
+            continue
+        command = shutil.which(str(base / filename))
+        if command:
+            return str(Path(command).resolve())
+    raise FileNotFoundError(
+        f"{name} was not found on PATH outside the current directory"
+    )
+
+
 def project_directory(directory):
     result = subprocess.run(
-        ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
+        [path_command("git"), "-C", str(directory), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
         encoding="utf-8",
