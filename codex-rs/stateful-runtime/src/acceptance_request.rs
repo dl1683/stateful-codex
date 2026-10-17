@@ -37,7 +37,8 @@ impl StatefulRunStore {
 }
 
 /// Appends newly applied steering to the run's request parts and returns the request. Must
-/// run inside a write transaction.
+/// run inside a write transaction. Trusted callers supply the ID and unchanged goal
+/// from the same durable run; these parameters are not a storage-binding certificate.
 pub(crate) async fn acceptance_request(
     connection: &mut SqliteConnection,
     run_id: &StatefulRunId,
