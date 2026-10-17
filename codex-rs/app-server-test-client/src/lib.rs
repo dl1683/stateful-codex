@@ -89,6 +89,7 @@ use url::Url;
 use uuid::Uuid;
 
 mod loopback_responses_server;
+mod path_env;
 mod plugin_analytics_capture;
 mod plugin_analytics_mutation_smoke;
 mod plugin_analytics_smoke;
@@ -601,11 +602,8 @@ impl BackgroundAppServer {
         let url = format!("ws://{addr}");
         let mut cmd = Command::new(codex_bin);
         if let Some(codex_bin_parent) = codex_bin.parent() {
-            let mut path = OsString::from(codex_bin_parent.as_os_str());
-            if let Some(existing_path) = std::env::var_os("PATH") {
-                path.push(":");
-                path.push(existing_path);
-            }
+            let path = path_env::prepend_path(codex_bin_parent, std::env::var_os("PATH").as_deref())
+                .context("failed to prepend codex binary directory to PATH")?;
             cmd.env("PATH", path);
         }
         for override_kv in config_overrides {
@@ -1633,11 +1631,8 @@ impl CodexClient {
         let codex_bin_display = codex_bin.display();
         let mut cmd = Command::new(codex_bin);
         if let Some(codex_bin_parent) = codex_bin.parent() {
-            let mut path = OsString::from(codex_bin_parent.as_os_str());
-            if let Some(existing_path) = std::env::var_os("PATH") {
-                path.push(":");
-                path.push(existing_path);
-            }
+            let path = path_env::prepend_path(codex_bin_parent, std::env::var_os("PATH").as_deref())
+                .context("failed to prepend codex binary directory to PATH")?;
             cmd.env("PATH", path);
         }
         for override_kv in config_overrides {
