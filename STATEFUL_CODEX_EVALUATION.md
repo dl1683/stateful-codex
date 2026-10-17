@@ -1561,3 +1561,25 @@ Current scope, next guard-count diagnosis and receipts:
 [guarded HAL lifetime record](STATEFUL_HAL_GUARDED_LIFETIME_20261017.md).
 Native project attachment/import/old-writer exclusion/lock cutover remain the S1
 priority; run_creation_20261017/NEXT_NATIVE_JOIN.md records the live native seams.
+
+
+## 2026-10-17 — Separate HAL guard-drain diagnostic
+
+Direct1 and the sole original-launcher gpt-6-luna Luna1 passed the bounded
+guard-empty diagnostic using unchanged native probe8a3c9fb7. Direct observed
+active/ID-count[1,0,0], Luna[0,0]; no guard intervention. Luna17.87732s
+is non-reproduction, not an explanation or regrade of the earlier lifetime
+failure, whose cause remains unknown. Fresh Droid approves source/witness40
+and evidence102bindings,51frozen inputs and65sessionbindings. Pure10+6controls
+pass; failed preparations retained. No Rust change/build/test for this HAL
+successor; no guardian/native policy/descendant/offline/customer/firstDB claim.
+See [guard-drain diagnostic](STATEFUL_HAL_GUARD_DRAIN_20261017.md).
+
+
+## 2026-10-17 — Automatic project-storage exclusion
+
+Source7033: Windows56/167/339 and WSL56/167/340 PASS, PI1existingignoredworker;
+cleanup APPROVE40bindings, final CLI linked9632Gitblobs. Native Luna1 FAIL_RETAINED:
+refresh2publicfiles, zero queries, unsupported final; original hardlink and all
+postflights restored/pass. Separate readonly6node inventory is diagnostic only.
+FirstDB/import/old-writer/lock remain OPEN. See [exact record](STATEFUL_STORAGE_EXCLUSION_20261017.md).
