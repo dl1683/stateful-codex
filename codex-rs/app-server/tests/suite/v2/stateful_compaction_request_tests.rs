@@ -5,6 +5,7 @@ use codex_project_intelligence::BlackboardStore;
 use codex_project_intelligence::RootBlackboardQuery;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
+use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_root() -> Result<()> {
