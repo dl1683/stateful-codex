@@ -17,18 +17,29 @@ fn responses() -> Vec<Response> {
     [
         ResponseEvent::Ready { worker_pid: 7 },
         ResponseEvent::Spawned { target_pid: 9 },
-        ResponseEvent::RootExited { exit_code: u32::MAX },
-        ResponseEvent::Failed { stage: FailureStage::Control, win32_code: 5 },
+        ResponseEvent::RootExited {
+            exit_code: u32::MAX,
+        },
+        ResponseEvent::Failed {
+            stage: FailureStage::Control,
+            win32_code: 5,
+        },
     ]
     .into_iter()
-    .map(|event| Response { nonce: NONCE, event })
+    .map(|event| Response {
+        nonce: NONCE,
+        event,
+    })
     .collect()
 }
 
 #[test]
 fn consecutive_frames_leave_the_exact_next_frame_untouched() {
     let responses = responses();
-    let frames: Vec<_> = responses.iter().map(|r| encode_response(r, &NONCE).unwrap()).collect();
+    let frames: Vec<_> = responses
+        .iter()
+        .map(|r| encode_response(r, &NONCE).unwrap())
+        .collect();
     let joined = frames.concat();
     let mut reader = joined.as_slice();
     for (index, response) in responses.into_iter().enumerate() {
@@ -36,7 +47,10 @@ fn consecutive_frames_leave_the_exact_next_frame_untouched() {
         assert_eq!(reader, frames[index + 1..].concat());
     }
     // Even after root/failure observations, a required boundary is not optional.
-    assert_eq!(read_response_frame(&mut reader, &NONCE), Err(ResponseError::Framing));
+    assert_eq!(
+        read_response_frame(&mut reader, &NONCE),
+        Err(ResponseError::Framing)
+    );
 }
 
 struct InterruptedBytes<'a> {
@@ -51,7 +65,7 @@ impl Read for InterruptedBytes<'_> {
             return Err(io::ErrorKind::Interrupted.into());
         }
         assert!(!self.bytes.is_empty(), "reader probed beyond the frame");
-        let count = buffer.len().min(1);
+        let count = buffer.len().min(/*other*/ 1);
         buffer[..count].copy_from_slice(&self.bytes[..count]);
         self.bytes = &self.bytes[count..];
         Ok(count)
@@ -62,7 +76,10 @@ impl Read for InterruptedBytes<'_> {
 fn interrupted_one_byte_reads_never_probe_after_the_frame() {
     for response in responses() {
         let frame = encode_response(&response, &NONCE).unwrap();
-        let mut reader = InterruptedBytes { bytes: &frame, interrupt_next: false };
+        let mut reader = InterruptedBytes {
+            bytes: &frame,
+            interrupt_next: false,
+        };
         assert_eq!(read_response_frame(&mut reader, &NONCE), Ok(response));
         assert_eq!(reader.bytes, b"");
     }
@@ -87,13 +104,25 @@ impl Read for BodyProbe<'_> {
 fn length_is_admitted_before_body_access_and_bounds_allocation() {
     for length in [0_u32, 1_048_577, u32::MAX] {
         let header = length.to_le_bytes();
-        let mut reader = BodyProbe { header: &header, requested: vec![] };
-        assert_eq!(read_response_frame(&mut reader, &NONCE), Err(ResponseError::Framing));
+        let mut reader = BodyProbe {
+            header: &header,
+            requested: vec![],
+        };
+        assert_eq!(
+            read_response_frame(&mut reader, &NONCE),
+            Err(ResponseError::Framing)
+        );
         assert_eq!(reader.requested, Vec::<usize>::new());
     }
     let header = 1_048_576_u32.to_le_bytes();
-    let mut reader = BodyProbe { header: &header, requested: vec![] };
-    assert_eq!(read_response_frame(&mut reader, &NONCE), Err(ResponseError::Framing));
+    let mut reader = BodyProbe {
+        header: &header,
+        requested: vec![],
+    };
+    assert_eq!(
+        read_response_frame(&mut reader, &NONCE),
+        Err(ResponseError::Framing)
+    );
     assert_eq!(reader.requested, vec![1_048_576]);
 }
 
@@ -113,7 +142,10 @@ fn every_truncation_and_io_failure_refuses_with_static_framing_error() {
     for response in responses() {
         let frame = encode_response(&response, &NONCE).unwrap();
         for end in 0..frame.len() {
-            assert_eq!(read_response_frame(&mut &frame[..end], &NONCE), Err(ResponseError::Framing));
+            assert_eq!(
+                read_response_frame(&mut &frame[..end], &NONCE),
+                Err(ResponseError::Framing)
+            );
             let error = read_response_frame(&mut FailAfter(&frame[..end]), &NONCE).unwrap_err();
             assert_eq!(error.to_string(), "invalid console response framing");
             assert_eq!(error, ResponseError::Framing);
@@ -127,9 +159,13 @@ fn payload_and_nonce_errors_leave_following_frame_untouched() {
     let payload = std::str::from_utf8(&good[4..]).unwrap();
     for bad_payload in [
         "!".to_owned(),
-        payload.replacen("\"version\":1", "\"version\":2", 1),
-        payload.replacen("\"workerPid\":7", "\"workerPid\":0", 1),
-        payload.replacen("\"version\":1", "\"version\":1,\"version\":1", 1),
+        payload.replacen("\"version\":1", "\"version\":2", /*count*/ 1),
+        payload.replacen("\"workerPid\":7", "\"workerPid\":0", /*count*/ 1),
+        payload.replacen(
+            "\"version\":1",
+            "\"version\":1,\"version\":1",
+            /*count*/ 1,
+        ),
     ] {
         let mut frame = (bad_payload.len() as u32).to_le_bytes().to_vec();
         frame.extend_from_slice(bad_payload.as_bytes());
@@ -142,6 +178,9 @@ fn payload_and_nonce_errors_leave_following_frame_untouched() {
     }
     let joined = [good.as_slice(), good.as_slice()].concat();
     let mut reader = joined.as_slice();
-    assert_eq!(read_response_frame(&mut reader, &[8; 16]), Err(ResponseError::Admission));
+    assert_eq!(
+        read_response_frame(&mut reader, &[8; 16]),
+        Err(ResponseError::Admission)
+    );
     assert_eq!(reader, good);
 }
