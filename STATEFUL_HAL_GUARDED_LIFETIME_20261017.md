@@ -1,4 +1,4 @@
-# Guarded Windows lifetime evidence â€” 2026-10-17
+# Guarded Windows lifetime evidence — 2026-10-17
 
 The original-launcher Luna check FAILED. This remains a blocker for this fixture's
 positive runtime qualification. It does not activate native HAL policy or establish
