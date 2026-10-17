@@ -1077,7 +1077,11 @@ impl ChatWidget {
             SlashCommand::Memory => {
                 self.app_event_tx.send(AppEvent::StatefulMemory {
                     thread_id: self.thread_id(),
-                    args: trimmed.to_string(),
+                    args: if crate::stateful_memory_commands::is_correction(&args) {
+                        args
+                    } else {
+                        trimmed.to_string()
+                    },
                 });
             }
             _ => self.dispatch_command_from_source(cmd, source),
@@ -1174,7 +1178,13 @@ impl ChatWidget {
 
         let trimmed_start = rest.trim_start();
         let leading_trimmed = rest.len().saturating_sub(trimmed_start.len());
-        let trimmed_rest = trimmed_start.trim_end();
+        let trimmed_rest = if cmd == SlashCommand::Memory
+            && crate::stateful_memory_commands::is_correction(trimmed_start)
+        {
+            trimmed_start
+        } else {
+            trimmed_start.trim_end()
+        };
         let args_elements = Self::slash_command_args_elements(
             trimmed_rest,
             rest_offset + leading_trimmed,

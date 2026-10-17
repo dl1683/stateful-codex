@@ -93,6 +93,10 @@
 //! recall is a two-phase handoff: stage the submitted slash text here, then record it after
 //! `ChatWidget` dispatches the command.
 //!
+//! Eligible memory corrections retain their complete argument suffix through expansion,
+//! submission and rich recall. Whole-command pastes revealed by expansion dispatch locally
+//! on Enter and parse locally on dequeue after Tab; literal and bash drafts keep their policy.
+//!
 //! # Question Draft Recovery
 //!
 //! Live terminal turns recover typed, unsubmitted question answers into the main composer.
@@ -378,6 +382,7 @@ mod agents_navigation;
 mod attachment_state;
 mod completion_target;
 mod composer_layout;
+mod correction;
 mod draft_state;
 mod footer_state;
 mod history_search;
@@ -3012,9 +3017,6 @@ impl ChatComposer {
         let mut text_elements = original_text_elements.clone();
         let input_starts_with_space = original_input.starts_with(' ');
         self.draft.recent_submission_mention_bindings.clear();
-        self.draft.textarea.set_text_clearing_elements("");
-        self.draft.is_bash_mode = false;
-
         if pending_paste_handling == PendingPasteHandling::Expand
             && !self.draft.pending_pastes.is_empty()
         {
@@ -3025,7 +3027,11 @@ impl ChatComposer {
             text_elements = expanded_elements;
         }
 
-        if self.config.trim_submission {
+        let preserve_correction = !input_starts_with_space
+            && self.slash_input().is_memory_correction(&text);
+        self.draft.textarea.set_text_clearing_elements("");
+        self.draft.is_bash_mode = false;
+        if self.config.trim_submission && !preserve_correction {
             let expanded_input = text.clone();
             text = text.trim().to_string();
             text_elements = Self::trim_text_elements(&expanded_input, &text, text_elements);
@@ -3093,7 +3099,9 @@ impl ChatComposer {
             let preserve_literal_paste = self.slash_commands_enabled()
                 && text.starts_with('!')
                 && !original_input.trim_start().starts_with('!');
-            let (history_text, history_text_elements) = if preserve_literal_paste {
+            let (history_text, history_text_elements) = if preserve_correction {
+                (original_input.clone(), original_text_elements)
+            } else if preserve_literal_paste {
                 let history_text = original_input.trim().to_string();
                 let history_text_elements = Self::trim_text_elements(
                     &original_input,
@@ -3111,7 +3119,7 @@ impl ChatComposer {
                 remote_image_urls: self.attachments.remote_image_urls(),
                 mention_bindings: original_mention_bindings,
                 pending_pastes: if pending_paste_handling == PendingPasteHandling::Preserve
-                    || preserve_literal_paste
+                    || preserve_literal_paste || preserve_correction
                 {
                     original_pending_pastes.clone()
                 } else {
@@ -3176,7 +3184,8 @@ impl ChatComposer {
             let original_text_elements = self.current_text_elements();
             let original_pending_pastes = self.draft.pending_pastes.clone();
             let raw_text = self.draft.textarea.text();
-            let defer_slash_validation = self.slash_input().should_parse_on_dequeue(raw_text);
+            let defer_slash_validation = self.slash_input().should_parse_on_dequeue(raw_text)
+                || self.expanded_memory_correction();
             let preserve_pending_pastes = defer_slash_validation
                 && !self.draft.pending_pastes.is_empty()
                 && parse_slash_name(raw_text)
@@ -3243,6 +3252,20 @@ impl ChatComposer {
         let original_local_image_paths = self.attachments.local_image_paths();
         let original_pending_pastes = self.draft.pending_pastes.clone();
         if let Some(result) = self.try_dispatch_slash_command_with_args() {
+            return (result, true);
+        }
+
+        if self.expanded_memory_correction() {
+            let command = SlashCommandItem::Builtin(SlashCommand::Memory);
+            self.stage_slash_command_history(&command);
+            if self.reject_slash_command_if_unavailable(&command) {
+                self.record_pending_slash_command_history();
+                return (InputResult::None, true);
+            }
+            let result = self.prepare_inline_args_submission(/*record_history*/ false)
+                .map_or(InputResult::None, |(args, elements)| {
+                    InputResult::CommandWithArgs(SlashCommand::Memory, args, elements)
+                });
             return (result, true);
         }
 
@@ -3354,7 +3377,11 @@ impl ChatComposer {
             inline_command.rest_offset,
             &self.draft.textarea.text_elements(),
         );
-        let trimmed_rest = inline_command.rest.trim();
+        let trimmed_rest = if self.slash_input().is_memory_correction(&text) {
+            inline_command.rest
+        } else {
+            inline_command.rest.trim()
+        };
         args_elements = Self::trim_text_elements(inline_command.rest, trimmed_rest, args_elements);
         let SlashCommandItem::Builtin(cmd) = command else {
             return None;
@@ -3366,7 +3393,7 @@ impl ChatComposer {
         ))
     }
 
-    /// Expand pending placeholders and extract normalized inline-command args.
+    /// Expand pending placeholders and extract inline args, preserving correction suffixes.
     ///
     /// Inline-arg commands are initially dispatched using the raw draft so command rejection does
     /// not consume user input. Once a command needs its args, this helper performs the usual
@@ -3384,7 +3411,11 @@ impl ChatComposer {
         let (prepared_rest, prepared_rest_offset) = slash_input::prepared_args(&prepared_text)?;
         let mut args_elements =
             slash_input::args_elements(prepared_rest, prepared_rest_offset, &prepared_elements);
-        let trimmed_rest = prepared_rest.trim();
+        let trimmed_rest = if self.slash_input().is_memory_correction(&prepared_text) {
+            prepared_rest
+        } else {
+            prepared_rest.trim()
+        };
         args_elements = Self::trim_text_elements(prepared_rest, trimmed_rest, args_elements);
         self.draft.textarea.enter_vim_insert_mode();
         Some((trimmed_rest.to_string(), args_elements))
@@ -3416,7 +3447,9 @@ impl ChatComposer {
         if matches!(command, SlashCommandItem::Builtin(SlashCommand::Clear)) {
             return;
         }
-        self.stage_slash_command_history_text(self.draft.textarea.text().trim().to_string());
+        let text = self.draft.textarea.text();
+        let text = if self.expanded_memory_correction() { text } else { text.trim() };
+        self.stage_slash_command_history_text(text.to_string());
     }
 
     /// Stage a popup-selected command using its canonical command text.
@@ -5044,6 +5077,10 @@ impl ChatComposer {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "chat_composer/correction_tests.rs"]
+mod correction_tests;
 
 #[cfg(test)]
 #[path = "chat_composer/agents_navigation_tests.rs"]

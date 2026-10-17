@@ -3645,3 +3645,63 @@ async fn transcript_copy_feedback_stays_in_the_footer_without_history_or_interru
         render_bottom_popup(&chat, /*width*/ 80)
     );
 }
+
+#[tokio::test]
+async fn correction_live_and_busy_tab_never_submit_a_model_turn() {
+    use crate::stateful_memory_commands::MemoryCommand;
+    use crate::stateful_memory_commands::parse;
+    for args in ["correct e@1  padded  ", "CoRrEcT broken", "correct e@1 ",
+        "correct e@1   ", "correct e@1 α\t中 e\u{301}"] {
+        for route in ["live", "queued", "expanded-live", "expanded-queued"] {
+            let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+            let queued = route.ends_with("queued");
+            let expanded = route.starts_with("expanded");
+            if queued {
+                handle_turn_started(&mut chat, "busy");
+            }
+            let expected = format!("{args}{}", if expanded { " ".repeat(1100) } else { String::new() });
+            let text = format!("/memory {expected}");
+            if expanded {
+                chat.handle_paste(text.clone());
+            } else {
+                chat.bottom_pane.set_composer_text(text.clone(), Vec::new(), Vec::new());
+            }
+            let draft = chat.bottom_pane.composer_text();
+            if queued {
+                chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+                assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
+                complete_turn_with_message(&mut chat, "busy", Some("done"));
+                assert!(chat.input_queue.queued_user_messages.is_empty());
+            } else {
+                submit_current_composer(&mut chat);
+            }
+            let mut memory = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::StatefulMemory { thread_id, args } = event {
+                    memory.push((thread_id, args));
+                }
+            }
+            assert_eq!(memory, vec![(chat.thread_id(), expected.clone())]);
+            let parsed = parse(&memory[0].1);
+            if args == "CoRrEcT broken" {
+                assert!(parsed.is_err());
+            } else {
+                let MemoryCommand::Forget(target) = parse("forget e@1").unwrap() else {
+                    panic!("target");
+                };
+                let payload = expected.strip_prefix("correct e@1 ").unwrap().to_string();
+                assert_eq!(parsed, Ok(MemoryCommand::Correct(target, payload)));
+            }
+            assert_eq!(recall_latest_after_clearing(&mut chat), draft);
+            submit_current_composer(&mut chat);
+            let mut replay = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::StatefulMemory { args, .. } = event {
+                    replay.push(args);
+                }
+            }
+            assert_eq!(replay, vec![expected]);
+            assert_no_submit_op(&mut ops);
+        }
+    }
+}

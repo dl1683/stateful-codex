@@ -161,3 +161,27 @@ fn apply_and_undo_name_exact_targets() {
         ]
     );
 }
+
+#[test]
+fn correction_suffix_is_exact_and_malformed_targets_stay_local() {
+    for (args, suffix) in [
+        ("correct e@1 ", ""),
+        ("CoRrEcT e@1  ", " "),
+        ("  correct  e@1\tα\r\nβ  ", "α\r\nβ  "),
+        ("correct e@1\u{2003}é e\u{301}\t中", "é e\u{301}\t中"),
+        ("correct e@1\r\nx", "\nx"),
+    ] {
+        assert!(super::is_correction(args));
+        assert_eq!(parse(args), Ok(MemoryCommand::Correct(
+            super::EntryTarget { entry_id: "e".into(), revision: 1 }, suffix.into(),
+        )));
+    }
+    for args in ["correct", "correct e@1", "correct @1 x", "correct e@0 x",
+        "correct e@-1 x", "correct e@18446744073709551616 x", "correct e x"] {
+        assert!(super::is_correction(args));
+        assert_eq!(parse(args), Err(USAGE.to_string()));
+    }
+    assert_eq!(parse(" add note  padded  "), Ok(addition(
+        StatefulMemoryAddKind::Note, "padded", /*reason*/ None,
+    )));
+}

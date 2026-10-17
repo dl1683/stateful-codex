@@ -73,8 +73,22 @@ pub(crate) struct Addition {
     pub(crate) reason: Option<String>,
 }
 
+/// Recognizes the correction verb even when its target or payload is malformed.
+pub(crate) fn is_correction(args: &str) -> bool {
+    args.split_whitespace()
+        .next()
+        .is_some_and(|verb| verb.eq_ignore_ascii_case("correct"))
+}
+
 /// Parses the arguments of `/memory`.
 pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
+    if is_correction(args) {
+        let (_, rest) = args.trim_start().split_once(char::is_whitespace)
+            .ok_or_else(|| USAGE.to_string())?;
+        let (target, text) = rest.trim_start().split_once(char::is_whitespace)
+            .ok_or_else(|| USAGE.to_string())?;
+        return Ok(MemoryCommand::Correct(entry_target(target)?, text.to_string()));
+    }
     let args = args.trim();
     if args.is_empty() {
         return Ok(MemoryCommand::List);
@@ -99,10 +113,6 @@ pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
                 .ok_or_else(|| USAGE.to_string())?;
             Ok(MemoryCommand::Apply(entry_target(target)?, category))
         }
-        "correct" if !text.trim().is_empty() => Ok(MemoryCommand::Correct(
-            entry_target(target)?,
-            text.trim().to_string(),
-        )),
         _ => Err(USAGE.to_string()),
     }
 }

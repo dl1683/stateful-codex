@@ -122,6 +122,13 @@ impl<'a> SlashInput<'a> {
         })
     }
 
+    pub(super) fn is_memory_correction(&self, text: &str) -> bool {
+        self.inline_command(text).is_some_and(|input| {
+            matches!(input.command, SlashCommandItem::Builtin(SlashCommand::Memory))
+                && crate::stateful_memory_commands::is_correction(input.rest)
+        })
+    }
+
     pub(super) fn should_parse_on_dequeue(&self, text: &str) -> bool {
         self.enabled && !text.starts_with(' ') && text.trim().starts_with('/')
     }
