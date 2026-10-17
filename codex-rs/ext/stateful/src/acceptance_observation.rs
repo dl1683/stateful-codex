@@ -14,9 +14,9 @@
 //! check's pinned artifacts and checker bytes, and every criterion's pinned files. At its end
 //! it records the receipt against that start state: unavailable, never passed, when its own
 //! pinned content changed while it ran, when another mutation was observed meanwhile, or when
-//! no start snapshot exists. A check that changed any criterion's pinned files is itself a
-//! mutation: earlier evidence becomes stale and only its own unchanged post-write state is
-//! qualified. The host also takes the workspace's content identity around a check (see
+//! its captured criterion revision is obsolete. Without a start snapshot it emits no receipt.
+//! A check that changed any criterion's pinned files is itself a mutation: earlier evidence
+//! becomes stale and only its own unchanged post-write state is qualified. The host also takes the workspace's content identity around a check (see
 //! `acceptance_workspace`); when a file no active criterion pins changed (or the identity is
 //! unavailable), or another change was observed while the check ran, its own receipt cannot
 //! qualify and every receipt made before or during it becomes stale. A command that returned with no live process and whose end item
@@ -353,20 +353,14 @@ async fn observe_command(
     let start = turn_store
         .get::<CheckStarts>()
         .and_then(|starts| starts.0.lock().ok()?.remove(&command.id));
-    if matched.is_empty() {
-        if command.status != CommandExecutionStatus::Declined && mutates(command) {
-            return bump(services, run_id).await;
+    if start.is_none() {
+        if command.status != CommandExecutionStatus::Declined
+            && (!matched.is_empty() || mutates(command))
+        {
+            bump(services, run_id).await?;
         }
         return Ok(());
     }
-    let output = command.aggregated_output.clone().unwrap_or_else(|| {
-        format!(
-            "{}{}",
-            command.stdout.as_deref().unwrap_or_default(),
-            command.stderr.as_deref().unwrap_or_default()
-        )
-    });
-    let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
     let end = governing_digests(roots, &ledger).await;
     let end_identity = workspace_manifest(roots).await;
     // A check's effects are accounted for only when its whole run is known: it started at
@@ -391,9 +385,24 @@ async fn observe_command(
             stamp_generation = Some(ledger.workspace_generation + 1);
         }
     }
+    // Snapshot accounting above also applies when a refinement changed argv/cwd. Do not
+    // apply the unmatched-command heuristic a second time to a captured execution.
+    if matched.is_empty() {
+        return Ok(());
+    }
+    let output = command.aggregated_output.clone().unwrap_or_else(|| {
+        format!(
+            "{}{}",
+            command.stdout.as_deref().unwrap_or_default(),
+            command.stderr.as_deref().unwrap_or_default()
+        )
+    });
+    let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
     let evidence = matched
         .iter()
-        .map(|criterion| {
+        .filter_map(|criterion| {
+            let start = start.as_ref()?;
+            let captured = start.criteria.get(&criterion.ordinal)?;
             let unavailable = |detail: &str| {
                 (
                     EvidenceOutcome::Unavailable,
@@ -403,17 +412,11 @@ async fn observe_command(
                     None,
                 )
             };
-            let started = start
-                .as_ref()
-                .and_then(|start| Some((start.generation, start.criteria.get(&criterion.ordinal)?)));
-            let (outcome, detail, generation, digest, checker) = match started {
-                None => unavailable(
-                    "no start snapshot of this check exists (it started before this process observed it)",
-                ),
-                Some((_, (revision, _, _))) if *revision != criterion.revision => {
+            let (outcome, detail, generation, digest, checker) = match (start.generation, captured) {
+                (_, (revision, _, _)) if *revision != criterion.revision => {
                     unavailable("the criterion changed while the check ran")
                 }
-                Some((generation, (_, start_digest, start_checker))) => {
+                (generation, (_, start_digest, start_checker)) => {
                     let (end_digest, end_checker) =
                         end.get(&criterion.ordinal).cloned().unwrap_or_default();
                     let unchanged = start_digest.is_some()
@@ -444,9 +447,9 @@ async fn observe_command(
                     )
                 }
             };
-            CommandEvidence {
+            Some(CommandEvidence {
                 ordinal: criterion.ordinal,
-                criterion_revision: criterion.revision,
+                criterion_revision: captured.0,
                 outcome,
                 command: criterion.check_command.clone().unwrap_or_default(),
                 exit_code: command.exit_code,
@@ -457,7 +460,7 @@ async fn observe_command(
                 detail,
                 start_generation: generation,
                 source_id: command.id.clone(),
-            }
+            })
         })
         .collect();
     store

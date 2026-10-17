@@ -406,7 +406,7 @@ async fn a_check_binds_only_in_its_directory_with_a_start_snapshot() {
         )
         .await;
     assert_eq!(fixture.latest().await, (None, 1));
-    // No start snapshot: unavailable, never passed.
+    // No start snapshot: no receipt, and unknown effects advance generation.
     fixture
         .finish(
             "unseen",
@@ -417,7 +417,7 @@ async fn a_check_binds_only_in_its_directory_with_a_start_snapshot() {
             "unknown",
         )
         .await;
-    assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Unavailable));
+    assert_eq!(fixture.latest().await, (None, 2));
     // A clean run in the pinned directory passes and tracks in-flight state.
     fixture
         .start("clean", "pytest -q tests/test_parse.py", &root)
@@ -434,7 +434,7 @@ async fn a_check_binds_only_in_its_directory_with_a_start_snapshot() {
         )
         .await;
     assert_eq!(fixture.pending().await, 0);
-    assert_eq!(fixture.latest().await, (Some(EvidenceOutcome::Passed), 1));
+    assert_eq!(fixture.latest().await, (Some(EvidenceOutcome::Passed), 2));
     // A verifier the shell tool timed out is failed, never passed.
     fixture.check("timed-out", "failed", 124).await;
     assert_eq!(fixture.latest().await.0, Some(EvidenceOutcome::Failed));
@@ -933,4 +933,33 @@ async fn oversized_commands_end_forget_and_expire_with_bounded_evidence() {
         ),
         (0, false)
     );
+}
+
+#[tokio::test]
+async fn a_newly_matching_ordinal_has_no_captured_revision_to_certify() {
+    let fixture = fixture("new-ordinal").await;
+    let root = fixture.project.path();
+    fixture.start("held", "pytest -q tests/test_parse.py", root).await;
+    let before = fixture.store.acceptance_ledger(&fixture.run_id).await.expect("ledger");
+    fixture.store.revise_acceptance(
+        &fixture.run_id, before.revision,
+        vec![AcceptanceChange::Add {
+            origin: AcceptanceOrigin::Derived, kind: AcceptanceKind::Check,
+            statement: "An additional check.".to_string(), request_span: None,
+            terms: CriterionTerms {
+                required: true, artifacts: vec!["src/parse.py".to_string()],
+                checker: vec!["tests/test_parse.py".to_string()],
+                check_command: Some("pytest -q tests/test_parse.py".to_string()),
+                expected_observation: Some("Every test passes.".to_string()),
+                ..CriterionTerms::default()
+            },
+        }], "add-while-held", /*project_root*/ None,
+    ).await.expect("added");
+    fixture.finish("held", "pytest -q tests/test_parse.py", root, "completed", 0, "unknown").await;
+    let after = fixture.store.acceptance_ledger(&fixture.run_id).await.expect("ledger");
+    assert_eq!(after.criteria[1].evidence, None);
+    assert_eq!(after.criteria[0].evidence.as_ref().expect("captured C1").criterion_revision,
+        before.criteria[0].revision);
+    assert_eq!((after.workspace_generation, after.observed_executions, after.pending_commands),
+        (before.workspace_generation + 1, 1, 0));
 }

@@ -481,3 +481,6 @@ async fn a_check_that_changes_unpinned_repository_files_is_refused() -> Result<(
     }
     Ok(())
 }
+
+#[path = "stateful_acceptance_start_revision_tests.rs"]
+mod start_revision;
