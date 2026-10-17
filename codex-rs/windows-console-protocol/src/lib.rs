@@ -23,6 +23,7 @@ pub use response::ResponseEvent;
 pub use response::decode_response;
 pub use response::encode_response;
 pub use response_stream::read_closed_response;
+pub use response_stream::read_response_frame;
 pub use sequence::SequenceError;
 pub use sequence::WorkerResponseSequence;
 pub use stream::read_closed_request;
