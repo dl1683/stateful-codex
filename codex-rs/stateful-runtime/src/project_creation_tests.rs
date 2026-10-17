@@ -73,7 +73,10 @@ async fn modes_replay_and_terminal_state_preserve_entire_run() -> Result {
         assert!(run.created_at_ms > 0);
         assert_eq!(f.create().await?, run);
         sqlx::query("UPDATE stateful_runs SET status='cancelled', revision=2, result='retained', updated_at_ms=created_at_ms+1 WHERE id='run'").execute(&mut f.observer).await?;
-        assert_eq!(f.create().await?, StatefulRun { status: StatefulRunStatus::Cancelled, revision: 2, result: Some("retained".into()), updated_at_ms: run.created_at_ms+1, ..run });
+        assert_eq!(f.create().await?, StatefulRun { status: StatefulRunStatus::Cancelled, revision: 2, result: Some("retained".into()), updated_at_ms: run.created_at_ms+1, ..run.clone() });
+        sqlx::query("UPDATE stateful_runs SET status='completed' WHERE id='run'").execute(&mut f.observer).await?;
+        sqlx::query("INSERT INTO stateful_host_answers VALUES ('run','z','turn','answer','unverified',1)").execute(&mut f.observer).await?;
+        assert_eq!(f.create().await?, StatefulRun { status: StatefulRunStatus::Answered, revision: 2, result: Some("retained".into()), updated_at_ms: run.created_at_ms+1, ..run });
     }
     Ok(())
 }
@@ -140,5 +143,16 @@ async fn complete_projection_byte_and_thread_boundaries_precede_loading() -> Res
     assert_eq!(f.create().await?.value, f.value);
     sqlx::query("INSERT INTO stateful_run_threads VALUES ('run',64,'overflow')").execute(&mut f.observer).await?;
     assert!(matches!(f.refuse().await?, ProjectRunCreationError::ReadLimit));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_changed_persisted_mode_conflicts_with_original_creation() -> Result {
+    let mut f = Fixture::new("stateful-runtime").await?;
+    let original = f.create().await?;
+    sqlx::query("UPDATE stateful_runs SET mode='collaborative', revision=2 WHERE id='run'").execute(&mut f.observer).await?;
+    assert!(matches!(f.refuse().await?, ProjectRunCreationError::Runtime(StatefulRunStoreError::RunIdentityConflict(_))));
+    f.value.mode = WorkflowMode::Collaborative;
+    assert_eq!(f.create().await?, StatefulRun { value: f.value.clone(), revision: 2, ..original });
     Ok(())
 }
