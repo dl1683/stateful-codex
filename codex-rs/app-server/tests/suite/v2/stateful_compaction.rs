@@ -42,6 +42,9 @@ const SEEDED_FACT: &str = "A decisive project fact survives every thread view.";
 const LATER_FACT: &str = "A later project decision changes the root.";
 const COMPACT_PROMPT: &str = "Summarize the Stateful conversation.";
 
+#[path = "stateful_compaction_request_tests.rs"]
+mod request_tests;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn project_root_appears_once_across_compaction_revision_and_resume() -> Result<()> {
     let server = responses::start_mock_server().await;
