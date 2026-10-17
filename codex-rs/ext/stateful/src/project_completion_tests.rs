@@ -6,7 +6,6 @@ use codex_project_intelligence::PreparedProjectNoLearning;
 use codex_project_intelligence::ProjectKnowledgeReader;
 use codex_project_intelligence::ProjectKnowledgeWriteError;
 use codex_project_intelligence::revalidate_project_no_reusable_learning;
-use codex_project_store::DomainManifest;
 use codex_project_store::PreparedDomains;
 use codex_project_store::ProjectStoreLocation;
 use codex_project_store::ProjectStoreReader;
@@ -32,8 +31,6 @@ use sqlx::Row;
 use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteConnectOptions;
 
-static PI: sqlx::migrate::Migrator = sqlx::migrate!("../../project-intelligence/migrations");
-static RT: sqlx::migrate::Migrator = sqlx::migrate!("../../stateful-runtime/migrations");
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Rows = Vec<BTreeMap<String, String>>;
 
@@ -55,14 +52,8 @@ struct Fixture {
 
 async fn domains() -> Result<PreparedDomains> {
     Ok(PreparedDomains::prepare(&[
-        DomainManifest {
-            domain: "project-intelligence",
-            migrations: &PI,
-        },
-        DomainManifest {
-            domain: "stateful-runtime",
-            migrations: &RT,
-        },
+        codex_project_intelligence::project_store_domain(),
+        codex_stateful_runtime::project_store_domain()?,
     ])
     .await?)
 }

@@ -112,10 +112,10 @@ async fn future_native_migrations_leave_populated_canonical_store_readable()
     let mut reader =
         ProjectStoreReader::open(&location, PreparedDomains::prepare(&[canonical]).await?)
             .await?
-            .into_domain_reader(&project_store_domain()?)
+            .into_domain_reader(&project_store_base_domain()?)
             .await?;
     let mut snapshot = reader.begin_snapshot().await?;
-    snapshot.require_domain(&project_store_domain()?)?;
+    snapshot.require_domain(&project_store_base_domain()?)?;
     assert_eq!(snapshot.identity(), &identity);
     assert_eq!(
         sqlx::query_as::<_, (String, String)>(
@@ -150,10 +150,22 @@ async fn future_native_migrations_leave_populated_canonical_store_readable()
 
     // Exercise actual canonical guards against the simulated native selection,
     // retaining an independently installed predecessor. No native opener runs.
+    let mut migrations = frozen.migrations.to_vec();
+    migrations.extend(SUFFIX.iter().cloned());
+    let frozen = Migrator { migrations: Cow::Owned(migrations), ..Migrator::DEFAULT };
     let domains = || DomainManifest {
         domain: "stateful-runtime",
         migrations: &frozen,
     };
+    let plan = codex_project_store::PreparedDomainUpgrade::new(
+        PreparedDomains::prepare(&[project_store_base_domain()?]).await?,
+        PreparedDomains::prepare(&[domains()]).await?,
+    )?;
+    let mut upgrader = ProjectStoreWriter::open(
+        &location, PreparedDomains::prepare(&[project_store_base_domain()?]).await?, &identity,
+    ).await?;
+    upgrader.upgrade_domains(&plan).await?;
+    upgrader.close().await?;
     let store = crate::StatefulRunStore {
         pool: sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(/*max*/ 1)

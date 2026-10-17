@@ -55,17 +55,33 @@ const BASE: [(i64, &str, &str); 8] = [
     ),
 ];
 
-static CANONICAL: LazyLock<Result<Migrator, StoreRegistryError>> =
+static BASELINE: LazyLock<Result<Migrator, StoreRegistryError>> =
     LazyLock::new(|| select_base(&crate::storage::MIGRATOR));
+static SUFFIX: Migrator = sqlx::migrate!("./project_migrations");
+static CANONICAL: LazyLock<Result<Migrator, StoreRegistryError>> = LazyLock::new(|| {
+    let base = BASELINE.as_ref().map_err(|_| StoreRegistryError::IncompatibleHistory)?;
+    let mut migrations = base.migrations.to_vec();
+    migrations.extend(SUFFIX.iter().cloned());
+    Ok(Migrator { migrations: Cow::Owned(migrations), ..Migrator::DEFAULT })
+});
 
-/// Compiled canonical runtime metadata only. Does not open a database or engine
-/// home. Refuses changed base ownership; unrelated native versions are excluded.
+/// Current canonical runtime metadata, including project-only suffixes. Does not
+/// open or upgrade storage; native home versions and flags remain independent.
 pub fn project_store_domain() -> Result<DomainManifest<'static>, StoreRegistryError> {
     match &*CANONICAL {
         Ok(migrations) => Ok(DomainManifest {
             domain: "stateful-runtime",
             migrations,
         }),
+        Err(_) => Err(StoreRegistryError::IncompatibleHistory),
+    }
+}
+
+/// Frozen original canonical owner for explicit, complete-store conversion only.
+/// This is compiled metadata, never ordinary-access fallback or native admission.
+pub fn project_store_base_domain() -> Result<DomainManifest<'static>, StoreRegistryError> {
+    match &*BASELINE {
+        Ok(migrations) => Ok(DomainManifest { domain: "stateful-runtime", migrations }),
         Err(_) => Err(StoreRegistryError::IncompatibleHistory),
     }
 }

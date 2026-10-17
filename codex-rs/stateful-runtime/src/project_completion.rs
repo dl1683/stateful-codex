@@ -13,6 +13,11 @@ use crate::StatefulRunStoreError;
 use crate::StatefulRunUpdate;
 use crate::storage;
 
+pub(crate) const FOREIGN_DEPENDENTS_SQL: &str =
+    "SELECT EXISTS(SELECT 1 FROM stateful_obligations WHERE run_id=? AND project_id<>?
+     UNION ALL SELECT 1 FROM stateful_steering WHERE run_id=? AND project_id<>?
+     UNION ALL SELECT 1 FROM stateful_turn_measurements WHERE run_id=? AND project_id<>?)";
+
 /// Trusted runtime inputs; callers must first validate knowledge, eligibility and
 /// source bindings in the same transaction. Native routing remains inactive.
 pub struct ProjectRunCompletion<'a> {
@@ -89,11 +94,7 @@ pub async fn commit_project_run(
     let current = storage::load_run(transaction.connection(), request.run_id)
         .await?
         .ok_or_else(|| StatefulRunStoreError::RunNotFound(request.run_id.to_string()))?;
-    let foreign: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM stateful_obligations WHERE run_id=? AND project_id<>?
-         UNION ALL SELECT 1 FROM stateful_steering WHERE run_id=? AND project_id<>?
-         UNION ALL SELECT 1 FROM stateful_turn_measurements WHERE run_id=? AND project_id<>?)",
-    )
+    let foreign: bool = sqlx::query_scalar(FOREIGN_DEPENDENTS_SQL)
     .bind(request.run_id.as_str())
     .bind(&project)
     .bind(request.run_id.as_str())

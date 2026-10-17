@@ -18,6 +18,9 @@ mod obligation_operations;
 mod project_acceptance;
 mod project_completion;
 mod project_domain;
+#[cfg(test)]
+#[path = "project_index_tests.rs"]
+mod project_index_tests;
 mod project_verification;
 mod run;
 mod run_history_storage;
@@ -89,6 +92,7 @@ pub use project_completion::ProjectRunCompletionError;
 pub use project_completion::commit_project_run;
 pub use project_completion::revalidate_project_run_start;
 pub use project_domain::project_store_domain;
+pub use project_domain::project_store_base_domain;
 pub use project_verification::ProjectVerificationError;
 pub use project_verification::commit_project_verification_end;
 pub use project_verification::commit_project_verification_start;

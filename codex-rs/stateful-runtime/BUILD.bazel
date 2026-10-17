@@ -4,6 +4,7 @@ codex_rust_crate(
     name = "stateful-runtime",
     compile_data = glob([
         "migrations/**",
+        "project_migrations/**",
         "tests/data/**",
     ]),
     crate_name = "codex_stateful_runtime",

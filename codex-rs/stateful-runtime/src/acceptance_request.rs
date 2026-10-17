@@ -13,6 +13,12 @@ use crate::StatefulRunStoreError;
 use crate::acceptance_storage::ensure_ledger;
 use crate::storage::load_run;
 
+pub(crate) const APPLIED_DISCOVERY_SQL: &str =
+    "SELECT id FROM stateful_steering
+     WHERE run_id = ? AND status = 'applied' AND id NOT IN (
+         SELECT steering_id FROM stateful_acceptance_request_parts WHERE run_id = ?
+     ) ORDER BY resulting_strategy_revision, created_at_ms, id";
+
 pub(crate) struct AcceptanceRequest {
     pub(crate) text: String,
     /// Byte range of each applied steering input inside `text`, by steering ID.
@@ -45,12 +51,7 @@ pub(crate) async fn acceptance_request(
     goal: &str,
 ) -> Result<AcceptanceRequest, StatefulRunStoreError> {
     ensure_ledger(connection, run_id).await?;
-    let unrecorded = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM stateful_steering
-         WHERE run_id = ? AND status = 'applied' AND id NOT IN (
-             SELECT steering_id FROM stateful_acceptance_request_parts WHERE run_id = ?
-         ) ORDER BY resulting_strategy_revision, created_at_ms, id",
-    )
+    let unrecorded = sqlx::query_scalar::<_, String>(APPLIED_DISCOVERY_SQL)
     .bind(run_id.as_str())
     .bind(run_id.as_str())
     .fetch_all(&mut *connection)
