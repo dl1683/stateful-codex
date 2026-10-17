@@ -1439,4 +1439,11 @@ Exact closeout/promotion govern landing. First project-database milestone OPEN.
 
 ## SC-REBUILD-20261017-OWNER-MANIFESTS
 
-Inactive canonical lineage/actual-owner refactor; native history unchanged. Windows/WSL each: runtime99, PI162 (one ignored support worker), CLI11 PASS. Direct2/Luna2 compare22CLI calls/two67-table stores/full typed rowids/history/UUIDs; actual Luna2 PASS19.545s/128bindings/raw exact nested exec. Runtime compile, stale cross-worktree candidate2 and actual Luna1 Git-cache diagnostic failures retained, never regraded. Clean candidate3/repeatedWindows gates and reviewed prospective exclusion precede Luna2; all19229source leaves Git-object verified. Scopedfix/fmt pass/no Rust retest; Bazel lock update pass/no drift, not Bazel runtime qualification. Source dd220f1165 and baseline1d4b5aff; cleanup binary not executed. Witness STATEFUL_PROJECT_OWNER_MANIFEST_WITNESS_20261017.md, full report owner_manifests_20261017/RECORD_DRAFT.md; exact closeout/promotion separately governs landing. First database/native import/oldwriters/lock/HAL/offline/customer gates OPEN.
+Inactive canonical owner refactor; native history unchanged. Windows/WSL each pass runtime 99, PI 162 (one ignored support worker), CLI 11.
+Direct2/Luna2 compare 22 CLI calls across two 67-table stores, including typed rowids, history and UUIDs. Luna2 passes in 19.545s with 128 bindings.
+Raw rollout verifies the exact nested exec. Runtime compile, stale candidate2 and actual Luna1 Git-cache diagnostic failures remain retained.
+Clean candidate3/repeated Windows gates and reviewed prospective cache exclusion precede Luna2; all 19,229 source leaves match Git objects.
+Scoped fixes/fmt pass; no Rust retest follows. Bazel lock update passes without drift; this is not Bazel runtime qualification.
+Executed source dd220f1165, baseline 1d4b5aff; cleanup binary was not executed. Source approval and witness approval have separate scopes.
+See STATEFUL_PROJECT_OWNER_MANIFEST_WITNESS_20261017.md and owner_manifests_20261017/RECORD_DRAFT.md for receipts and limitations.
+Exact closeout/promotion determines landing. First database, native import/old writers/lock, HAL, offline and customer gates remain OPEN.
