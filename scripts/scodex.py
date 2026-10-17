@@ -14,6 +14,7 @@ TEMPLATE_HOME = Path.home() / ".codex-stateful"
 README = """# Stateful project store
 
 This directory is the native Stateful Codex home. Keep it private and out of Git.
+Git and directory-index ignore policies are written before private data is seeded.
 Its layout, SQLite schemas, migrations and locks are the existing Codex layout;
 no combined memory.sqlite or legacy import is required. STATEFUL_STORE_ROOT is
 the optional location override (relative paths resolve from the selected project).
@@ -72,6 +73,7 @@ def project_directory(directory):
         ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     return (
@@ -97,12 +99,13 @@ def store_directory(project, environ):
 def prepare_home(root, template):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Ignore private configuration/credentials and all native data before seeding.
-    ignore = root / ".gitignore"
-    if ignore.exists() and ignore.read_text(encoding="utf-8") != "*\n":
-        raise ValueError(
-            "The store's existing .gitignore must contain exactly '*' before launch"
-        )
-    ignore.write_text("*\n", encoding="utf-8")
+    for name in (".gitignore", ".ignore"):
+        ignore = root / name
+        if ignore.exists() and ignore.read_text(encoding="utf-8") != "*\n":
+            raise ValueError(
+                f"The store's existing {name} must contain exactly '*' before launch"
+            )
+        ignore.write_text("*\n", encoding="utf-8")
     for name in ("config.toml", "auth.json"):
         source, destination = template / name, root / name
         if source.is_file() and not destination.exists():
@@ -153,7 +156,7 @@ def launch(args):
         options.append("--stateful")
     # The native CLI setting wins over a copied legacy sqlite_home preference;
     # managed requirements are still enforced by the native configuration loader.
-    storage = ["-c", f"sqlite_home={json.dumps(str(root))}"]
+    storage = ["-c", f"sqlite_home={json.dumps(str(root), ensure_ascii=False)}"]
     return subprocess.call([str(binary), *storage, *options, *args], env=environ)
 
 

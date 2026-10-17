@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -36,7 +37,8 @@ class ProjectHomeTests(unittest.TestCase):
 
     def test_git_subdirectory_and_cd_select_one_project_home(self):
         with tempfile.TemporaryDirectory() as directory:
-            project = Path(directory).resolve()
+            project = (Path(directory) / "भारत-🙂").resolve()
+            project.mkdir()
             subprocess.run(["git", "init", "-q", str(project)], check=True)
             nested = project / "nested"
             nested.mkdir()
@@ -65,7 +67,7 @@ class ProjectHomeTests(unittest.TestCase):
             scodex.prepare_home(root, template)
             self.assertEqual(
                 sorted(p.name for p in root.iterdir()),
-                [".gitignore", "README.md", "auth.json", "config.toml"],
+                [".gitignore", ".ignore", "README.md", "auth.json", "config.toml"],
             )
             self.assertEqual(
                 (root / "auth.json").read_text(), '{"fixture":"not-a-token"}'
@@ -73,15 +75,18 @@ class ProjectHomeTests(unittest.TestCase):
             (root / "config.toml").write_text('model = "fixture"\n')
             scodex.prepare_home(root, template)
             self.assertEqual((root / "config.toml").read_text(), 'model = "fixture"\n')
-            (root / ".gitignore").write_text("!auth.json\n")
-            with self.assertRaises(ValueError):
-                scodex.prepare_home(root, template)
+            for name in (".gitignore", ".ignore"):
+                with self.subTest(policy=name):
+                    (root / name).write_text("!auth.json\n")
+                    with self.assertRaises(ValueError):
+                        scodex.prepare_home(root, template)
+                    (root / name).write_text("*\n")
 
     def test_two_plain_projects_launch_native_storage_with_distinct_homes(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()
             homes = []
-            for name in ("alpha", "beta"):
+            for name in ("alpha-नमुना-🙂", "beta"):
                 project = base / name
                 project.mkdir()
                 with (
@@ -102,11 +107,18 @@ class ProjectHomeTests(unittest.TestCase):
                         kwargs["env"]["CODEX_SQLITE_HOME"], str(project / ".stateful")
                     )
                     self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
+                    if sys.version_info >= (3, 11):
+                        import tomllib
+
+                        self.assertEqual(
+                            tomllib.loads(args[0][2])["sqlite_home"],
+                            str(project / ".stateful"),
+                        )
                     self.assertEqual(
                         args[0][1:3],
                         [
                             "-c",
-                            f"sqlite_home={scodex.json.dumps(str(project / '.stateful'))}",
+                            f"sqlite_home={scodex.json.dumps(str(project / '.stateful'), ensure_ascii=False)}",
                         ],
                     )
                     self.assertEqual(

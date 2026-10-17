@@ -1,5 +1,16 @@
 # Stateful Codex evaluation record
 
+> **Launcher compatibility (2026-10-17).** Unicode Git paths are decoded as UTF-8,
+> and the native `sqlite_home` argument preserves Unicode scalars instead of JSON
+> surrogate escapes that TOML rejects. Both Git and non-Git index ignore policies
+> precede private-home seeding. Combined launcher tests pass6/6, including the
+> attached-directory routing repair, real Unicode Git roots and TOML round trips;
+> final `just fmt` passes with no subsequent test run. No Rust/schema change,
+> rebuild or additional Luna journey belongs to this compatibility repair.
+> The superseded old-client-exclusion proposal was archived without promotion;
+> its baseline timeouts and limited original-launcher smoke remain historical
+> evidence under `sc_dogfood/lsr_drivers/reports/stateful_rebuild/knowledge_quiescence_20261017/`.
+
 > **Current placement (2026-10-17 simplification directive).** `scodex` now selects
 > `<project>/.stateful` as its native home; `STATEFUL_STORE_ROOT` overrides that
 > location. Existing files, SQLite schemas and locks remain unchanged. The old
