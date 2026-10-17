@@ -109,6 +109,7 @@ mod connection_cleanup;
 mod connection_rpc_gate;
 mod current_time;
 mod daemon_thread_recovery;
+mod disposable_root;
 mod dynamic_tools;
 mod effective_plugin_change;
 mod error_code;
@@ -505,6 +506,7 @@ pub async fn run_main_with_transport_options(
     auth: WebsocketAuthSettings,
     runtime_options: AppServerRuntimeOptions,
 ) -> IoResult<AppServerExit> {
+    let disposable_root = disposable_root::DisposableRoot::from_env(strict_config)?;
     #[cfg(target_os = "windows")]
     let _registered_core = codex_windows_sandbox::registered_core_requested();
     let loader_overrides = loader_overrides_with_test_user_config_file(
@@ -526,6 +528,10 @@ pub async fn run_main_with_transport_options(
         )
     })?;
     let codex_home = find_codex_home()?;
+    if let Some(root) = &disposable_root {
+        root.contains(&codex_home)?;
+        root.contains(loader_overrides.user_config_path(&codex_home)?.as_path())?;
+    }
     let local_runtime_paths = ExecServerRuntimeOptions::from_optional_paths(
         arg0_paths.codex_self_exe.clone(),
         arg0_paths.codex_linux_sandbox_exe.clone(),
@@ -539,7 +545,8 @@ pub async fn run_main_with_transport_options(
         Default::default(),
         arg0_paths.clone(),
         Arc::new(NoopThreadConfigLoader),
-    );
+    )
+    .with_disposable_root(disposable_root);
     let bootstrap_config = config_manager
         .load_startup_config(/*fallback_cwd*/ None)
         .await?;

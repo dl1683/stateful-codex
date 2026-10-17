@@ -42,6 +42,7 @@ pub(crate) struct ModelProviderRequirementsChanged;
 /// Shared app-server entry point for loading effective Codex configuration.
 #[derive(Clone)]
 pub(crate) struct ConfigManager {
+    disposable_root: Option<crate::disposable_root::DisposableRoot>,
     codex_home: PathBuf,
     cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
     runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
@@ -81,6 +82,7 @@ impl ConfigManager {
     ) -> Self {
         let network_policy = codex_http_client::NetworkPolicyController::default();
         Self {
+            disposable_root: None,
             codex_home,
             cli_overrides: Arc::new(RwLock::new(cli_overrides)),
             runtime_feature_enablement: Arc::new(RwLock::new(BTreeMap::new())),
@@ -98,6 +100,22 @@ impl ConfigManager {
 
     pub(crate) fn codex_home(&self) -> &Path {
         self.codex_home.as_path()
+    }
+
+    pub(crate) fn with_disposable_root(
+        mut self,
+        root: Option<crate::disposable_root::DisposableRoot>,
+    ) -> Self {
+        self.disposable_root = root;
+        self
+    }
+
+    fn admit_config(&self, config: Config) -> std::io::Result<Config> {
+        if let Some(root) = &self.disposable_root {
+            root.contains(self.user_config_path()?.as_path())?;
+            root.validate(&config)?;
+        }
+        Ok(config)
     }
 
     pub(crate) fn with_embedded_network_policy(
@@ -229,7 +247,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     /// Refreshes global settings and managed requirements using already fetched session layers.
@@ -255,7 +273,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     /// Checks the retained session route against current managed provider requirements.
@@ -338,6 +356,12 @@ impl ConfigManager {
     }
 
     pub(crate) async fn load_default_config(&self) -> std::io::Result<Config> {
+        if self.disposable_root.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "disposable app-server cannot use configuration recovery defaults",
+            ));
+        }
         let mut loader_overrides = self.loader_overrides.clone();
         loader_overrides.ignore_user_config = true;
         loader_overrides.ignore_project_config = true;
@@ -354,7 +378,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     pub(crate) async fn load_with_overrides(
@@ -468,7 +492,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     pub(crate) async fn load_config_layers_for_cwd(
