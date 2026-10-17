@@ -1,26 +1,17 @@
 # Project-local Stateful home
 
-The 2026-10-17 simplification directive supersedes the combined-database rebuild.
-Keep every existing schema, filename, migration and locking mechanism. Select a
-native Codex home at `<project>/.stateful`, with `STATEFUL_STORE_ROOT` as the single
-location override. The launcher resolves `-C`/`--cd` before selecting the Git root
-or plain directory, then runs the existing binary with that home. This moves
-SQLite databases, sessions, memory files and runtime subfolders together without
-changing domain code. Engine login/configuration seed a fresh home; knowledge is
-never imported. Private home contents are ignored before they are created.
+The 2026-10-17 simplification supersedes the combined-store rebuild.
+`scodex` resolves `-C`/`--cd`, then the Git root or plain directory; its native
+home defaults to `<project>/.stateful`. `STATEFUL_STORE_ROOT` overrides location.
+Native filenames, schemas, migrations, locks, sessions and subfolders stay intact.
+Fresh homes seed only configuration/login; ignore policies precede private files.
+Archive the old shared home with a checked literal-path move and retain it;
+never move an active home or use archived knowledge as fallback.
 
-Archive the old shared home by a checked, literal-path rename; retain credentials
-and configuration as launcher defaults, with no shared knowledge fallback.
-Existing processes keep their custody; never move a home while a process uses it.
-The read-only `stateful-memory native-root/native-read` interface targets the
-unchanged `project_intelligence_1.sqlite` and uses existing effective-read rules.
-The earlier combined-database reader remains supported for its existing fixtures.
-A short generated README beside the databases describes plain SQLite inspection.
-
-Validation: launcher root/override/argument and home-isolation tests; native-reader
-integration tests including restart and retirement; one serialized local CLI and
-reader build with jobs=2 and the existing RAM floor; the reader crate's normal
-tests; final format; a launcher/Luna scratch memory write/restart/read journey;
-one fresh Droid whole-diff review. Publish to main and `stateful` after approval.
-No schema redesign, import, old-client barrier, component qualification or HAL
-acceptance claim is part of this change.
+`stateful-memory root/native-read` reads native `project_intelligence_1.sqlite`
+with existing eligibility rules. Existing combined-store fixtures still work.
+A README beside databases explains tables, schema and plain read-only SQLite.
+Validation and retained failures: see `STATEFUL_CODEX_EVALUATION.md`'s store-root
+entry and its linked receipts: one local build, normal touched-crate tests,
+format/lint, one Luna write/restart/recall check and final whole-diff Droid review.
+Merge main/push only `stateful` after approval; no import, exclusion or HAL claim.

@@ -25,13 +25,10 @@ class ProjectHomeTests(unittest.TestCase):
                     patch.object(scodex.subprocess, "call", return_value=0) as call,
                 ):
                     self.assertEqual(scodex.launch(["exec", flag, "hello"]), 0)
+                    env = call.call_args.kwargs["env"]
                     self.assertEqual(
-                        call.call_args.kwargs["env"]["CODEX_HOME"],
-                        str(beta / ".stateful"),
-                    )
-                    self.assertEqual(
-                        call.call_args.kwargs["env"]["CODEX_SQLITE_HOME"],
-                        str(beta / ".stateful"),
+                        [env[key] for key in ("CODEX_HOME", "CODEX_SQLITE_HOME")],
+                        [str(beta / ".stateful")] * 2,
                     )
             self.assertFalse((alpha / ".stateful").exists())
 
@@ -52,6 +49,22 @@ class ProjectHomeTests(unittest.TestCase):
                     ["--cd=nested", "--", "-C", "missing"], project
                 ),
                 nested,
+            )
+
+    def test_memory_words_are_not_directory_flags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory).resolve()
+            for command in (
+                "memory --thread fixture add rule Use -C missing",
+                "exec memory --thread fixture correct entry@1 Use --cd=missing",
+                "memory --thread fixture add decision --reason sample Use -Cmissing",
+            ):
+                self.assertEqual(
+                    scodex.selected_directory(command.split(), project), project
+                )
+            self.assertEqual(
+                scodex.selected_directory(["-m", "memory", "-C", directory], project),
+                project,
             )
 
     def test_fresh_home_seeds_configuration_and_login_but_never_knowledge(self):
@@ -114,23 +127,13 @@ class ProjectHomeTests(unittest.TestCase):
                             tomllib.loads(args[0][2])["sqlite_home"],
                             str(project / ".stateful"),
                         )
-                    self.assertEqual(
-                        args[0][1:3],
-                        [
-                            "-c",
-                            f"sqlite_home={scodex.json.dumps(str(project / '.stateful'), ensure_ascii=False)}",
-                        ],
+                    quoted = scodex.json.dumps(
+                        str(project / ".stateful"), ensure_ascii=False
                     )
                     self.assertEqual(
-                        args[0][3:],
-                        [
-                            "-m",
-                            "gpt-6-luna",
-                            "--stateful",
-                            "exec",
-                            "--skip-git-repo-check",
-                            "hello",
-                        ],
+                        args[0][1:],
+                        ["-c", f"sqlite_home={quoted}"]
+                        + "-m gpt-6-luna --stateful=ask exec --skip-git-repo-check hello".split(),
                     )
             self.assertNotEqual(*homes)
 

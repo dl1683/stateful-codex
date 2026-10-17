@@ -1,14 +1,5 @@
 # Stateful Codex evaluation record
 
-> **Launcher compatibility (2026-10-17).** UTF-8 Git paths, Unicode TOML arguments
-> and trailing path whitespace round-trip correctly. Both Git and non-Git ignore
-> policies publish atomically before private seeding and stay untouched on restart.
-> Normal Python tests pass7/7: directory routing, Unicode/TOML paths and competing
-> initializers are covered. Final `just fmt` passes; no tests afterward. This
-> repair adds no Rust/schema changes, rebuild or additional Luna journey.
-> Superseded exclusion work was archived without promotion; baseline timeouts
-> and the old-launcher smoke remain historical evidence in the rebuild reports.
-
 > **Current placement (2026-10-17 simplification directive).** `scodex` now selects
 > `<project>/.stateful` as its native home; `STATEFUL_STORE_ROOT` overrides that
 > location. Existing files, SQLite schemas and locks remain unchanged. The old
@@ -1684,3 +1675,11 @@ now select the destination project's home; the new two-project regression and
 all other launcher tests pass (6/6, python-tests-routing.log). Rust is unchanged;
 no Rust test or second Luna journey was run for this correction. The first
 REVISE verdict is retained, and final approval still gates promotion.
+
+The follow-up review found transient ignore-policy truncation. Existing valid
+policies are now untouched; missing policies are published atomically before
+private files, preserving and validating concurrent winners. Seven launcher
+tests pass, including those races and Unicode path arguments without invalid
+TOML surrogate escapes (python-tests-ignore.log). Rust/model journeys unchanged.
+
+Combined launcher regressions pass8/8 (merged_compact.log): UTF-8 Git roots, trailing whitespace, atomic non-Git policies and native argument boundaries; prior failed reviews retained.
