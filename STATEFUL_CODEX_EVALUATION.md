@@ -1397,3 +1397,26 @@ Next gate plan retains foreign completeness, count+new AND maxordinal+new,
 byte/sort-key bounds and explicit schema-transition needs. Exact closeout/promotion
 receipts govern landing. First database/import/old-writer/acceptance/Forget/
 compaction/MCP/offline/customer gates open; B0 separate/unqualified.
+
+## Required HAL response frame — 2026-10-17
+
+Inactive `read_response_frame` consumes exactly one required length-capped frame,
+without probing the next frame/EOF at the supplied Read interface. Existing
+closed-reader semantics remain unchanged. EOF/short/I/O refusal, caller stream
+abandonment and separate deadline/sequence/lifecycle obligations are explicit.
+Source29cb0b4d28422d414276c94588532759fe194d0a fresh Droid APPROVE; Windows/WSL
+29/29 each, no skips or test retries. Linux1 CRLF wrapper failure before Rust is
+retained; corrected LF Linux2 passes. All9608executed source leaves match Git
+objects and all test/helper frames. Scopedfix/finalfmt pass, fix no source edits;
+later cleanup comments/layout only, no Rust retest afterward.
+
+Direct1 and fresh helper/controller review pass12 independent whole-output stream
+oracles plus static I/O failure. Sole actual unchanged-launcher gpt-6-luna session
+PASS14.861seconds/one command/43archivedbindings, exact typed tool/final/case
+outputs and isolated trial/home inventories. Fourteen synthetic controller checks
+pass; no normalization or actual-session regrade. Locked/offline unique helper,
+15unchanged dependency definitions; no repository dependencies/native install.
+The [witness](./STATEFUL_HAL_RESPONSE_FRAME_WITNESS_20261017.md) links raw failures,
+reviews, tests, input archives and source/cleanup custody. Exact closeout and
+promotion determine landing. No authentication, worker/job/drain/native transport,
+Marathi/image/offline/customer qualification or first project-database milestone.

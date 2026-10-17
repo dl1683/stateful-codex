@@ -23,6 +23,11 @@ preserves legacy materialization with 97-test Windows/WSL gates and a separate
 Luna legacy-parity check. It adds no project writer. Run-prefix access and domain
 transition design remain prerequisites; exact closeout/promotion govern landing.
 
+The [HAL frame reader witness](./STATEFUL_HAL_RESPONSE_FRAME_WITNESS_20261017.md)
+adds one required-frame read without probing the next frame; Windows/WSL29-test
+gates and a separate Luna component pass establish no native lifecycle authority.
+Exact closeout/promotion govern its landing.
+
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
 and runtime schema installation, owned readonly snapshots, bounded attributed
