@@ -6,7 +6,9 @@
 > See the rebuild entries at the end and the linked baseline/custody receipt.
 > Latest 2026-10-16: repaired extension fixtures yield Windows338/338 and WSL339/339;
 > the inactive closed response reader passes19/19 on each OS. Component checks
-> and installed-launcher checks have separate scopes. Native routing, populated
+> and installed-launcher checks have separate scopes. The inactive project-bound
+> lease adapter passes87/87 runtime tests on each OS; its frozen C382 helper Luna
+> journey passes within that component scope. Native routing, populated
 > import, old-writer exclusion and the first database milestone remain open.
 
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
@@ -1284,3 +1286,28 @@ Root witnesses link all logs. Scoped protocol/extension fix and final fmt pass;
 fix made no source edits, with the existing extension large-enum warning retained.
 Formatting changes layout only; no Rust tests were rerun afterward. Final
 promotion requires its separate exact-candidate closeout and receipt.
+
+## 2026-10-16 — inactive project-bound verification lease adapter
+
+Two explicit guard-consuming runtime APIs share legacy verification SQL and
+bind the exact run to the admitted project/runtime domain. Success commits prior
+domain writes with the lease operation; refusal is rollback and close-only.
+Same-owner takeover, competing-owner expiry and exact owner/attempt release
+remain intact. Cancellation during COMMIT is uncertain and needs reconciliation.
+No native routing or checker/acceptance authority was added.
+
+Initial C382 runtime gates passed85/85 on Windows and WSL. Two follow-up
+regressions first failed (overflow error ordering and a NUL-blind test observer),
+then complete identical-source gates passed87/87 each with zero skips/retries.
+Scoped fix and final fmt pass; no Rust tests followed cleanup. The merge with
+approved main preserves component trees. Fresh source/closeout review and the
+actual promotion receipt remain the authority for landing, not these test counts.
+
+One frozen installed-launcher gpt-6-luna session passed in14.504s with one
+inspector command, two project-local databases, complete durable-state checks,
+strict output/attribution checks and9,620 archived bindings. Its external helper
+was built from C382; it does not attest the later cleanup as a new binary or
+native product behavior. Earlier helper/controller failures remain retained.
+See [the witness](./STATEFUL_PROJECT_VERIFICATION_WITNESS_20261016.md).
+The first project-database milestone, migration, old-writer exclusion, real
+acceptance/source freshness, neutral MCP writes and offline/customer gates stay open.
