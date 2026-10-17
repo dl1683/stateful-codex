@@ -66,7 +66,7 @@ async fn upgrade_preserves_rows_and_identity_and_switches_the_owned_manifest() -
 async fn failed_suffix_and_mismatched_plan_require_awaited_close() -> TestResult {
     for plan in [
         PreparedDomainUpgrade::new(domains().await?, successor(&["CREATE UNIQUE INDEX alpha_value ON alpha(value);"]).await?)?,
-        PreparedDomainUpgrade::new(successor(&[INDEX]).await?, successor(&[INDEX, "CREATE INDEX bravo_value ON bravo(value);"]).await?)?,
+        PreparedDomainUpgrade::new(successor(&[INDEX]).await?, successor(&[INDEX, "CREATE INDEX alpha_id ON alpha(id);"]).await?)?,
     ] {
         let (_directory, location, identity) = fixture().await?;
         let mut writer = ProjectStoreWriter::open(&location, domains().await?, &identity).await?;
