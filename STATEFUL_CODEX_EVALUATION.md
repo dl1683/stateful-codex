@@ -1420,3 +1420,19 @@ The [witness](./STATEFUL_HAL_RESPONSE_FRAME_WITNESS_20261017.md) links raw failu
 reviews, tests, input archives and source/cleanup custody. Exact closeout and
 promotion determine landing. No authentication, worker/job/drain/native transport,
 Marathi/image/offline/customer qualification or first project-database milestone.
+
+## Explicit domain upgrade and recovery — 2026-10-17
+
+The [witness](./STATEFUL_PROJECT_DOMAIN_UPGRADE_WITNESS_20261017.md) records an
+inactive trusted prefix/suffix plan, dedicated writer transition and reconciliation
+in one qualified read-only snapshot. Exact source e8ec5a4f7f has fresh review3
+APPROVE; Windows3/WSL1 pass 56/56, with 9,612 Git-verified source leaves and identical
+test/helper frames. Windows1 compile and Windows2 fixture failures remain failures.
+Commit-hook cancellation separately recovers through awaited close and fresh
+durable reconciliation. Fix/fmt pass; cleanup layout only, no Rust retests after.
+Direct1 and fresh helper review pass; sole original-launcher Luna PASS18.238s,
+one command, 44 archived bindings, 8 checks, 2 projects/68 tables each with full
+typed durable postflight. Only a fixture index/history changes; kernel/UUIDs,
+retirement/journals/answers/allocator and prior history preserved. No production
+index, arbitrary-migration preservation, old-client exclusion or native activation.
+Exact closeout/promotion govern landing. First project-database milestone OPEN.

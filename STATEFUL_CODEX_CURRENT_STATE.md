@@ -20,13 +20,19 @@ its exact closeout/promotion receipts separately determine landing.
 
 The [private request extraction](./STATEFUL_REQUEST_PARAMETERS_WITNESS_20261017.md)
 preserves legacy materialization with 97-test Windows/WSL gates and a separate
-Luna legacy-parity check. It adds no project writer. Run-prefix access and domain
-transition design remain prerequisites; exact closeout/promotion govern landing.
+Luna legacy-parity check. It adds no project writer. Production run-prefix access
+and cohort transition remain prerequisites; exact closeout/promotion govern landing.
 
 The [HAL frame reader witness](./STATEFUL_HAL_RESPONSE_FRAME_WITNESS_20261017.md)
 adds one required-frame read without probing the next frame; Windows/WSL29-test
 gates and a separate Luna component pass establish no native lifecycle authority.
 Exact closeout/promotion govern its landing.
+
+The [explicit domain upgrade](./STATEFUL_PROJECT_DOMAIN_UPGRADE_WITNESS_20261017.md)
+adds an explicit trusted transition and reconciliation in one snapshot. Windows
+and WSL each pass 56 tests; a separate Luna check compares 68 tables in each of
+two project fixtures. Production runtime-index/cohort/native-client qualification
+remains open; exact promotion governs landing.
 
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
