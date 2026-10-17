@@ -25,7 +25,8 @@ impl ProjectStoreWriter {
                 return Err(ProjectWriteError::IdentityMismatch);
             }
             plan.apply(&mut transaction, &self.identity).await
-        }.await;
+        }
+        .await;
         let successor = match result {
             Ok(successor) => successor,
             Err(error) => {
@@ -39,4 +40,3 @@ impl ProjectStoreWriter {
         Ok(())
     }
 }
-
