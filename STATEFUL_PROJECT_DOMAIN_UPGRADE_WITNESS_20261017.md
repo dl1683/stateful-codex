@@ -22,8 +22,9 @@ fix no edits, later cleanup layout only, no Rust retests afterward.
 Locked/offline unique helper, 621 unchanged dependency definitions. Direct1 passes
 8 checks across 2 canonical project fixtures, 68 tables each: both real schemas plus
 fixture-upgrade domain, synthetic retirement/journals/answers/allocator/NUL/REAL/
-BLOB data. Whole typed tables/schema/headers/UUIDs/prior history compared; only
-fixture index/new history allowed to change. Unique failure rollback, cross-process
+BLOB data. Whole typed tables/schema, selected stable header fields, UUIDs and
+prior history compared; only fixture index/new history may change. Rollback,
+cross-process
 busy close-only, reconciliation and old-reader/writer refusal pass. Fresh helper
 review APPROVE precedes the sole original-launcher gpt-6-luna PASS: 18.238 seconds,
 one command, 44 archived bindings, with full durable controller postflight.
