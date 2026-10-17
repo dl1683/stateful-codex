@@ -18,6 +18,7 @@ mod obligation_operations;
 mod project_acceptance;
 mod project_completion;
 mod project_domain;
+mod project_request;
 #[cfg(test)]
 #[path = "project_index_tests.rs"]
 mod project_index_tests;
@@ -93,6 +94,9 @@ pub use project_completion::commit_project_run;
 pub use project_completion::revalidate_project_run_start;
 pub use project_domain::project_store_base_domain;
 pub use project_domain::project_store_domain;
+pub use project_request::ProjectAcceptanceRequest;
+pub use project_request::ProjectRequestError;
+pub use project_request::materialize_project_request;
 pub use project_verification::ProjectVerificationError;
 pub use project_verification::commit_project_verification_end;
 pub use project_verification::commit_project_verification_start;
