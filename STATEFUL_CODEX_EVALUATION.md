@@ -4,12 +4,14 @@
 > historical hold below. S0 evidence is landed; S1a is an inert placement foundation,
 > with native project ownership, migration and atomic completion still gated.
 > See the rebuild entries at the end and the linked baseline/custody receipt.
-> Latest 2026-10-16: repaired extension fixtures yield Windows338/338 and WSL339/339;
-> the inactive closed response reader passes19/19 on each OS. Component checks
-> and installed-launcher checks have separate scopes. The inactive project-bound
-> lease adapter passes87/87 runtime tests on each OS; its frozen C382 helper Luna
-> journey passes within that component scope. Native routing, populated
-> import, old-writer exclusion and the first database milestone remain open.
+> Latest 2026-10-17: the inactive bounded project request passes runtime105/105
+> and CLI11/11 on Windows/WSL, plus extension338/339. The first Windows extension
+> gate retains one timeout; the unchanged full retry passes. Its sole unchanged-
+> launcher Luna component journey passes39 calls/two67-table stores. Executed
+> source31aebbd has9622 Git-object-verified leaves; later Rust cleanup is exact
+> pinned formatter output. Component checks and installed-native behavior have
+> separate scopes. HAL custody/factory approvals are design-only. Native routing,
+> populated import, old-writer exclusion and the first database milestone remain open.
 
 > **Where things stand and what is next (2026-10-14, owner hold; LSR has priority).** Stateful Codex is on hold in a consistent state. Code head on `stateful/main` is `b59589c84` (open-model usability stages A1 and A2); everything built since 2026-10-12 is landed and was gated on the Linux CI VM and reviewed by a fresh reviewer (the narrow fix to the stage 2B repair, applied as `125f77db6`, was re-read by a fresh reviewer only after landing: landable with two named limitations, namely that Git-mode duplicate-entry accounting across overlapping roots still depends on root order, and that the unreadable-marker test reports a pass when its permission preflight fails; both are backlog): the exec image flag, workspace identity for git roots and non-git folders (stages 2A to 2C), the Argon-driven fixes (digest provenance for long call IDs, `openIssues` on blocked updates, clearer acceptance rejections), stream-retry request filtering, the run-goal error text, slice 1 answer-safety activation (plain finals end Answered or Partial), and usability A1 and A2. The scratch work clones hold only landed work. Older local branches in the repository (`h1done/*`, `cleanup/entropy`, `docs/oct-campaign`) still carry superseded or cut commits that are not on `stateful/main` (inventory in `STATEFUL_CODEX_PLAN_HISTORY.md`); nothing live depends on them. Linux bundles exist for `b59589c84`, `73f2d82da`, `1f329a28b`, `40e68b588`, `e9316e0eb`, `36dacb2bf` and `c5a8f39eb` (paths and hashes in `sc_dogfood/integrate/EXEC_LOG.md`).
 > **Evidence in hand.** Ten ordinary Autonomous prompts on Gemma 4 31B end Answered in both registered checks (before and after A1 and A2: Completed 0, Answered 10, Partial 0, Blocked 0, nonzero 0); eight of ten first completion calls were refused for a missing `openIssues` before the fix and none after, but only three of ten sessions called the completion tool after the fix, so the guidance change and the field change are not separated. Luna hands-on runs show correct work and mostly Partial endings for checked tasks, a visible outcome footer, and a model that rewrites a failing checker and then says the check passes (see the hunt-corrected entries and `campaign2/FINDINGS.md`).
