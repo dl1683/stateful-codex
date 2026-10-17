@@ -1662,7 +1662,7 @@ project1/shared0. No second model journey or old-client exclusion; no HAL claim.
 Reviews requested attached-CD routing and atomic ignore publication, then memory
 trailing-text and explicit UTF8 Git decoding. All addressed; existing valid ignore
 policies remain untouched and conflicting concurrent winners refuse before seeding.
-Final Python7/7 PASS under cp1252, including Unicode Git paths and TOML arguments.
+Final Python8/8 PASS under cp1252; PATH-only Python/Git defeats executable planting.
 Initial fixture/review failures and the failed encoding probe remain retained.
 Final review verdict/source/integration are in the run report; approval gates push.
 Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/store_root_20261017/

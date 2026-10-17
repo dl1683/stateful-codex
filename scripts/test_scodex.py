@@ -9,6 +9,27 @@ import scodex
 
 
 class ProjectHomeTests(unittest.TestCase):
+    def test_executables_require_absolute_path_entries_outside_the_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            trusted = root / "trusted"
+            trusted.mkdir()
+            with (
+                patch.object(scodex.Path, "cwd", return_value=root),
+                patch.object(
+                    scodex.os,
+                    "get_exec_path",
+                    return_value=["", ".", str(root), str(trusted)],
+                ),
+                patch.object(
+                    scodex.shutil, "which", return_value=str(trusted / "git.exe")
+                ) as which,
+            ):
+                self.assertEqual(scodex.path_command("git"), str(trusted / "git.exe"))
+                which.assert_called_once_with(
+                    str(trusted / ("git.exe" if os.name == "nt" else "git"))
+                )
+
     def test_directory_options_do_not_consume_memory_text_or_option_values(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()

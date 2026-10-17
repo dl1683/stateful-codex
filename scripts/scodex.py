@@ -26,12 +26,10 @@ Other native databases include goals_1, memories_1, queue_1 and logs_2.sqlite.
 sessions/, memories/ and other subfolders retain their normal native roles.
 Each database's _sqlx_migrations table records its schema version. List the
 actual tables with plain SQLite; future versions may add native tables:
-
 Memory tables include hierarchy_nodes, context_map_entries, blackboard_entries,
 blackboard_entry_revisions, knowledge_context, capture_sources and memory_changes.
 Runtime tables include stateful_runs, stateful_run_threads, stateful_obligations,
 stateful_steering, stateful_turn_measurements and stateful_acceptance_ledgers.
-
     sqlite3 -readonly project_intelligence_1.sqlite '.tables'
     sqlite3 -readonly project_intelligence_1.sqlite '.schema'
     sqlite3 -readonly project_intelligence_1.sqlite 'SELECT id, project_id, revision FROM blackboard_entries LIMIT 20;'
@@ -41,12 +39,11 @@ copy a live database without SQLite backup, or use immutable=1 on a live WAL sto
 Native writers retain their existing SQLite locking; close them before moving
 the store. Archives are inactive snapshots, never fallback authorities.
 Raw SQL exposes historical/forgotten text. For effective eligible memory use:
-
     stateful-memory --project <project> root --json
     stateful-memory --project <project> native-read --project-id <id> --entry <id> --json
 
 Pass --store-root <directory> to that reader for an explicit root override.
-The reader opens existing files read-only, never migrates or imports, and applies
+The reader never migrates or imports, opens existing files read-only, and applies
 the same eligibility/retirement rules as native exact reads. Its bounded replies
 refuse oversized results. Hosted model use does not establish offline readiness.
 """
@@ -55,29 +52,13 @@ refuse oversized results. Hosted model use does not establish offline readiness.
 def selected_directory(args, cwd):
     selected = cwd
     skip_value = False
-    value_options = {
-        "-a",
-        "--ask-for-approval",
-        "-c",
-        "--config",
-        "-i",
-        "--image",
-        "-m",
-        "--model",
-        "-o",
-        "--output-last-message",
-        "-p",
-        "--profile",
-        "-s",
-        "--sandbox",
-        "--add-dir",
-        "--disable",
-        "--enable",
-        "--local-provider",
-        "--output-schema",
-        "--stateful-project",
-        "--thread-source",
-    }
+    value_options = set(
+        (
+            "-a --ask-for-approval -c --config -i --image -m --model -o --output-last-message "
+            "-p --profile -s --sandbox --add-dir --disable --enable --local-provider "
+            "--output-schema --stateful-project --thread-source"
+        ).split()
+    )
     for index, arg in enumerate(args):
         if skip_value:
             skip_value = False
@@ -98,9 +79,23 @@ def selected_directory(args, cwd):
     return (cwd / selected).resolve(strict=True)
 
 
+def path_command(name):
+    filename = name + ".exe" if os.name == "nt" else name
+    for folder in os.get_exec_path():
+        base = Path(folder.strip('"'))
+        if not base.is_absolute() or base.resolve() == Path.cwd().resolve():
+            continue
+        command = shutil.which(str(base / filename))
+        if command:
+            return str(Path(command).resolve())
+    raise FileNotFoundError(
+        f"{name} was not found on PATH outside the current directory"
+    )
+
+
 def project_directory(directory):
     result = subprocess.run(
-        ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
+        [path_command("git"), "-C", str(directory), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
         encoding="utf-8",
