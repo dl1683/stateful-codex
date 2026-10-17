@@ -1675,3 +1675,9 @@ now select the destination project's home; the new two-project regression and
 all other launcher tests pass (6/6, python-tests-routing.log). Rust is unchanged;
 no Rust test or second Luna journey was run for this correction. The first
 REVISE verdict is retained, and final approval still gates promotion.
+
+The follow-up review found transient ignore-policy truncation. Existing valid
+policies are now untouched; missing policies are published atomically before
+private files, preserving and validating concurrent winners. Seven launcher
+tests pass, including those races and Unicode path arguments without invalid
+TOML surrogate escapes (python-tests-ignore.log). Rust/model journeys unchanged.

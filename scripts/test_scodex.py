@@ -81,7 +81,7 @@ class ProjectHomeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()
             homes = []
-            for name in ("alpha", "beta"):
+            for name in ("alpha", "beta-🙂"):
                 project = base / name
                 project.mkdir()
                 with (
@@ -106,7 +106,7 @@ class ProjectHomeTests(unittest.TestCase):
                         args[0][1:3],
                         [
                             "-c",
-                            f"sqlite_home={scodex.json.dumps(str(project / '.stateful'))}",
+                            f"sqlite_home={scodex.json.dumps(str(project / '.stateful'), ensure_ascii=False)}",
                         ],
                     )
                     self.assertEqual(
@@ -122,14 +122,54 @@ class ProjectHomeTests(unittest.TestCase):
                     )
             self.assertNotEqual(*homes)
 
-    def test_old_sqlite_preference_does_not_rewrite_user_configuration(self):
+    def test_existing_ignore_policy_is_untouched_on_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / ".stateful"
-            root.mkdir()
-            text = 'sqlite_home = "old-shared"\n'
-            (root / "config.toml").write_text(text)
             scodex.prepare_home(root, Path(directory) / "template")
-            self.assertEqual((root / "config.toml").read_text(), text)
+            ignore = root / ".gitignore"
+            os.utime(ignore, (1, 1))
+            before = (
+                ignore.read_bytes(),
+                ignore.stat().st_ino,
+                ignore.stat().st_mtime_ns,
+            )
+            scodex.prepare_home(root, Path(directory) / "template")
+            self.assertEqual(
+                (ignore.read_bytes(), ignore.stat().st_ino, ignore.stat().st_mtime_ns),
+                before,
+            )
+
+    def test_atomic_ignore_publication_preserves_a_concurrent_winner(self):
+        real_link = os.link
+        for policy in (b"*\n", b"!auth.json\n"):
+            with (
+                self.subTest(policy=policy),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root, template = (
+                    Path(directory) / ".stateful",
+                    Path(directory) / "template",
+                )
+                template.mkdir()
+                (template / "auth.json").write_bytes(b"fixture-not-a-token")
+                ignore = root / ".gitignore"
+
+                def concurrent_link(source, destination):
+                    if destination == ignore:
+                        self.assertEqual(Path(source).read_bytes(), b"*\n")
+                        self.assertFalse((root / "auth.json").exists())
+                        ignore.write_bytes(policy)
+                        raise FileExistsError()
+                    return real_link(source, destination)
+
+                with patch.object(scodex.os, "link", side_effect=concurrent_link):
+                    if policy == b"*\n":
+                        scodex.prepare_home(root, template)
+                    else:
+                        with self.assertRaises(ValueError):
+                            scodex.prepare_home(root, template)
+                self.assertEqual(ignore.read_bytes(), policy)
+                self.assertEqual((root / "auth.json").exists(), policy == b"*\n")
 
     def test_store_override_cannot_turn_the_project_or_an_ancestor_into_a_home(self):
         with tempfile.TemporaryDirectory() as directory:

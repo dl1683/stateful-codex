@@ -1,5 +1,6 @@
 """Launch Stateful Codex with its unchanged native home inside the project."""
 
+import io
 import json
 import os
 from pathlib import Path
@@ -94,29 +95,36 @@ def store_directory(project, environ):
     return root
 
 
+def publish_missing(destination, source):
+    """Publish a complete file without replacing a concurrent initializer's file."""
+    descriptor, name = tempfile.mkstemp(dir=destination.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as target:
+            shutil.copyfileobj(source, target)
+        try:
+            os.link(temporary, destination)
+        except FileExistsError:
+            pass
+    finally:
+        temporary.unlink()
+
+
 def prepare_home(root, template):
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     # Ignore private configuration/credentials and all native data before seeding.
     ignore = root / ".gitignore"
-    if ignore.exists() and ignore.read_text(encoding="utf-8") != "*\n":
+    if not ignore.exists():
+        publish_missing(ignore, io.BytesIO(b"*\n"))
+    if ignore.read_text(encoding="utf-8") != "*\n":
         raise ValueError(
             "The store's existing .gitignore must contain exactly '*' before launch"
         )
-    ignore.write_text("*\n", encoding="utf-8")
     for name in ("config.toml", "auth.json"):
         source, destination = template / name, root / name
         if source.is_file() and not destination.exists():
-            # Publish complete seeds atomically without overwriting another launch.
-            with tempfile.NamedTemporaryFile(dir=root, delete=False) as target:
-                temporary = Path(target.name)
-                with source.open("rb") as seed:
-                    shutil.copyfileobj(seed, target)
-            try:
-                os.link(temporary, destination)
-            except FileExistsError:
-                pass
-            finally:
-                temporary.unlink()
+            with source.open("rb") as seed:
+                publish_missing(destination, seed)
     (root / "README.md").write_text(README, encoding="utf-8")
 
 
@@ -153,7 +161,8 @@ def launch(args):
         options.append("--stateful")
     # The native CLI setting wins over a copied legacy sqlite_home preference;
     # managed requirements are still enforced by the native configuration loader.
-    storage = ["-c", f"sqlite_home={json.dumps(str(root))}"]
+    quoted_root = json.dumps(str(root), ensure_ascii=False).replace("\x7f", "\\u007f")
+    storage = ["-c", f"sqlite_home={quoted_root}"]
     return subprocess.call([str(binary), *storage, *options, *args], env=environ)
 
 
