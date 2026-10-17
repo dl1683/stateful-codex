@@ -317,3 +317,60 @@ async fn a_corrected_attributed_note_drops_the_old_speaker() {
         )
     );
 }
+
+/// Both identity paths preserve accepted bytes, including the one-byte and UTF-8 byte cap.
+#[tokio::test]
+async fn corrections_preserve_exact_bytes_at_the_bounds() {
+    let state_home = TempDir::new().expect("state home");
+    let services = services(&state_home);
+    let node_id = services.project_node_id("project-1").await.expect("node");
+    let store = services.blackboard().await.expect("store");
+    for (kind_index, addition) in [
+        crate::MemoryAddition::Rule { scope: None },
+        crate::MemoryAddition::Note,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for (index, content) in [
+            "x".to_string(),
+            format!("é{}Z", "a".repeat(1_997)),
+            "Keep  double spaces,\ttabs,\r\nnewlines and café e\u{301}.".to_string(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let original = crate::add_entry(
+                store,
+                &crate::MemoryActor {
+                    action_id: Some(format!("exact-{kind_index}-{index}")),
+                    ..Default::default()
+                },
+                "project-1",
+                node_id.clone(),
+                addition.clone(),
+                &format!("Original {kind_index} {index}"),
+            )
+            .await
+            .expect("add")
+            .0;
+            let corrected = correct_entry(
+                store,
+                &crate::MemoryActor::default(),
+                "project-1",
+                &original.id,
+                original.revision,
+                &content,
+            )
+            .await
+            .expect("correct");
+            let stored = store
+                .get_entry("project-1", &corrected.successor.id)
+                .await
+                .expect("read")
+                .expect("successor");
+            assert_eq!(stored, corrected.successor);
+            assert_eq!(stored.value.content.as_bytes(), content.as_bytes());
+        }
+    }
+}
