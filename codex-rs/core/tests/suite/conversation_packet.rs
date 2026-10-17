@@ -1,4 +1,4 @@
-//! Remote-v2 compaction persists the exact original deliveries with each checkpoint.
+//! Compaction persists the exact original deliveries with each checkpoint.
 
 use anyhow::Context;
 use anyhow::Result;
@@ -7,6 +7,7 @@ use codex_history::ConversationPacket;
 use codex_history::ConversationRecordKind;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
+use codex_model_provider_info::built_in_model_providers;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use core_test_support::responses;
@@ -308,6 +309,112 @@ async fn failed_deliveries_stay_pending_and_resolutions_survive_resume() -> Resu
             !body.contains("assistant_delivery_classification"),
             "host classification reached provider input: {body}"
         );
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_compaction_captures_original_deliveries_across_two_checkpoints() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = wiremock::MockServer::start().await;
+    let response_mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                final_answer("msg-first", FIRST_ANSWER),
+                responses::ev_completed("response-1"),
+            ]),
+            responses::sse_failed("compact-fail", "context_length_exceeded", "retry compact"),
+            sse(vec![
+                final_answer("summary-first", "FIRST_LOCAL_SUMMARY"),
+                responses::ev_completed("compact-1"),
+            ]),
+            sse(vec![
+                final_answer("msg-second", SECOND_ANSWER),
+                responses::ev_completed("response-2"),
+            ]),
+            sse(vec![
+                final_answer("summary-second", "SECOND_LOCAL_SUMMARY"),
+                responses::ev_completed("compact-2"),
+            ]),
+        ],
+    )
+    .await;
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "local-compaction-test".into();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    let test = test_codex()
+        .with_auth(CodexAuth::from_api_key("test-key"))
+        .with_config(move |config| {
+            config.model_provider = provider;
+            config.compact_prompt = Some("SYNTHETIC_COMPACTION_REQUEST".into());
+            config.model_auto_compact_token_limit = Some(200_000);
+            config.model_post_turn_compact_threshold_percent = 0;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+
+    test.submit_turn(FIRST_REQUEST).await?;
+    test.codex.submit(Op::Compact).await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    test.submit_turn(SECOND_REQUEST).await?;
+    test.codex.submit(Op::Compact).await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let rollout_path = test
+        .session_configured
+        .rollout_path
+        .clone()
+        .context("rollout path")?;
+    test.codex.shutdown_and_wait().await?;
+
+    let packets = persisted_packets(&rollout_path)?;
+    let [first, second] = packets.as_slice() else {
+        panic!("expected two local checkpoints, got {}", packets.len());
+    };
+    assert_eq!(
+        summary(first),
+        vec![
+            (ConversationRecordKind::User, FIRST_REQUEST),
+            (ConversationRecordKind::AssistantFinal, FIRST_ANSWER),
+        ]
+    );
+    assert_eq!(
+        summary(second),
+        vec![
+            (ConversationRecordKind::User, FIRST_REQUEST),
+            (ConversationRecordKind::AssistantFinal, FIRST_ANSWER),
+            (ConversationRecordKind::User, SECOND_REQUEST),
+            (ConversationRecordKind::AssistantFinal, SECOND_ANSWER),
+        ]
+    );
+    assert_eq!(first.records(), &second.records()[..2]);
+    assert_eq!(
+        first.coverage().input_coverage(),
+        ConversationInputCoverage::CompleteThroughCutoff
+    );
+    assert_eq!(
+        second.coverage().input_coverage(),
+        ConversationInputCoverage::BoundedWindow
+    );
+    for packet in &packets {
+        assert!(packet.records().iter().all(|record| {
+            record.origin_thread_id() == test.session_configured.thread_id
+        }));
+    }
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 5);
+    assert_eq!(requests[2].input().len(), requests[1].input().len() - 1);
+    for request in requests {
+        let body = request.body_json().to_string();
+        assert!(!body.contains("conversation_packet") && !body.contains("conversation_origin"));
     }
     Ok(())
 }
