@@ -32,7 +32,8 @@ pub async fn commit_project_verification_start(
 ) -> Result<u64, ProjectVerificationError> {
     require_run(&mut transaction, run_id).await?;
     crate::run::validate_source_id(owner).map_err(StatefulRunStoreError::from)?;
-    let attempt = crate::verification::begin_on(transaction.connection(), run_id, owner, lease_ms).await?;
+    let attempt =
+        crate::verification::begin_on(transaction.connection(), run_id, owner, lease_ms).await?;
     transaction.commit().await?;
     Ok(attempt)
 }
@@ -58,7 +59,10 @@ async fn require_run(
     transaction: &mut ProjectWriteTransaction<'_>,
     run_id: &StatefulRunId,
 ) -> Result<(), ProjectVerificationError> {
-    transaction.require_domain(&DomainManifest { domain: "stateful-runtime", migrations: &crate::storage::MIGRATOR })?;
+    transaction.require_domain(&DomainManifest {
+        domain: "stateful-runtime",
+        migrations: &crate::storage::MIGRATOR,
+    })?;
     let project = transaction.identity().project_uuid.to_string();
     let owner: Option<String> = sqlx::query_scalar(
         "SELECT CASE WHEN typeof(project_id)='text' AND octet_length(project_id)=36

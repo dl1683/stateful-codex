@@ -167,7 +167,8 @@ impl StatefulRunStore {
     ) -> Result<u64, StatefulRunStoreError> {
         crate::run::validate_source_id(owner)?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let attempt = crate::verification::begin_on(&mut transaction, run_id, owner, lease_ms).await?;
+        let attempt =
+            crate::verification::begin_on(&mut transaction, run_id, owner, lease_ms).await?;
         transaction.commit().await?;
         Ok(attempt)
     }
