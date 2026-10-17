@@ -11,6 +11,8 @@ mod snapshot;
 mod writer;
 
 pub use domains::DomainManifest;
+pub use domains::DomainUpgradeState;
+pub use domains::PreparedDomainUpgrade;
 pub use domains::PreparedDomains;
 pub use filesystem::FilesystemQualificationError;
 pub use filesystem::qualify_local_filesystem;

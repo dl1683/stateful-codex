@@ -17,6 +17,8 @@ use crate::StoreIdentity;
 use crate::StoreRegistryError;
 use crate::opener;
 
+mod upgrade;
+
 /// One project-local writer for trusted domain code. The caller must own this
 /// writable location; a copied database does not authorize a writable fork.
 /// No creation, installation, legacy/home route, reconnect or native cutover.

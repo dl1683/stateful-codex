@@ -3,6 +3,9 @@
     reason = "isolated project-store transaction fixtures"
 )]
 
+#[path = "writer/upgrade_tests.rs"]
+mod upgrade_tests;
+
 use super::*;
 use crate::DomainManifest;
 use codex_utils_absolute_path::AbsolutePathBuf;

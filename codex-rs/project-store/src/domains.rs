@@ -10,6 +10,10 @@ use crate::StoreRegistryError;
 use crate::registry::SCHEMA;
 use crate::registry::{self};
 
+mod upgrade;
+pub use upgrade::DomainUpgradeState;
+pub use upgrade::PreparedDomainUpgrade;
+
 const TRANSITION: &str = "UPDATE project_store_identity SET format_version = 2, min_reader_version = 2, min_writer_version = 2 WHERE singleton = 1";
 type History = Vec<(Option<String>, i64, Option<Vec<u8>>)>;
 
