@@ -3,8 +3,9 @@
 ## Current authority pointer — 2026-10-17
 
 The lower sequence retains earlier S1 checkpoints. Bounded attributed-content
-and CLI components have since landed; read CURRENT_STATE and the evaluation
-ledger before interpreting "unimplemented" below as current. Domain upgrades,
+and CLI components have since landed; read [current state](./STATEFUL_CODEX_CURRENT_STATE.md)
+and [the evaluation ledger](./STATEFUL_CODEX_EVALUATION.md) before interpreting
+"unimplemented" below as current. Domain upgrades,
 native attachment/import/old-writer exclusion and the first complete milestone
 remain open. This historical plan does not authorize partial native cutover.
 
