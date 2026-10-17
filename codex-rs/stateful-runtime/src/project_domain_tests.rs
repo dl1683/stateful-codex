@@ -152,7 +152,10 @@ async fn future_native_migrations_leave_populated_canonical_store_readable()
     // retaining an independently installed predecessor. No native opener runs.
     let mut migrations = frozen.migrations.to_vec();
     migrations.extend(SUFFIX.iter().cloned());
-    let frozen = Migrator { migrations: Cow::Owned(migrations), ..Migrator::DEFAULT };
+    let frozen = Migrator {
+        migrations: Cow::Owned(migrations),
+        ..Migrator::DEFAULT
+    };
     let domains = || DomainManifest {
         domain: "stateful-runtime",
         migrations: &frozen,
@@ -162,8 +165,11 @@ async fn future_native_migrations_leave_populated_canonical_store_readable()
         PreparedDomains::prepare(&[domains()]).await?,
     )?;
     let mut upgrader = ProjectStoreWriter::open(
-        &location, PreparedDomains::prepare(&[project_store_base_domain()?]).await?, &identity,
-    ).await?;
+        &location,
+        PreparedDomains::prepare(&[project_store_base_domain()?]).await?,
+        &identity,
+    )
+    .await?;
     upgrader.upgrade_domains(&plan).await?;
     upgrader.close().await?;
     let store = crate::StatefulRunStore {

@@ -39,6 +39,11 @@ preserve native history while isolating canonical runtime lineage. Scoped Window
 WSL gates and a two-project Luna component check pass; exact closeout/promotion
 govern landing. Native conversion and the first database milestone remain open.
 
+The [canonical steering index](./STATEFUL_CANONICAL_STEERING_INDEX_WITNESS_20261017.md)
+adds a project-only suffix and exercises explicit complete-domain transition with
+Windows/WSL gates and an actual Luna component pass. Exact closeout/promotion
+govern landing; native routing, import and old-client exclusion remain open.
+
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
 and runtime schema installation, owned readonly snapshots, bounded attributed

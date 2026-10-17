@@ -95,15 +95,15 @@ pub async fn commit_project_run(
         .await?
         .ok_or_else(|| StatefulRunStoreError::RunNotFound(request.run_id.to_string()))?;
     let foreign: bool = sqlx::query_scalar(FOREIGN_DEPENDENTS_SQL)
-    .bind(request.run_id.as_str())
-    .bind(&project)
-    .bind(request.run_id.as_str())
-    .bind(&project)
-    .bind(request.run_id.as_str())
-    .bind(&project)
-    .fetch_one(transaction.connection())
-    .await
-    .map_err(StatefulRunStoreError::from)?;
+        .bind(request.run_id.as_str())
+        .bind(&project)
+        .bind(request.run_id.as_str())
+        .bind(&project)
+        .bind(request.run_id.as_str())
+        .bind(&project)
+        .fetch_one(transaction.connection())
+        .await
+        .map_err(StatefulRunStoreError::from)?;
     if current.value.project_id != project
         || foreign
         || request

@@ -1447,3 +1447,17 @@ Scoped fixes/fmt pass; no Rust retest follows. Bazel lock update passes without 
 Executed source dd220f1165, baseline 1d4b5aff; cleanup binary was not executed. Source approval and witness approval have separate scopes.
 See STATEFUL_PROJECT_OWNER_MANIFEST_WITNESS_20261017.md and owner_manifests_20261017/RECORD_DRAFT.md for receipts and limitations.
 Exact closeout/promotion determines landing. First database, native import/old writers/lock, HAL, offline and customer gates remain OPEN.
+
+## 2026-10-17 — Canonical steering index, inactive S1 component
+
+Project-only runtime14 adds the production run-leading steering index; native
+history/openers are untouched and current reads refuse predecessor cohorts.
+Windows runtime100/CLI11/extension338 and WSL100/11/339 pass; scoped fix/fmt pass
+with no tests afterward. Direct1 and actual original-launcher Luna1 pass a
+two-project/67-table transition, typed preservation, old/new CLI refusal matrix,
+busy cancellation and uncertain acknowledgement reconciliation. Luna1:27.728s,
+286 bindings, exact raw nested command/model/rollout checks. Build/source/auxiliary
+custody and retained failed attempts are in the dated witness and RECORD.md.
+Exact fresh closeout/promotion receipts govern landing. Native activation,
+shared-store migration, old-client exclusion, lock cutover and the first database
+milestone remain OPEN. HAL parent-authority review approves design only.

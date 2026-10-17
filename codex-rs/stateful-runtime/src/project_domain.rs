@@ -59,10 +59,15 @@ static BASELINE: LazyLock<Result<Migrator, StoreRegistryError>> =
     LazyLock::new(|| select_base(&crate::storage::MIGRATOR));
 static SUFFIX: Migrator = sqlx::migrate!("./project_migrations");
 static CANONICAL: LazyLock<Result<Migrator, StoreRegistryError>> = LazyLock::new(|| {
-    let base = BASELINE.as_ref().map_err(|_| StoreRegistryError::IncompatibleHistory)?;
+    let base = BASELINE
+        .as_ref()
+        .map_err(|_| StoreRegistryError::IncompatibleHistory)?;
     let mut migrations = base.migrations.to_vec();
     migrations.extend(SUFFIX.iter().cloned());
-    Ok(Migrator { migrations: Cow::Owned(migrations), ..Migrator::DEFAULT })
+    Ok(Migrator {
+        migrations: Cow::Owned(migrations),
+        ..Migrator::DEFAULT
+    })
 });
 
 /// Current canonical runtime metadata, including project-only suffixes. Does not
@@ -81,7 +86,10 @@ pub fn project_store_domain() -> Result<DomainManifest<'static>, StoreRegistryEr
 /// This is compiled metadata, never ordinary-access fallback or native admission.
 pub fn project_store_base_domain() -> Result<DomainManifest<'static>, StoreRegistryError> {
     match &*BASELINE {
-        Ok(migrations) => Ok(DomainManifest { domain: "stateful-runtime", migrations }),
+        Ok(migrations) => Ok(DomainManifest {
+            domain: "stateful-runtime",
+            migrations,
+        }),
         Err(_) => Err(StoreRegistryError::IncompatibleHistory),
     }
 }
