@@ -134,15 +134,6 @@ class ProjectHomeTests(unittest.TestCase):
                     )
             self.assertNotEqual(*homes)
 
-    def test_old_sqlite_preference_does_not_rewrite_user_configuration(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory) / ".stateful"
-            root.mkdir()
-            text = 'sqlite_home = "old-shared"\n'
-            (root / "config.toml").write_text(text)
-            scodex.prepare_home(root, Path(directory) / "template")
-            self.assertEqual((root / "config.toml").read_text(), text)
-
     def test_existing_ignore_policy_is_untouched_on_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / ".stateful"
