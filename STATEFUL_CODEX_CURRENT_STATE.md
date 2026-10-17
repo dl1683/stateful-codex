@@ -18,6 +18,11 @@ records ordered assertions and sticky refusal with 24-test Windows/WSL gates and
 one Luna component check. It grants no process, job, drain or native authority;
 its exact closeout/promotion receipts separately determine landing.
 
+The [private request extraction](./STATEFUL_REQUEST_PARAMETERS_WITNESS_20261017.md)
+preserves legacy materialization with 97-test Windows/WSL gates and a separate
+Luna legacy-parity check. It adds no project writer. Run-prefix access and domain
+transition design remain prerequisites; exact closeout/promotion govern landing.
+
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
 and runtime schema installation, owned readonly snapshots, bounded attributed

@@ -1,5 +1,13 @@
 # Next S1 boundary: domain registration and effective knowledge reads
 
+## Current authority pointer — 2026-10-17
+
+The lower sequence retains earlier S1 checkpoints. Bounded attributed-content
+and CLI components have since landed; read CURRENT_STATE and the evaluation
+ledger before interpreting "unimplemented" below as current. Domain upgrades,
+native attachment/import/old-writer exclusion and the first complete milestone
+remain open. This historical plan does not authorize partial native cutover.
+
 ## Superseding checkpoint: 2026-10-16
 
 The source facts and sequence below describe the earlier bootstrap-only boundary.

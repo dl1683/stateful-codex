@@ -1367,3 +1367,33 @@ Exact closeout/promotion receipts determine landing. Worker auth/jobs/lifetime/
 EOF/drain/packaging, native405-to329Marathi/image/offline/customer gaps remain
 OPEN, as does first project database/import/old-writer acceptance. B0 is separate
 and unqualified. Root HAL sequence witness and sequence_20261017 retain evidence.
+
+
+## 2026-10-17 — private request parameters, legacy parity only
+
+Sourcecfdb20ccbd/97411af572 extracts only the private ID/goal parameters and five
+same-run production callers, preserving original SQL/order/spans/materialization/
+public wrapper/terminal behavior. No public API, schema, native route or cap.
+Minimal design/source APPROVE. Windows/WSL runtime97/97 PASS0skips/retries; complete
+9606-file frames match and all source bytes recover from9741 Git objects.
+Scoped fix/fmt PASS; no Rust retest afterward. Cleanup is layout only.
+
+Locked/offline helper build PASS. Fresh offline lock generation failed; reused
+approved lock retains all621dependency package definitions and only adapts helper
+root identity/edges. No root dependency/version change or online fallback.
+Direct2 passes full independent text/durable/ledger-default/ordinal/reopen and
+file/home checks. Fresh helper/controller APPROVE. Sole unchanged-launcher Luna
+PASS14.405s/one command/six materializations/30archivedbindings, exact whole typed
+tool/final outputs and complete durable postflight. This is9741 external LEGACY
+API parity, not canonical project memory, host steering admission or later native
+binary; raw post-terminal fixture edits are explicitly synthetic.
+
+Wider project-writer design remains REVISE/DEFERRED. Frozen PythonSQLite3.50.4
+access-path evidence APPROVE LIMITED_TO_PYTHON: unindexed missing-run VMsteps
+1517/15017/150017 versus11 with fixture run-index; project-filter hides foreign
+binding. Fixed cardinality/empty parts only, no Rust/SQLx/universal performance,
+production index/migration/domain upgrade or canonical native qualification.
+Next gate plan retains foreign completeness, count+new AND maxordinal+new,
+byte/sort-key bounds and explicit schema-transition needs. Exact closeout/promotion
+receipts govern landing. First database/import/old-writer/acceptance/Forget/
+compaction/MCP/offline/customer gates open; B0 separate/unqualified.
