@@ -8,6 +8,11 @@ execution follows the owner-invoked
 The first company-brain milestone remains **NOT FULFILLED**. Consult the latest
 appended entries in [the evaluation ledger](./STATEFUL_CODEX_EVALUATION.md).
 
+The [inactive acceptance reader witness](./STATEFUL_PROJECT_ACCEPTANCE_READER_WITNESS_20261017.md)
+records bounded same-snapshot reads, explicit valid-legacy refusals, Windows/WSL
+52/95-test gates and a separate Luna component pass. Its exact closeout/promotion
+receipts determine landing; native routing and request materialization stay open.
+
 Reviewed components now provide project-local resolution, bootstrap identity and
 registry, filesystem admission, closed-stage publication, compiled intelligence
 and runtime schema installation, owned readonly snapshots, bounded attributed

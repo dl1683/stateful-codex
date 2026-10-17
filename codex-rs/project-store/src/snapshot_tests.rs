@@ -76,6 +76,41 @@ async fn fixture() -> TestResult<Fixture> {
 }
 
 #[tokio::test]
+async fn snapshot_requires_exact_compiled_domain_history() -> TestResult {
+    let mut fixture = fixture().await?;
+    let snapshot = fixture.reader.begin_snapshot().await?;
+    let compiled = migrations();
+    snapshot.require_domain(&DomainManifest {
+        domain: "snapshot",
+        migrations: &compiled,
+    })?;
+    let mut changed = migrations();
+    changed.migrations.to_mut()[0].sql = sqlx::SqlStr::from_static("SELECT 1;");
+    for manifest in [
+        DomainManifest {
+            domain: "other",
+            migrations: &compiled,
+        },
+        DomainManifest {
+            domain: "snapshot",
+            migrations: &changed,
+        },
+    ] {
+        assert!(matches!(
+            snapshot.require_domain(&manifest),
+            Err(ProjectReadError::Registry(
+                StoreRegistryError::IncompatibleHistory
+            ))
+        ));
+    }
+    snapshot.finish().await?;
+    fixture.reader.begin_snapshot().await?.finish().await?;
+    fixture.reader.close().await?;
+    fixture.writer.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn writer_commit_is_visible_only_to_the_next_admitted_snapshot() -> TestResult {
     let mut fixture = fixture().await?;
     let mut snapshot = fixture.reader.begin_snapshot().await?;
