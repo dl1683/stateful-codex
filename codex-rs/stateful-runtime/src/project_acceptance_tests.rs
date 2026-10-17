@@ -72,7 +72,7 @@ impl Fixture {
         }], "seed", /*project_root*/ None).await?)
     }
 
-    async fn mutate(&self, sql: &str) -> Result {
+    async fn mutate(&self, sql: &'static str) -> Result {
         sqlx::raw_sql(sql).execute(&self.store.pool).await?;
         Ok(())
     }
