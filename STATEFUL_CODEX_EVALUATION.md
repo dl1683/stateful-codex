@@ -1637,47 +1637,34 @@ customer qualification absent. See [scope and receipts](STATEFUL_RUNTIME_QUIESCE
 
 ## SC-REBUILD-20261017-STORE-ROOT
 
-The owner's simplified path/config change uses the existing native home layout,
-not the combined-store architecture. `scripts/scodex.py` selects the Git root or
-plain selected directory, honors `-C`/`--cd`, and defaults to its `.stateful` home.
-`STATEFUL_STORE_ROOT` is the location override. Only configuration/login seed a
-fresh private, ignored home; no old knowledge is imported. A generated README
-beside the databases lists schema/table examples and plain read-only SQLite use.
-`stateful-memory root` detects this layout; `native-read` uses existing native
-eligibility/retirement checks through the read-only SQLite shim. Old reader
-fixtures remain supported. No tables, migrations, completion locks or checks
-were redesigned; direct ordinary Codex invocations retain their existing home.
+The simplified placement change gives `scodex` a native home at the selected Git
+root/plain folder's `.stateful`; `STATEFUL_STORE_ROOT` overrides its location.
+Existing files, schemas, migrations and locks remain unchanged. Only login/config
+seed a fresh private ignored home; no knowledge import. Original shared home is
+retained at C:/Users/devan/.codex-stateful-archive-20261017-store-root.
+The generated SQLite README lists tables/schema inspection. `stateful-memory
+root` detects native layout; `native-read` reuses native eligibility/retirement
+through a read-only SQLite shim. Existing reader fixtures remain supported.
+Ordinary direct Codex defaults are unchanged; this is launcher-scoped placement.
 
-One local jobs=2 build passed. Launcher tests: 5 passed. Normal scoped Rust run:
-177 passed, one new fixture failed, two unchanged PI tests timed out, one existing
-case skipped. The fixture used the combined installer without its kernel; fixed
-to run compiled native migrations. Reader rerun: 13/13 pass, including the new
-snapshot. PI's two timeouts also occur on clean unchanged 9fa6256bcd; its third
-baseline timeout passed in this run. No assertion or timeout was weakened.
+One local jobs=2 build passed. Initial scoped Rust run:177 passed,1 fixture setup
+failure,2 existing PI timeouts,1 existing skipped case. The fixture mistakenly
+used the combined installer; compiled native migrations fix it, reader13/13 PASS.
+Both timeouts occur on clean9fa6256bcd; its third timeout passed in our run.
+No assertion/timeout weakened. Scoped fix/final fmt pass; no Rust reruns afterward.
 
-The sole launcher/Luna journey saved a rule through `scodex memory`, then a new
-process/thread recalled CIRRUS-4827 without that value in its prompt. The neutral
-reader returned the exact saved text. The script's EXTRA global-empty assertion
-failed (exit1 retained): shared DB files were recreated at16:56, before this
-check began at17:18; their creator is unestablished. The canary exists once in the
-project DB and zero times in the recreated shared DB. Original archive retained;
-no second model journey, exclusion barrier, migration or HAL claim.
+The sole launcher/Luna journey saved a rule, then a different process/thread
+recalled CIRRUS-4827 without that value in its prompt; neutral exact read passed.
+Overall script exit1 is RETAINED: EXTRA shared-empty assertion failed. Recreated
+shared files predate this check (16:56 vs17:18); creator unestablished. Canary is
+project1/shared0. No second model journey or old-client exclusion; no HAL claim.
 
+Reviews requested attached-CD routing and atomic ignore publication, then memory
+trailing-text and explicit UTF8 Git decoding. All addressed; existing valid ignore
+policies remain untouched and conflicting concurrent winners refuse before seeding.
+Final Python7/7 PASS under cp1252, including Unicode Git paths and TOML arguments.
+Initial fixture/review failures and the failed encoding probe remain retained.
+Final review verdict/source/integration are in the run report; approval gates push.
 Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/store_root_20261017/
-(Build.log, Tests.log, ReaderTests.log, python-tests.log, archive.json,
-journey-commands.json, journey-assessment.json, neutral.stdout and recall.txt).
-Scoped lint/final format and one fresh whole-diff Droid review gate promotion;
-exact verdict/commit and integration disposition are in that run's final report.
-
-The first whole-diff review requested a routing correction: native attached
-`-Cvalue` and `-C=value` forms were not used when selecting the home. Both forms
-now select the destination project's home; the new two-project regression and
-all other launcher tests pass (6/6, python-tests-routing.log). Rust is unchanged;
-no Rust test or second Luna journey was run for this correction. The first
-REVISE verdict is retained, and final approval still gates promotion.
-
-The follow-up review found transient ignore-policy truncation. Existing valid
-policies are now untouched; missing policies are published atomically before
-private files, preserving and validating concurrent winners. Seven launcher
-tests pass, including those races and Unicode path arguments without invalid
-TOML surrogate escapes (python-tests-ignore.log). Rust/model journeys unchanged.
+(Build/Tests/ReaderTests/Fix/Format logs, Python regression logs, archive.json,
+journey-assessment.json, raw journey outputs, encoding probes and review verdicts).

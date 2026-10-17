@@ -54,17 +54,47 @@ refuse oversized results. Hosted model use does not establish offline readiness.
 
 def selected_directory(args, cwd):
     selected = cwd
+    skip_value = False
+    value_options = {
+        "-a",
+        "--ask-for-approval",
+        "-c",
+        "--config",
+        "-i",
+        "--image",
+        "-m",
+        "--model",
+        "-o",
+        "--output-last-message",
+        "-p",
+        "--profile",
+        "-s",
+        "--sandbox",
+        "--add-dir",
+        "--disable",
+        "--enable",
+        "--local-provider",
+        "--output-schema",
+        "--stateful-project",
+        "--thread-source",
+    }
     for index, arg in enumerate(args):
-        if arg == "--":
+        if skip_value:
+            skip_value = False
+            continue
+        if arg in ("--", "memory"):
             break
         if arg in ("-C", "--cd"):
             if index + 1 == len(args):
                 raise ValueError(f"{arg} requires a directory")
             selected = Path(args[index + 1])
+            skip_value = True
         elif arg.startswith("--cd="):
             selected = Path(arg.split("=", 1)[1])
         elif arg.startswith("-C") and len(arg) > 2:
             selected = Path(arg[2:].removeprefix("="))
+        elif arg in value_options:
+            skip_value = True
     return (cwd / selected).resolve(strict=True)
 
 
@@ -73,6 +103,7 @@ def project_directory(directory):
         ["git", "-C", str(directory), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     return (

@@ -9,34 +9,42 @@ import scodex
 
 
 class ProjectHomeTests(unittest.TestCase):
-    def test_attached_cd_flags_route_native_home_to_the_selected_project(self):
+    def test_directory_options_do_not_consume_memory_text_or_option_values(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()
             alpha, beta = base / "alpha", base / "beta"
             alpha.mkdir()
             beta.mkdir()
-            for flag in ("-C../beta", "-C=../beta"):
+            cases = [
+                (["exec", flag, "hello"], beta) for flag in ("-C../beta", "-C=../beta")
+            ]
+            cases += [(["exec", "-m", "memory", "-C../beta", "hello"], beta)]
+            cases += [
+                (["memory", "--thread", "fixture", *action, "Use", "-C../beta"], alpha)
+                for action in (["add", "note"], ["correct", "entry@1"])
+            ]
+            for args, target in cases:
                 with (
-                    self.subTest(flag=flag),
+                    self.subTest(args=args),
                     patch.dict(os.environ, {"STATEFUL_STORE_ROOT": ""}),
                     patch.object(scodex.Path, "cwd", return_value=alpha),
                     patch.object(scodex, "TEMPLATE_HOME", base / "empty-template"),
                     patch.object(scodex.subprocess, "call", return_value=0) as call,
                 ):
-                    self.assertEqual(scodex.launch(["exec", flag, "hello"]), 0)
+                    self.assertEqual(scodex.launch(args), 0)
                     self.assertEqual(
                         call.call_args.kwargs["env"]["CODEX_HOME"],
-                        str(beta / ".stateful"),
+                        str(target / ".stateful"),
                     )
                     self.assertEqual(
                         call.call_args.kwargs["env"]["CODEX_SQLITE_HOME"],
-                        str(beta / ".stateful"),
+                        str(target / ".stateful"),
                     )
-            self.assertFalse((alpha / ".stateful").exists())
 
     def test_git_subdirectory_and_cd_select_one_project_home(self):
         with tempfile.TemporaryDirectory() as directory:
-            project = Path(directory).resolve()
+            project = Path(directory).resolve() / "repo-🙂"
+            project.mkdir()
             subprocess.run(["git", "init", "-q", str(project)], check=True)
             nested = project / "nested"
             nested.mkdir()
