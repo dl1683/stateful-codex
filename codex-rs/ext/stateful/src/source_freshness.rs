@@ -13,6 +13,7 @@ use codex_project_intelligence::HierarchyNode;
 use codex_project_intelligence::HierarchySourceUpdate;
 use codex_project_intelligence::NodeLifecycle;
 use codex_project_intelligence::SourceFingerprint;
+use codex_project_store::is_project_storage_directory;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -494,8 +495,18 @@ fn fingerprint_source(
     relative_path: &str,
     maximum_bytes: u64,
 ) -> Result<(SourceFingerprint, u64), SourceCheckError> {
+    if configured_root
+        .join(relative_path)
+        .parent()
+        .is_some_and(is_project_storage_directory)
+    {
+        return Err(SourceCheckError::Missing);
+    }
     let root = std::fs::canonicalize(configured_root).map_err(classify_io_error)?;
     let source = std::fs::canonicalize(root.join(relative_path)).map_err(classify_io_error)?;
+    if source.parent().is_some_and(is_project_storage_directory) {
+        return Err(SourceCheckError::Missing);
+    }
     if !source.starts_with(&root) {
         return Err(SourceCheckError::Unchecked);
     }
@@ -523,6 +534,10 @@ fn fingerprint_source(
         .map_err(|_| SourceCheckError::Unchecked)?;
     Ok((fingerprint, total_bytes))
 }
+
+#[cfg(test)]
+#[path = "source_freshness/private_storage_tests.rs"]
+mod private_storage_tests;
 
 fn classify_io_error(error: std::io::Error) -> SourceCheckError {
     if error.kind() == std::io::ErrorKind::NotFound {

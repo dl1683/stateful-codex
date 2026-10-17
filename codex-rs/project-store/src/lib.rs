@@ -8,6 +8,7 @@ mod opener;
 mod reader;
 mod registry;
 mod snapshot;
+mod source_policy;
 mod writer;
 
 pub use domains::DomainManifest;
@@ -29,6 +30,7 @@ pub use registry::read_identity;
 pub use snapshot::ProjectDomainReader;
 pub use snapshot::ProjectReadError;
 pub use snapshot::ProjectReadSnapshot;
+pub use source_policy::is_project_storage_directory;
 pub use writer::ProjectStoreWriter;
 pub use writer::ProjectWriteError;
 pub use writer::ProjectWriteTransaction;

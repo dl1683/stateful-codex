@@ -16,6 +16,7 @@ workspace = true
 codex-extension-api = { workspace = true }
 codex-git-utils = { workspace = true }
 codex-project-intelligence = { workspace = true }
+codex-project-store = { workspace = true }
 codex-protocol = { workspace = true }
 codex-state = { workspace = true }
 codex-stateful-runtime = { workspace = true }
@@ -32,7 +33,6 @@ tracing = { workspace = true }
 [dev-dependencies]
 codex-exec-server = { workspace = true }
 codex-file-system = { workspace = true }
-codex-project-store = { workspace = true }
 codex-utils-output-truncation = { workspace = true }
 pretty_assertions = { workspace = true }
 sqlx = { workspace = true }

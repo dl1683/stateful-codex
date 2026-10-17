@@ -274,13 +274,9 @@ impl ProjectIndexer {
             {
                 return Err(ProjectIndexerError::IdentityConflict(file_id.to_string()));
             }
-            let missing_files = if existing.lifecycle == NodeLifecycle::Active {
-                self.mark_missing(&project_id, existing, PublicationFence::Targeted)
-                    .await?;
-                1
-            } else {
-                0
-            };
+            let missing_files = u64::from(existing.lifecycle != NodeLifecycle::Missing);
+            self.mark_missing(&project_id, existing, PublicationFence::Targeted)
+                .await?;
             return Ok(ProjectIndexReport {
                 inventory_complete: true,
                 region_coverage_complete: true,
@@ -482,18 +478,19 @@ impl ProjectIndexer {
                     NodeKind::Project => {}
                     NodeKind::Directory | NodeKind::Region => pending.push(child.id),
                     NodeKind::File => {
-                        if child.lifecycle == NodeLifecycle::Active
-                            && !seen_files.contains(&child.id)
-                        {
+                        if !seen_files.contains(&child.id) {
+                            let newly_missing = child.lifecycle != NodeLifecycle::Missing;
                             self.mark_missing(
                                 project_id,
                                 child,
                                 PublicationFence::FullRefresh(generation),
                             )
                             .await?;
-                            missing = missing
-                                .checked_add(1)
-                                .ok_or(ProjectIndexerError::CountOverflow)?;
+                            if newly_missing {
+                                missing = missing
+                                    .checked_add(1)
+                                    .ok_or(ProjectIndexerError::CountOverflow)?;
+                            }
                         }
                     }
                 }
@@ -593,3 +590,7 @@ pub enum ProjectIndexerError {
 #[cfg(test)]
 #[path = "indexer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "indexer/private_index_tests.rs"]
+mod private_index_tests;

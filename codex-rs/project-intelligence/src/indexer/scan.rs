@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 
+use codex_project_store::is_project_storage_directory;
 use ignore::WalkBuilder;
 use sha2::Digest;
 use sha2::Sha256;
@@ -69,6 +70,13 @@ pub(super) fn scan_roots_with_limits(
     let mut inventory_complete = true;
     let mut regions_scanned = 0_usize;
     for root in roots {
+        if is_project_storage_directory(root)
+            || root
+                .canonicalize()
+                .is_ok_and(|path| is_project_storage_directory(&path))
+        {
+            continue;
+        }
         let mut builder = WalkBuilder::new(root);
         builder
             .hidden(false)
@@ -76,10 +84,15 @@ pub(super) fn scan_roots_with_limits(
             .standard_filters(true);
         builder.filter_entry(|entry| {
             !entry.file_type().is_some_and(|kind| kind.is_dir())
-                || !matches!(
-                    entry.file_name().to_str(),
-                    Some(".git" | "node_modules" | "target")
-                )
+                || (!is_project_storage_directory(entry.path())
+                    && !entry
+                        .path()
+                        .canonicalize()
+                        .is_ok_and(|path| is_project_storage_directory(&path))
+                    && !matches!(
+                        entry.file_name().to_str(),
+                        Some(".git" | "node_modules" | "target")
+                    ))
         });
         for entry in builder.build() {
             let entry = match entry {
@@ -136,13 +149,22 @@ pub(super) fn scan_project_file(
     root: &Path,
     relative_path: &ProjectRelativePath,
 ) -> Result<Option<ScannedFile>, ProjectIndexerError> {
-    let canonical_root = std::fs::canonicalize(root)?;
     let path = root.join(relative_path.as_str());
+    if path.parent().is_some_and(is_project_storage_directory) {
+        return Ok(None);
+    }
+    let canonical_root = std::fs::canonicalize(root)?;
     let canonical_path = match std::fs::canonicalize(&path) {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
+    if canonical_path
+        .parent()
+        .is_some_and(is_project_storage_directory)
+    {
+        return Ok(None);
+    }
     if !canonical_path.starts_with(&canonical_root)
         || !std::fs::metadata(&canonical_path)?.is_file()
     {
@@ -278,3 +300,7 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
 #[cfg(test)]
 #[path = "scan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "private_storage_tests.rs"]
+mod private_storage_tests;

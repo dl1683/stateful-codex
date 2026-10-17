@@ -131,7 +131,7 @@ pub(super) async fn mark_file_missing(
         "UPDATE hierarchy_nodes
          SET lifecycle = 'missing', revision = revision + 1, updated_at_ms = ?
          WHERE project_id = ? AND parent_id = ? AND kind = 'region'
-           AND lifecycle = 'active'",
+           AND lifecycle IN ('active', 'replaced')",
     )
     .bind(now)
     .bind(project_id)
@@ -141,7 +141,7 @@ pub(super) async fn mark_file_missing(
     sqlx::query(
         "UPDATE hierarchy_nodes
          SET lifecycle = 'missing', revision = revision + 1, updated_at_ms = ?
-         WHERE project_id = ? AND id = ? AND lifecycle = 'active'",
+         WHERE project_id = ? AND id = ? AND lifecycle IN ('active', 'replaced')",
     )
     .bind(now)
     .bind(project_id)
