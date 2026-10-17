@@ -5,6 +5,7 @@ use sqlx::Transaction;
 use thiserror::Error;
 
 use crate::DomainManifest;
+use crate::PreparedDomains;
 use crate::ProjectStoreReader;
 use crate::StoreIdentity;
 use crate::StoreRegistryError;
@@ -23,6 +24,7 @@ pub struct ProjectReadSnapshot<'a> {
     transaction: Transaction<'a, Sqlite>,
     ready: &'a mut bool,
     identity: &'a StoreIdentity,
+    domains: &'a PreparedDomains,
 }
 
 /// Refusal to start or finish an admitted domain snapshot.
@@ -74,6 +76,7 @@ impl ProjectDomainReader {
             transaction,
             ready: &mut self.ready,
             identity: &self.reader.identity,
+            domains: &self.reader.domains,
         })
     }
 
@@ -84,6 +87,15 @@ impl ProjectDomainReader {
 }
 
 impl ProjectReadSnapshot<'_> {
+    /// Require the domain owner's compiled history before reading its tables.
+    /// Identity alone does not authorize a domain, nor authenticate an actor.
+    pub fn require_domain(&self, manifest: &DomainManifest<'_>) -> Result<(), ProjectReadError> {
+        if !self.domains.matches_domain(manifest) {
+            return Err(StoreRegistryError::IncompatibleHistory.into());
+        }
+        Ok(())
+    }
+
     /// Both UUIDs validated in this snapshot, not a knowledge/freshness certificate.
     pub fn identity(&self) -> &StoreIdentity {
         self.identity
