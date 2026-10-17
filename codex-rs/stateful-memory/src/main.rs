@@ -1,6 +1,7 @@
 //! Standalone project inspection. No engine login, home or native attachment.
 
 mod arguments;
+mod native;
 mod read;
 
 use std::io::Write;
@@ -26,6 +27,9 @@ const MAX_READ_REPLY_BYTES: usize = 8 * 1024;
 struct Cli {
     #[arg(long)]
     project: PathBuf,
+    /// Native store root; defaults to STATEFUL_STORE_ROOT or <project>/.stateful.
+    #[arg(long, global = true)]
+    store_root: Option<PathBuf>,
     /// Emit compact JSON (the default is indented JSON).
     #[arg(long, global = true)]
     json: bool,
@@ -35,6 +39,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Operation {
+    /// Inspect the unchanged native project store without engine login.
+    NativeRoot,
+    /// Read eligible native memory using the native retirement rules.
+    NativeRead {
+        #[arg(long)]
+        project_id: String,
+        #[arg(long)]
+        entry: String,
+    },
     Capabilities,
     Root,
     /// Read bounded attributed historical text from installed project domains.
@@ -107,7 +120,10 @@ async fn main() -> ExitCode {
     } else {
         OutputStyle::Indented
     };
-    let max_reply_bytes = if matches!(&cli.command, Operation::Read { .. }) {
+    let max_reply_bytes = if matches!(
+        &cli.command,
+        Operation::Read { .. } | Operation::NativeRead { .. }
+    ) {
         MAX_READ_REPLY_BYTES
     } else {
         MAX_REPLY_BYTES
@@ -120,7 +136,27 @@ async fn main() -> ExitCode {
 }
 
 async fn execute(cli: Cli) -> Result<Value, (&'static str, String)> {
+    if native::database(&cli.project, cli.store_root.clone()).is_file() {
+        match &cli.command {
+            Operation::Root => return native::root(&cli.project, cli.store_root).await,
+            Operation::Capabilities => {
+                return Ok(json!({
+                    "protocolVersion":1,"layout":"nativeHome","readOnly":true,
+                    "operations":["capabilities","root","native-root","native-read"],
+                    "maxReplyBytes":MAX_REPLY_BYTES,"maxReadReplyBytes":MAX_READ_REPLY_BYTES
+                }));
+            }
+            Operation::NativeRoot
+            | Operation::NativeRead { .. }
+            | Operation::Read { .. }
+            | Operation::Init { .. } => {}
+        }
+    }
     let operation = match cli.command {
+        Operation::NativeRoot => return native::root(&cli.project, cli.store_root).await,
+        Operation::NativeRead { project_id, entry } => {
+            return native::read(&cli.project, cli.store_root, &project_id, &entry).await;
+        }
         Operation::Read {
             project_uuid,
             store_uuid,

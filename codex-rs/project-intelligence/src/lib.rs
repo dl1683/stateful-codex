@@ -70,6 +70,8 @@ pub use blackboard_storage::ReviewContext;
 pub use blackboard_storage::ReviewPage;
 pub use blackboard_storage::Succession;
 pub use blackboard_storage::SupersededEntry;
+pub use blackboard_storage::native_memory_projects;
+pub use blackboard_storage::read_native_memory;
 pub use blackboard_storage::revalidate_project_knowledge_clocks;
 pub use blackboard_storage::revalidate_project_no_reusable_learning;
 pub use context_map::ContextMapCoverage;
