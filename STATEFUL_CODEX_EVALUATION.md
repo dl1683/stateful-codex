@@ -1583,3 +1583,13 @@ cleanup APPROVE40bindings, final CLI linked9632Gitblobs. Native Luna1 FAIL_RETAI
 refresh2publicfiles, zero queries, unsupported final; original hardlink and all
 postflights restored/pass. Separate readonly6node inventory is diagnostic only.
 FirstDB/import/old-writer/lock remain OPEN. See [exact record](STATEFUL_STORAGE_EXCLUSION_20261017.md).
+
+
+## 2026-10-17 — Schema and limited writer-exclusion feasibility
+
+Source8ca47f remains landed, native query journey failed. Fresh schema-only
+inventory63bindings approved, no safe import/row preservation proof. Single
+separate Luna run: SQLite engine3cases PASS2.809s; delivery FAIL_RETAINED26.344s
+on malformed final, no retry/regrade. Clock-only bypass and persistent committed
+refusals plus rollback/worker exits retained. No native barrier/firstDB/HAL claim.
+See [current cutover handoff](STATEFUL_CUTOVER_HANDOFF_20261017.md).
