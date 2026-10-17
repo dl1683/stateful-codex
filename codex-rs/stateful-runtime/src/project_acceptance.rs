@@ -1,6 +1,5 @@
 //! Inactive, bounded acceptance-ledger reads from one admitted project snapshot.
 
-use codex_project_store::DomainManifest;
 use codex_project_store::ProjectReadError;
 use codex_project_store::ProjectReadSnapshot;
 use thiserror::Error;
@@ -42,10 +41,7 @@ pub async fn read_project_acceptance_ledger(
     mut snapshot: ProjectReadSnapshot<'_>,
     run_id: &StatefulRunId,
 ) -> Result<AcceptanceLedger, ProjectAcceptanceReadError> {
-    snapshot.require_domain(&DomainManifest {
-        domain: "stateful-runtime",
-        migrations: &crate::storage::MIGRATOR,
-    })?;
+    snapshot.require_domain(&crate::project_store_domain().map_err(ProjectReadError::from)?)?;
     let project = snapshot.identity().project_uuid.to_string();
     let owner: Option<String> = sqlx::query_scalar(
         "SELECT CASE WHEN typeof(project_id)='text' AND octet_length(project_id)=36

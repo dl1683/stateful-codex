@@ -1,4 +1,3 @@
-use codex_project_store::DomainManifest;
 use codex_project_store::ProjectWriteError;
 use codex_project_store::ProjectWriteTransaction;
 use sqlx::SqliteConnection;
@@ -47,10 +46,7 @@ pub async fn revalidate_project_run_start<'a>(
     run_id: &StatefulRunId,
     expected_created_at_ms: i64,
 ) -> Result<ProjectWriteTransaction<'a>, ProjectRunCompletionError> {
-    transaction.require_domain(&DomainManifest {
-        domain: "stateful-runtime",
-        migrations: &storage::MIGRATOR,
-    })?;
+    transaction.require_domain(&crate::project_store_domain().map_err(ProjectWriteError::from)?)?;
     if expected_created_at_ms < 0 {
         return Err(ProjectRunCompletionError::RunStartMismatch);
     }
@@ -83,10 +79,7 @@ pub async fn commit_project_run(
     mut transaction: ProjectWriteTransaction<'_>,
     request: ProjectRunCompletion<'_>,
 ) -> Result<(StatefulRun, Option<StatefulObligation>), ProjectRunCompletionError> {
-    transaction.require_domain(&DomainManifest {
-        domain: "stateful-runtime",
-        migrations: &storage::MIGRATOR,
-    })?;
+    transaction.require_domain(&crate::project_store_domain().map_err(ProjectWriteError::from)?)?;
     validate_request(
         &request.update,
         request.final_obligation.as_ref(),

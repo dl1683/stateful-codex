@@ -1,5 +1,4 @@
 //! Inactive project-store lease operations, sharing the legacy verification policy.
-use codex_project_store::DomainManifest;
 use codex_project_store::ProjectWriteError;
 use codex_project_store::ProjectWriteTransaction;
 use thiserror::Error;
@@ -59,10 +58,7 @@ async fn require_run(
     transaction: &mut ProjectWriteTransaction<'_>,
     run_id: &StatefulRunId,
 ) -> Result<(), ProjectVerificationError> {
-    transaction.require_domain(&DomainManifest {
-        domain: "stateful-runtime",
-        migrations: &crate::storage::MIGRATOR,
-    })?;
+    transaction.require_domain(&crate::project_store_domain().map_err(ProjectWriteError::from)?)?;
     let project = transaction.identity().project_uuid.to_string();
     let owner: Option<String> = sqlx::query_scalar(
         "SELECT CASE WHEN typeof(project_id)='text' AND octet_length(project_id)=36

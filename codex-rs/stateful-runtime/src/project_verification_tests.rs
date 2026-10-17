@@ -21,7 +21,7 @@ type Durable = BTreeMap<String, Vec<Vec<String>>>;
 async fn domains(domain: &str) -> Result<PreparedDomains> {
     Ok(PreparedDomains::prepare(&[DomainManifest {
         domain,
-        migrations: &crate::storage::MIGRATOR,
+        migrations: crate::project_store_domain().unwrap().migrations,
     }])
     .await?)
 }

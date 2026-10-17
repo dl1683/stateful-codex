@@ -1,4 +1,3 @@
-use codex_project_store::DomainManifest;
 use codex_project_store::PreparedDomains;
 use codex_project_store::ProjectStoreLocation;
 use codex_project_store::StoreIdentity;
@@ -15,9 +14,6 @@ use std::process::Command;
 use std::process::Output;
 use tempfile::TempDir;
 
-static INTELLIGENCE: sqlx::migrate::Migrator = sqlx::migrate!("../project-intelligence/migrations");
-static RUNTIME: sqlx::migrate::Migrator = sqlx::migrate!("../stateful-runtime/migrations");
-
 #[expect(
     clippy::disallowed_methods,
     reason = "explicit disposable project fixture"
@@ -30,14 +26,8 @@ async fn seed(
         ProjectStoreLocation::select_project(&AbsolutePathBuf::from_absolute_path(project)?)?;
     let identity = initialize_local_store(&location).await?;
     let domains = PreparedDomains::prepare(&[
-        DomainManifest {
-            domain: "project-intelligence",
-            migrations: &INTELLIGENCE,
-        },
-        DomainManifest {
-            domain: "stateful-runtime",
-            migrations: &RUNTIME,
-        },
+        codex_project_intelligence::project_store_domain(),
+        codex_stateful_runtime::project_store_domain()?,
     ])
     .await?;
     let mut writer = SqliteConnection::connect_with(

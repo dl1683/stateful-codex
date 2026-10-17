@@ -1,4 +1,3 @@
-use codex_project_store::DomainManifest;
 use codex_project_store::ProjectWriteError;
 use codex_project_store::ProjectWriteTransaction;
 use thiserror::Error;
@@ -54,10 +53,7 @@ pub async fn revalidate_project_knowledge_clocks<'a>(
     mut transaction: ProjectWriteTransaction<'a>,
     expected: &ProjectKnowledgeSnapshot,
 ) -> Result<ProjectWriteTransaction<'a>, ProjectKnowledgeWriteError> {
-    transaction.require_domain(&DomainManifest {
-        domain: "project-intelligence",
-        migrations: &super::MIGRATOR,
-    })?;
+    transaction.require_domain(&crate::project_store_domain())?;
     if transaction.identity() != &expected.identity {
         return Err(ProjectKnowledgeWriteError::IdentityMismatch);
     }

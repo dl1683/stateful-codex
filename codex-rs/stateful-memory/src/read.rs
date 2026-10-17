@@ -2,7 +2,6 @@
 use codex_project_intelligence::BlackboardEntryId;
 use codex_project_intelligence::ProjectKnowledgeReadError;
 use codex_project_intelligence::ProjectKnowledgeReader;
-use codex_project_store::DomainManifest;
 use codex_project_store::PreparedDomains;
 use codex_project_store::ProjectStoreLocation;
 use codex_project_store::ProjectStoreOpenError;
@@ -11,9 +10,6 @@ use codex_project_store::StoreIdentity;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value;
 use std::path::Path;
-
-static INTELLIGENCE: sqlx::migrate::Migrator = sqlx::migrate!("../project-intelligence/migrations");
-static RUNTIME: sqlx::migrate::Migrator = sqlx::migrate!("../stateful-runtime/migrations");
 
 fn refused(code: &'static str) -> (&'static str, String) {
     (
@@ -69,14 +65,8 @@ pub(super) async fn execute(
     let location =
         ProjectStoreLocation::select_project(&root).map_err(|_| refused("invalidProject"))?;
     let domains = PreparedDomains::prepare(&[
-        DomainManifest {
-            domain: "project-intelligence",
-            migrations: &INTELLIGENCE,
-        },
-        DomainManifest {
-            domain: "stateful-runtime",
-            migrations: &RUNTIME,
-        },
+        codex_project_intelligence::project_store_domain(),
+        codex_stateful_runtime::project_store_domain().map_err(|_| refused("unsupportedStore"))?,
     ])
     .await
     .map_err(|_| refused("unsupportedStore"))?;

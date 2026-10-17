@@ -4,6 +4,7 @@
 )]
 
 use super::*;
+use codex_project_store::DomainManifest;
 use codex_project_store::PreparedDomains;
 use codex_project_store::ProjectDomainReader;
 use codex_project_store::ProjectStoreLocation;
@@ -53,7 +54,7 @@ impl Fixture {
         let mut connection = store.pool.acquire().await?;
         PreparedDomains::prepare(&[DomainManifest {
             domain,
-            migrations: &crate::storage::MIGRATOR,
+            migrations: crate::project_store_domain().unwrap().migrations,
         }])
         .await?
         .install(&mut connection)
@@ -87,14 +88,14 @@ impl Fixture {
     async fn reader(&self) -> Result<ProjectDomainReader> {
         let manifest = DomainManifest {
             domain: self.domain,
-            migrations: &crate::storage::MIGRATOR,
+            migrations: crate::project_store_domain().unwrap().migrations,
         };
         let domains = PreparedDomains::prepare(&[manifest]).await?;
         Ok(ProjectStoreReader::open(&self.location, domains)
             .await?
             .into_domain_reader(&DomainManifest {
                 domain: self.domain,
-                migrations: &crate::storage::MIGRATOR,
+                migrations: crate::project_store_domain().unwrap().migrations,
             })
             .await?)
     }

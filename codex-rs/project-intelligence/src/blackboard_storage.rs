@@ -90,7 +90,7 @@ pub use succession::Succession;
 pub use succession::SupersededEntry;
 
 const INITIAL_REVISION: i64 = 1;
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+pub(crate) static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct BlackboardStore {

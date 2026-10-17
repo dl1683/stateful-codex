@@ -6,7 +6,6 @@ mod ownership;
 pub use content::ProjectAttributedEntry;
 pub use content::ProjectAttributedRead;
 
-use codex_project_store::DomainManifest;
 use codex_project_store::ProjectDomainReader;
 use codex_project_store::ProjectReadError;
 use codex_project_store::ProjectStoreReader;
@@ -71,10 +70,7 @@ impl ProjectKnowledgeReader {
         Ok(Self {
             admission_identity,
             reader: reader
-                .into_domain_reader(&DomainManifest {
-                    domain: "project-intelligence",
-                    migrations: &super::MIGRATOR,
-                })
+                .into_domain_reader(&crate::project_store_domain())
                 .await?,
         })
     }

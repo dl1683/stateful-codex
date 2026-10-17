@@ -1,4 +1,5 @@
 use super::*;
+use codex_project_store::DomainManifest;
 use codex_project_store::PreparedDomains;
 use codex_project_store::ProjectStoreLocation;
 use codex_project_store::ProjectStoreWriter;
@@ -44,7 +45,7 @@ async fn domains() -> Result<PreparedDomains> {
     Ok(PreparedDomains::prepare(&[
         DomainManifest {
             domain: "stateful-runtime",
-            migrations: &storage::MIGRATOR,
+            migrations: crate::project_store_domain().unwrap().migrations,
         },
         DomainManifest {
             domain: "test-domain",

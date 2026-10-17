@@ -21,7 +21,7 @@ async fn fixture(home: &TempDir) -> (ProjectKnowledgeReader, StoreIdentity, Sqli
     let identity = initialize_local_store(&location).await.unwrap();
     let manifest = [DomainManifest {
         domain: "project-intelligence",
-        migrations: &super::super::MIGRATOR,
+        migrations: crate::project_store_domain().migrations,
     }];
     let domains = PreparedDomains::prepare(&manifest).await.unwrap();
     let mut writer = SqliteConnection::connect_with(
@@ -166,7 +166,7 @@ async fn same_schema_admitted_under_another_domain_cannot_construct_knowledge_re
     initialize_local_store(&location).await.unwrap();
     let domains = PreparedDomains::prepare(&[DomainManifest {
         domain: "other-domain",
-        migrations: &super::super::MIGRATOR,
+        migrations: crate::project_store_domain().migrations,
     }])
     .await
     .unwrap();

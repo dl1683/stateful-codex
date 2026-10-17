@@ -1,6 +1,7 @@
 use super::*;
 use crate::ProjectKnowledgeReadError;
 use crate::ProjectKnowledgeReader;
+use codex_project_store::DomainManifest;
 use codex_project_store::PreparedDomains;
 use codex_project_store::ProjectStoreLocation;
 use codex_project_store::ProjectStoreReader;
@@ -24,7 +25,7 @@ struct Fixture {
 async fn domains() -> PreparedDomains {
     PreparedDomains::prepare(&[DomainManifest {
         domain: "project-intelligence",
-        migrations: &super::super::MIGRATOR,
+        migrations: crate::project_store_domain().migrations,
     }])
     .await
     .unwrap()
