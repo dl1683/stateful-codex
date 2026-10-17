@@ -62,6 +62,8 @@ def selected_directory(args, cwd):
             selected = Path(args[index + 1])
         elif arg.startswith("--cd="):
             selected = Path(arg.split("=", 1)[1])
+        elif arg.startswith("-C") and len(arg) > 2:
+            selected = Path(arg[2:].removeprefix("="))
     return (cwd / selected).resolve(strict=True)
 
 

@@ -1668,3 +1668,10 @@ Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/store_r
 journey-commands.json, journey-assessment.json, neutral.stdout and recall.txt).
 Scoped lint/final format and one fresh whole-diff Droid review gate promotion;
 exact verdict/commit and integration disposition are in that run's final report.
+
+The first whole-diff review requested a routing correction: native attached
+`-Cvalue` and `-C=value` forms were not used when selecting the home. Both forms
+now select the destination project's home; the new two-project regression and
+all other launcher tests pass (6/6, python-tests-routing.log). Rust is unchanged;
+no Rust test or second Luna journey was run for this correction. The first
+REVISE verdict is retained, and final approval still gates promotion.

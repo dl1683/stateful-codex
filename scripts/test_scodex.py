@@ -9,6 +9,31 @@ import scodex
 
 
 class ProjectHomeTests(unittest.TestCase):
+    def test_attached_cd_flags_route_native_home_to_the_selected_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            alpha, beta = base / "alpha", base / "beta"
+            alpha.mkdir()
+            beta.mkdir()
+            for flag in ("-C../beta", "-C=../beta"):
+                with (
+                    self.subTest(flag=flag),
+                    patch.dict(os.environ, {"STATEFUL_STORE_ROOT": ""}),
+                    patch.object(scodex.Path, "cwd", return_value=alpha),
+                    patch.object(scodex, "TEMPLATE_HOME", base / "empty-template"),
+                    patch.object(scodex.subprocess, "call", return_value=0) as call,
+                ):
+                    self.assertEqual(scodex.launch(["exec", flag, "hello"]), 0)
+                    self.assertEqual(
+                        call.call_args.kwargs["env"]["CODEX_HOME"],
+                        str(beta / ".stateful"),
+                    )
+                    self.assertEqual(
+                        call.call_args.kwargs["env"]["CODEX_SQLITE_HOME"],
+                        str(beta / ".stateful"),
+                    )
+            self.assertFalse((alpha / ".stateful").exists())
+
     def test_git_subdirectory_and_cd_select_one_project_home(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory).resolve()
