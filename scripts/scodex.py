@@ -66,8 +66,9 @@ def selected_directory(args, cwd):
             arg
             in (
                 "-c --config -m --model -p --profile -s --sandbox --local-provider "
-                "--add-dir --stateful --stateful-project --enable --disable --remote "
-                "-i --image -o --output-last-message --output-schema --color"
+                "--add-dir --stateful-project --enable --disable --remote "
+                "-i --image -o --output-last-message --output-schema --color "
+                "-a --ask-for-approval --thread-source"
             ).split()
         ):
             next(arguments, None)
@@ -164,11 +165,18 @@ def launch(args):
         "--version",
         "--help",
     }
-    options = [] if args and args[0] in passthrough else ["-m", "gpt-6-luna"]
-    if options and not any(
-        arg == "--stateful" or arg.startswith("--stateful=") for arg in args
-    ):
-        options.append("--stateful=ask")
+    options = []
+    option_args = args[: args.index("--")] if "--" in args else args
+    if not (args and args[0] in passthrough):
+        if not any(
+            arg in ("-m", "--model") or arg.startswith(("-m", "--model="))
+            for arg in option_args
+        ):
+            options.extend(["-m", "gpt-6-luna"])
+        if not any(
+            arg == "--stateful" or arg.startswith("--stateful=") for arg in option_args
+        ):
+            options.append("--stateful=ask")
     # The native CLI setting wins over a copied legacy sqlite_home preference;
     # managed requirements are still enforced by the native configuration loader.
     quoted_root = json.dumps(str(root), ensure_ascii=False).replace("\x7f", "\\u007f")

@@ -16,15 +16,20 @@ class ProjectHomeTests(unittest.TestCase):
             alpha, beta = base / "alpha", base / "beta"
             alpha.mkdir()
             beta.mkdir()
-            for flag in ("-C../beta", "-C=../beta"):
+            for command in (
+                "exec -C../beta hello",
+                "exec -C=../beta hello",
+                "--stateful -C ../beta exec hello",
+                "--stateful ask --cd=../beta exec hello",
+            ):
                 with (
-                    self.subTest(flag=flag),
+                    self.subTest(command=command),
                     patch.dict(os.environ, {"STATEFUL_STORE_ROOT": ""}),
                     patch.object(scodex.Path, "cwd", return_value=alpha),
                     patch.object(scodex, "TEMPLATE_HOME", base / "empty-template"),
                     patch.object(scodex.subprocess, "call", return_value=0) as call,
                 ):
-                    self.assertEqual(scodex.launch(["exec", flag, "hello"]), 0)
+                    self.assertEqual(scodex.launch(command.split()), 0)
                     env = call.call_args.kwargs["env"]
                     self.assertEqual(
                         [env[key] for key in ("CODEX_HOME", "CODEX_SQLITE_HOME")],
@@ -99,7 +104,11 @@ class ProjectHomeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory).resolve()
             homes = []
-            for name in ("alpha-नमुना-🙂", "beta"):
+            for name, model in (
+                ("alpha-नमुना-🙂", []),
+                ("beta", ["--model", "gpt-6-luna"]),
+                ("gamma", ["-mgpt-6-luna"]),
+            ):
                 project = base / name
                 project.mkdir()
                 with (
@@ -111,9 +120,8 @@ class ProjectHomeTests(unittest.TestCase):
                     patch.object(scodex, "TEMPLATE_HOME", base / "empty-template"),
                     patch.object(scodex.subprocess, "call", return_value=0) as call,
                 ):
-                    self.assertEqual(
-                        scodex.launch(["exec", "--skip-git-repo-check", "hello"]), 0
-                    )
+                    command = [*model, "exec", "--skip-git-repo-check", "hello"]
+                    self.assertEqual(scodex.launch(command), 0)
                     args, kwargs = call.call_args
                     homes.append(kwargs["env"]["CODEX_HOME"])
                     self.assertEqual(
@@ -133,9 +141,10 @@ class ProjectHomeTests(unittest.TestCase):
                     self.assertEqual(
                         args[0][1:],
                         ["-c", f"sqlite_home={quoted}"]
-                        + "-m gpt-6-luna --stateful=ask exec --skip-git-repo-check hello".split(),
+                        + ([] if model else ["-m", "gpt-6-luna"])
+                        + ["--stateful=ask", *command],
                     )
-            self.assertNotEqual(*homes)
+            self.assertEqual(len(set(homes)), 3)
 
     def test_existing_ignore_policy_is_untouched_on_restart(self):
         with tempfile.TemporaryDirectory() as directory:
