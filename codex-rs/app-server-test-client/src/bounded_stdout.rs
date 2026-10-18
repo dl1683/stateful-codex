@@ -1,23 +1,20 @@
-//! Inactive stdout-only admission, not a transport or task/process owner.
-//! Compact queued and delivered payloads share 16 MiB and 64 message leases.
+//! Inactive stdout admission using an explicitly supplied shared payload budget.
 //! Reader staging/compaction can add approximately 16 MiB plus fixed buffers;
-//! these are requested-payload bounds, not RSS limits. Later outbound integration
-//! must share the transport budget, not introduce another independent allowance.
+//! these are requested-payload bounds, not RSS limits. Independently held leases
+//! compete with queued/delivered frames, but outbound writes are not enforced.
 
 use super::bounded_frame_io::FrameError;
 use super::bounded_frame_io::FrameReader;
+use super::bounded_payload::AdmissionError;
+use super::bounded_payload::LeasedFrame;
+use super::bounded_payload::MAX_MESSAGES;
+use super::bounded_payload::PayloadBudget;
 use std::future::Future;
-use std::sync::Arc;
 use tokio::io::AsyncRead;
-use tokio::sync::OwnedSemaphorePermit;
-use tokio::sync::Semaphore;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
-
-const MAX_BYTES: usize = 16 * 1024 * 1024;
-const MAX_MESSAGES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StdoutError {
@@ -26,18 +23,6 @@ pub(super) enum StdoutError {
     ByteOverflow,
     MessageOverflow,
     PumpStopped,
-}
-
-pub(super) struct LeasedFrame {
-    bytes: Box<[u8]>,
-    _message: OwnedSemaphorePermit,
-    _bytes: OwnedSemaphorePermit,
-}
-
-impl LeasedFrame {
-    pub(super) fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
 }
 
 pub(super) struct StdoutQueue {
@@ -114,14 +99,13 @@ impl StdoutQueue {
 pub(super) fn stdout_queue<R>(
     input: R,
     pump_end: Instant,
+    budget: PayloadBudget,
 ) -> (StdoutQueue, impl Future<Output = ()> + Send + 'static)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let (sender, frames) = mpsc::channel(MAX_MESSAGES);
     let (done, ending) = oneshot::channel();
-    let messages = Arc::new(Semaphore::new(MAX_MESSAGES));
-    let bytes = Arc::new(Semaphore::new(MAX_BYTES));
     let mut reader = FrameReader::new(input);
     let pump = async move {
         let outcome = async {
@@ -138,24 +122,14 @@ where
                 if Instant::now() >= pump_end {
                     return Err(StdoutError::Deadline);
                 }
-                let message = Arc::clone(&messages)
-                    .try_acquire_owned()
-                    .map_err(|_| StdoutError::MessageOverflow)?;
-                let count = frame
-                    .len()
-                    .try_into()
-                    .map_err(|_| StdoutError::ByteOverflow)?;
-                let permit = Arc::clone(&bytes)
-                    .try_acquire_many_owned(count)
-                    .map_err(|_| StdoutError::ByteOverflow)?;
+                let frame = budget.try_admit(frame).map_err(|error| match error {
+                    AdmissionError::MessageOverflow => StdoutError::MessageOverflow,
+                    AdmissionError::ByteOverflow => StdoutError::ByteOverflow,
+                })?;
                 if Instant::now() >= pump_end {
                     return Err(StdoutError::Deadline);
                 }
-                match sender.try_send(LeasedFrame {
-                    bytes: frame,
-                    _message: message,
-                    _bytes: permit,
-                }) {
+                match sender.try_send(frame) {
                     Ok(()) => {}
                     Err(mpsc::error::TrySendError::Closed(_)) => return Ok(()),
                     Err(mpsc::error::TrySendError::Full(_)) => {

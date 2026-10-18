@@ -1679,3 +1679,13 @@ After normal1 RELEASE, tests added actual deadline-boundary repoll and terminal 
 Fresh checkout JUnit run UUIDs/case names match logs/archives; stale shared-target reports rejected without alternate target or location hold. Cleanup/review are separate recorded gates.
 Generic async only, not native Windows cancellation, task/child cleanup, shared outbound/phase budgets, controller, launcher/model or memory survival. Guard65failures/native denial and all inherited holds remain.
 Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/stderr_20261018/`.
+
+## SC-REBUILD-20261018-D25-SHARED-ADMISSION
+
+Private shared16MiB/64-message compact-payload leases now admit stdout and independent owners through one explicit budget; clones share credits, separate budgets do not.
+Fresh Droid proposer/critic split extraction from typed outbound writing. Fresh real Codex normal1 retained42PASS/1FAIL: dropped-pump test had not yet driven past the existing delimiter yield; automatic retry also failed.
+After RELEASE, only test setup gained a second confirmed-Pending poll, no production/assertion changes. Different fresh Codex normal2 passed43/43, including8new cases,0skips/retries; overlapping runs, not86unique cases.
+Causal admissions prove queued/delivered/independent retention, failure/expiry/drop cleanup, empty/message precedence and rollback; no counter-only replacement proof. Full bodies and fresh checkout JUnit UUIDs match.
+No outbound writer consumes leases yet; raw FrameWriter remains unenforced. Serialization/staging/allocator/RSS/global/process/native/phase/shutdown/controller/journey/installation/release guarantees remain outside scope.
+Separate old-c598 fixture-only run: complete preflight PASS,2PASS/1FAIL/3NOT RUN,3children reaped; generic case3 refusal cause UNKNOWN. Old0/6,65broader failures and all inherited holds remain, guard runtime RELEASE NO.
+Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/shared_transport_20261018/`; native evidence: sibling `fixture_repair_20261018/`. Cleanup/review remain separate recorded gates.

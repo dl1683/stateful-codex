@@ -1,4 +1,5 @@
 use super::*;
+use crate::bounded_payload::MAX_BYTES;
 use pretty_assertions::assert_eq;
 use std::future::poll_fn;
 use std::io;
@@ -36,7 +37,7 @@ async fn pending(mut future: Pin<&mut impl Future>) {
 #[tokio::test]
 async fn ordered_frames_and_clean_eof_remain_sticky() {
     for input in ["", "a\n\n€\n"] {
-        let (mut queue, pump) = stdout_queue(input.as_bytes(), end());
+        let (mut queue, pump) = stdout_queue(input.as_bytes(), end(), PayloadBudget::new());
         pump.await;
         let mut actual = Vec::new();
         while let Some(frame) = queue.receive(end()).await.unwrap() {
@@ -54,7 +55,7 @@ async fn ordered_frames_and_clean_eof_remain_sticky() {
 #[tokio::test]
 async fn retained_byte_leases_allow_empty_frames_and_refuse_the_first_extra_byte() {
     let (mut producer, input) = duplex(/*max_buf_size*/ 8192);
-    let (mut queue, pump) = stdout_queue(input, end());
+    let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
     let consumer = async {
         let mut held = Vec::new();
         for _ in 0..2 {
@@ -81,7 +82,7 @@ async fn retained_byte_leases_allow_empty_frames_and_refuse_the_first_extra_byte
 #[tokio::test]
 async fn dropping_a_delivered_frame_returns_byte_and_message_credit() {
     let (mut producer, input) = duplex(/*max_buf_size*/ 8192);
-    let (mut queue, pump) = stdout_queue(input, end());
+    let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
     tokio::join!(pump, async {
         let mut held = Vec::new();
         for _ in 0..3 {
@@ -110,7 +111,7 @@ async fn dropping_a_delivered_frame_returns_byte_and_message_credit() {
 #[tokio::test]
 async fn full_queue_reports_terminal_overflow_without_delivering_queued_success() {
     let input = io::Cursor::new(vec![b'\n'; MAX_MESSAGES + 1]);
-    let (mut queue, pump) = stdout_queue(input, end());
+    let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
     pump.await;
     assert_eq!(queue.frames.len(), MAX_MESSAGES);
     assert_eq!(receive(&mut queue).await, Err(StdoutError::MessageOverflow));
@@ -121,7 +122,7 @@ async fn full_queue_reports_terminal_overflow_without_delivering_queued_success(
 #[tokio::test]
 async fn delivered_empty_frames_still_exhaust_message_credit() {
     let (mut producer, input) = duplex(/*max_buf_size*/ 128);
-    let (mut queue, pump) = stdout_queue(input, end());
+    let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
     tokio::join!(pump, async {
         let mut held = Vec::new();
         for _ in 0..MAX_MESSAGES {
@@ -163,7 +164,7 @@ async fn reader_failures_win_over_queued_frames_and_expiry_without_payload_diagn
         ),
     ];
     for (input, expected) in cases {
-        let (mut queue, pump) = stdout_queue(input, end());
+        let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
         pump.await;
         let result = payload(queue.receive(Instant::now()).await);
         assert_eq!(result, Err(StdoutError::Frame(expected)));
@@ -174,10 +175,11 @@ async fn reader_failures_win_over_queued_frames_and_expiry_without_payload_diagn
 
 #[tokio::test]
 async fn dropped_pump_before_poll_or_after_queuing_is_not_eof() {
-    let (mut queue, pump) = stdout_queue(b"unused\n".as_slice(), end());
+    let (mut queue, pump) = stdout_queue(b"unused\n".as_slice(), end(), PayloadBudget::new());
     drop(pump);
     assert_eq!(receive(&mut queue).await, Err(StdoutError::PumpStopped));
-    let (mut queue, pump) = stdout_queue(b"queued\npartial".as_slice(), end());
+    let (mut queue, pump) =
+        stdout_queue(b"queued\npartial".as_slice(), end(), PayloadBudget::new());
     let mut pump = Box::pin(pump);
     while queue.frames.is_empty() {
         pending(pump.as_mut()).await;
@@ -193,7 +195,7 @@ async fn dropped_pump_before_poll_or_after_queuing_is_not_eof() {
 async fn ready_delivery_never_waits_for_terminal_and_cancelled_receive_preserves_input() {
     let (mut producer, input) = duplex(/*max_buf_size*/ 64);
     producer.write_all(b"first\npre").await.unwrap();
-    let (mut queue, pump) = stdout_queue(input, end());
+    let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
     let mut pump = Box::pin(pump);
     while queue.frames.is_empty() {
         pending(pump.as_mut()).await;
@@ -228,7 +230,7 @@ async fn expired_receive_seals_ready_data_and_wakes_silent_or_partial_pumps() {
     for prefix in ["", "partial"] {
         let (mut producer, input) = duplex(/*max_buf_size*/ 64);
         producer.write_all(prefix.as_bytes()).await.unwrap();
-        let (mut queue, pump) = stdout_queue(input, end());
+        let (mut queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
         let mut pump = Box::pin(pump);
         pending(pump.as_mut()).await;
         pending(pump.as_mut()).await;
@@ -238,7 +240,7 @@ async fn expired_receive_seals_ready_data_and_wakes_silent_or_partial_pumps() {
         assert!(producer.write_all(b"x").await.is_err());
         assert_eq!(receive(&mut queue).await, Err(StdoutError::Deadline));
     }
-    let (mut queue, pump) = stdout_queue(b"ready\n".as_slice(), end());
+    let (mut queue, pump) = stdout_queue(b"ready\n".as_slice(), end(), PayloadBudget::new());
     pump.await;
     assert_eq!(
         payload(queue.receive(Instant::now()).await),
@@ -250,7 +252,7 @@ async fn expired_receive_seals_ready_data_and_wakes_silent_or_partial_pumps() {
 async fn traffic_does_not_renew_pump_end_and_drop_wakes_a_blocked_reader() {
     let (mut producer, input) = duplex(/*max_buf_size*/ 64);
     let deadline = Instant::now() + Duration::from_secs(/*secs*/ 1);
-    let (mut queue, pump) = stdout_queue(input, deadline);
+    let (mut queue, pump) = stdout_queue(input, deadline, PayloadBudget::new());
     let task = tokio::spawn(pump);
     producer.write_all(b"notification\npartial").await.unwrap();
     assert_eq!(
@@ -261,7 +263,7 @@ async fn traffic_does_not_renew_pump_end_and_drop_wakes_a_blocked_reader() {
     task.await.unwrap();
     assert_eq!(receive(&mut queue).await, Err(StdoutError::Deadline));
     let (peer, input) = duplex(/*max_buf_size*/ 1);
-    let (queue, pump) = stdout_queue(input, end());
+    let (queue, pump) = stdout_queue(input, end(), PayloadBudget::new());
     let mut pump = Box::pin(pump);
     pending(pump.as_mut()).await;
     drop(queue);

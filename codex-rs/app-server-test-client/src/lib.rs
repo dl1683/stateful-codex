@@ -92,11 +92,15 @@ use uuid::Uuid;
 #[allow(dead_code)]
 mod bounded_frame_io;
 
+// Inactive shared compact-payload admission; outbound writing remains separate.
+#[allow(dead_code)]
+mod bounded_payload;
+
 // Inactive caller-owned stderr collector; no raw diagnostics or process owner.
 #[allow(dead_code)]
 mod bounded_stderr;
 
-// Inactive stdout-only accounting; no controller or process owner.
+// Inactive stdout admission to an explicit shared budget; no process owner.
 #[allow(dead_code)]
 mod bounded_stdout;
 mod loopback_responses_server;
