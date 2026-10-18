@@ -458,37 +458,58 @@ fn phase_less_deliveries_use_host_classification_and_pending_ones_stay_out() {
 
 #[test]
 fn history_role_and_thread_must_match_the_capture() {
-    let mut mismatched_user = delivered("wrong-user", 1, User, "not an assistant");
+    let mut mismatched_user = delivered("wrong-user", /*order*/ 1, User, "not an assistant");
     mismatched_user.metadata.as_mut().unwrap().retained_source =
         Some(source("wrong-user", AssistantFinal));
-    let mut mismatched_assistant = delivered("wrong-assistant", 2, AssistantFinal, "not a user");
-    mismatched_assistant.metadata.as_mut().unwrap().retained_source =
-        Some(source("wrong-assistant", User));
-    let mut developer = delivered("developer", 3, User, "context");
+    let mut mismatched_assistant = delivered(
+        "wrong-assistant",
+        /*order*/ 2,
+        AssistantFinal,
+        "not a user",
+    );
+    mismatched_assistant
+        .metadata
+        .as_mut()
+        .unwrap()
+        .retained_source = Some(source("wrong-assistant", User));
+    let mut developer = delivered("developer", /*order*/ 3, User, "context");
     if let ResponseItem::Message { role, .. } = &mut developer.item {
         *role = "developer".into();
     }
     let foreign = edited(
-        delivered("parent", 4, AssistantFinal, "parent answer"),
-        |metadata| metadata.conversation_origin_thread_id = Some(ThreadId::from_u128(8)),
+        delivered("parent", /*order*/ 4, AssistantFinal, "parent answer"),
+        |metadata| {
+            metadata.conversation_origin_thread_id = Some(ThreadId::from_u128(/*value*/ 8))
+        },
     );
-    let inherited = edited(delivered("inherited", 5, User, "parent request"), |metadata| {
-        metadata.inherited_user_message = true;
-    });
+    let inherited = edited(
+        delivered("inherited", /*order*/ 5, User, "parent request"),
+        |metadata| {
+            metadata.inherited_user_message = true;
+        },
+    );
     let packet = first_packet(&[
         mismatched_user,
         mismatched_assistant,
         developer,
         foreign.clone(),
         inherited,
-        delivered("child", 6, AssistantFinal, "child answer"),
+        delivered("child", /*order*/ 6, AssistantFinal, "child answer"),
     ]);
     assert_eq!(
         packet.records(),
-        &[record("child", 6, AssistantFinal, "child answer")]
+        &[record(
+            "child",
+            /*order*/ 6,
+            AssistantFinal,
+            "child answer"
+        )]
     );
     assert_eq!(coverage(&packet), (Unknown, 1, 1, 0, 0));
-    let bounded = first_packet(&[foreign, delivered("child", 6, User, "child request")]);
+    let bounded = first_packet(&[
+        foreign,
+        delivered("child", /*order*/ 6, User, "child request"),
+    ]);
     assert_eq!(coverage(&bounded), (BoundedWindow, 1, 1, 0, 0));
 }
 
@@ -496,7 +517,7 @@ fn history_role_and_thread_must_match_the_capture() {
 fn retained_deliveries_require_local_thread_origin_in_both_roles() {
     let mut retained = RetainedContext::default();
     let mut expected = Vec::new();
-    for (order, origin_thread_id) in [Some(ThreadId::from_u128(8)), None, Some(thread())]
+    for (order, origin_thread_id) in [Some(ThreadId::from_u128(/*value*/ 8)), None, Some(thread())]
         .into_iter()
         .enumerate()
     {
@@ -531,7 +552,7 @@ fn retained_deliveries_require_local_thread_origin_in_both_roles() {
             }
         }
     }
-    let packet = assemble(&[], &retained, None, SinceThreadStart);
+    let packet = assemble(&[], &retained, /*previous*/ None, SinceThreadStart);
     assert_eq!(packet.records(), expected.as_slice());
     assert_eq!(coverage(&packet), (Unknown, 2, 2, 0, 0));
 }
@@ -539,11 +560,16 @@ fn retained_deliveries_require_local_thread_origin_in_both_roles() {
 #[test]
 fn invalid_previous_packets_are_dropped_before_reuse_and_fresh_errors() {
     let previous = first_packet(&[
-        delivered("request", 1, User, "original request"),
-        delivered("answer", 2, AssistantFinal, "original answer"),
+        delivered("request", /*order*/ 1, User, "original request"),
+        delivered(
+            "answer",
+            /*order*/ 2,
+            AssistantFinal,
+            "original answer",
+        ),
     ]);
     let value = serde_json::to_value(&previous).expect("serialize");
-    let foreign = serde_json::json!(ThreadId::from_u128(8));
+    let foreign = serde_json::json!(ThreadId::from_u128(/*value*/ 8));
     let mut variants = Vec::new();
     for path in [
         "boundary", "origin", "role", "cutoff", "version", "coverage", "order", "complete", "size",
@@ -574,10 +600,10 @@ fn invalid_previous_packets_are_dropped_before_reuse_and_fresh_errors() {
         ));
     }
     let retained = RetainedContext::default();
-    let fresh = [delivered("fresh", 3, User, "fresh request")];
+    let fresh = [delivered("fresh", /*order*/ 3, User, "fresh request")];
     let conflicting = [
-        delivered("conflict", 4, User, "first"),
-        delivered("conflict", 4, User, "different"),
+        delivered("conflict", /*order*/ 4, User, "first"),
+        delivered("conflict", /*order*/ 4, User, "different"),
     ];
     for (label, invalid) in variants {
         let packet = assemble(&fresh, &retained, Some(&invalid), SinceThreadStart);

@@ -103,7 +103,7 @@ fn destructive_replacement_clears_the_packet() {
 fn invalid_previous_is_cleared_even_when_fresh_evidence_conflicts() {
     let thread_id = ThreadId::new();
     let mut live = ContextManager::new();
-    record(&mut live, "first", 0, thread_id);
+    record(&mut live, "first", /*order*/ 0, thread_id);
     let capture = live.capture_conversation_packet(thread_id);
     let installed = live.update_conversation_packet(capture).expect("installed");
     let mut invalid = serde_json::to_value(installed.as_ref()).expect("serialize");

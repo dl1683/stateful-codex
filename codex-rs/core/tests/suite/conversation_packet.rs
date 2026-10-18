@@ -405,9 +405,12 @@ async fn local_compaction_captures_original_deliveries_across_two_checkpoints() 
         ConversationInputCoverage::BoundedWindow
     );
     for packet in &packets {
-        assert!(packet.records().iter().all(|record| {
-            record.origin_thread_id() == test.session_configured.thread_id
-        }));
+        assert!(
+            packet
+                .records()
+                .iter()
+                .all(|record| { record.origin_thread_id() == test.session_configured.thread_id })
+        );
     }
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 5);
