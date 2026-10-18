@@ -602,8 +602,9 @@ impl BackgroundAppServer {
         let url = format!("ws://{addr}");
         let mut cmd = Command::new(codex_bin);
         if let Some(codex_bin_parent) = codex_bin.parent() {
-            let path = path_env::prepend_path(codex_bin_parent, std::env::var_os("PATH").as_deref())
-                .context("failed to prepend codex binary directory to PATH")?;
+            let path =
+                path_env::prepend_path(codex_bin_parent, std::env::var_os("PATH").as_deref())
+                    .context("failed to prepend codex binary directory to PATH")?;
             cmd.env("PATH", path);
         }
         for override_kv in config_overrides {
@@ -1631,8 +1632,9 @@ impl CodexClient {
         let codex_bin_display = codex_bin.display();
         let mut cmd = Command::new(codex_bin);
         if let Some(codex_bin_parent) = codex_bin.parent() {
-            let path = path_env::prepend_path(codex_bin_parent, std::env::var_os("PATH").as_deref())
-                .context("failed to prepend codex binary directory to PATH")?;
+            let path =
+                path_env::prepend_path(codex_bin_parent, std::env::var_os("PATH").as_deref())
+                    .context("failed to prepend codex binary directory to PATH")?;
             cmd.env("PATH", path);
         }
         for override_kv in config_overrides {
