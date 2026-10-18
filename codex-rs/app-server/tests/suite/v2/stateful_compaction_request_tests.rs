@@ -8,7 +8,8 @@ use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_root() -> Result<()> {
+async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_root() -> Result<()>
+{
     let server = responses::start_mock_server().await;
     let reply = |id: &str, total_tokens| {
         responses::sse(vec![
@@ -72,7 +73,7 @@ async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_r
     // Whole long entries force real omissions; lexical IDs keep the decisive facts first.
     let mut bulky_facts = Vec::new();
     for index in 0..10 {
-        let content = format!("Bounded root fact {index}: {}", "x".repeat(1_750));
+        let content = format!("Bounded root fact {index}: {}", "x".repeat(/*n*/ 1_750));
         promote_root_fact(
             codex_home.path(),
             project_id,
@@ -98,7 +99,13 @@ async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_r
     let _: ThreadCompactStartResponse = app.read_response(compact_request).await?;
     let _: TurnCompletedNotification = app.read_notification("turn/completed").await?;
     // Change the root after the checkpoint: a stale retained root or isolated delta cannot pass.
-    promote_root_fact(codex_home.path(), project_id, "later-boundary-fact", LATER_FACT).await?;
+    promote_root_fact(
+        codex_home.path(),
+        project_id,
+        "later-boundary-fact",
+        LATER_FACT,
+    )
+    .await?;
     let projection = BlackboardStore::open(&SqliteConfig::new_for_testing(codex_home.path().abs()))
         .await?
         .root_projection(RootBlackboardQuery {
@@ -118,7 +125,9 @@ async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_r
         (post_turn, "auto", "post_turn", "context_limit"),
     ] {
         let metadata: Value = serde_json::from_str(
-            &request.header("x-codex-turn-metadata").expect("turn metadata"),
+            &request
+                .header("x-codex-turn-metadata")
+                .expect("turn metadata"),
         )?;
         assert_eq!(metadata["request_kind"], "compaction");
         assert_eq!(
@@ -137,7 +146,9 @@ async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_r
         (after_post_turn, "post-turn-opaque-summary"),
     ] {
         let metadata: Value = serde_json::from_str(
-            &request.header("x-codex-turn-metadata").expect("turn metadata"),
+            &request
+                .header("x-codex-turn-metadata")
+                .expect("turn metadata"),
         )?;
         assert_eq!(metadata["request_kind"], "turn");
         assert_eq!(metadata["compaction"], Value::Null);
@@ -170,7 +181,10 @@ async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_r
         let [root] = roots.as_slice() else {
             panic!("expected exactly one full root");
         };
-        assert!(root.len() <= 9_000, "root exceeded the existing item byte cap");
+        assert!(
+            root.len() <= 9_000,
+            "root exceeded the existing item byte cap"
+        );
         let shown = bulky_facts
             .iter()
             .filter(|fact| root.contains(fact.as_str()))
@@ -190,7 +204,10 @@ async fn first_ordinary_requests_after_remote_compaction_carry_bounded_current_r
             "conversation_packet",
             "conversation_origin",
         ] {
-            assert!(!wire.contains(excluded), "unexpected provider input: {excluded}");
+            assert!(
+                !wire.contains(excluded),
+                "unexpected provider input: {excluded}"
+            );
         }
     }
     Ok(())
