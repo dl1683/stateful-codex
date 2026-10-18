@@ -83,11 +83,18 @@ pub(crate) fn is_correction(args: &str) -> bool {
 /// Parses the arguments of `/memory`.
 pub(crate) fn parse(args: &str) -> Result<MemoryCommand, String> {
     if is_correction(args) {
-        let (_, rest) = args.trim_start().split_once(char::is_whitespace)
+        let (_, rest) = args
+            .trim_start()
+            .split_once(char::is_whitespace)
             .ok_or_else(|| USAGE.to_string())?;
-        let (target, text) = rest.trim_start().split_once(char::is_whitespace)
+        let (target, text) = rest
+            .trim_start()
+            .split_once(char::is_whitespace)
             .ok_or_else(|| USAGE.to_string())?;
-        return Ok(MemoryCommand::Correct(entry_target(target)?, text.to_string()));
+        return Ok(MemoryCommand::Correct(
+            entry_target(target)?,
+            text.to_string(),
+        ));
     }
     let args = args.trim();
     if args.is_empty() {

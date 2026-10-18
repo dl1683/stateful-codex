@@ -3650,8 +3650,13 @@ async fn transcript_copy_feedback_stays_in_the_footer_without_history_or_interru
 async fn correction_live_and_busy_tab_never_submit_a_model_turn() {
     use crate::stateful_memory_commands::MemoryCommand;
     use crate::stateful_memory_commands::parse;
-    for args in ["correct e@1  padded  ", "CoRrEcT broken", "correct e@1 ",
-        "correct e@1   ", "correct e@1 α\t中 e\u{301}"] {
+    for args in [
+        "correct e@1  padded  ",
+        "CoRrEcT broken",
+        "correct e@1 ",
+        "correct e@1   ",
+        "correct e@1 α\t中 e\u{301}",
+    ] {
         for route in ["live", "queued", "expanded-live", "expanded-queued"] {
             let (mut chat, mut rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
             let queued = route.ends_with("queued");
@@ -3659,12 +3664,20 @@ async fn correction_live_and_busy_tab_never_submit_a_model_turn() {
             if queued {
                 handle_turn_started(&mut chat, "busy");
             }
-            let expected = format!("{args}{}", if expanded { " ".repeat(1100) } else { String::new() });
+            let expected = format!(
+                "{args}{}",
+                if expanded {
+                    " ".repeat(1100)
+                } else {
+                    String::new()
+                }
+            );
             let text = format!("/memory {expected}");
             if expanded {
                 chat.handle_paste(text.clone());
             } else {
-                chat.bottom_pane.set_composer_text(text.clone(), Vec::new(), Vec::new());
+                chat.bottom_pane
+                    .set_composer_text(text.clone(), Vec::new(), Vec::new());
             }
             let draft = chat.bottom_pane.composer_text();
             if queued {

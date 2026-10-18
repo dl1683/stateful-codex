@@ -164,23 +164,43 @@ async fn memory_application_fences_generations_binding_and_client() -> Result<()
     let read = || codex_app_server_protocol::ClientRequest::StatefulMemoryRead {
         request_id: AppServerRequestId::String(uuid::Uuid::new_v4().to_string()),
         params: codex_app_server_protocol::StatefulMemoryReadParams {
-            thread_id: thread.to_string(), expected_project_id: project.project.id.clone(),
-            cursor: None, limit: Some(50), background_section: true,
+            thread_id: thread.to_string(),
+            expected_project_id: project.project.id.clone(),
+            cursor: None,
+            limit: Some(50),
+            background_section: true,
         },
     };
     let before: codex_app_server_protocol::StatefulMemoryReadResponse =
         handle.request_typed(read()).await?;
     assert_eq!(before.next_cursor, None);
-    for payload in [" padded ", "", " ", "\t", "\u{2003}padded", "padded\u{2003}"] {
-        app.handle_event(&mut tui, &mut server, submit(&format!(
-            "correct {}@{} {payload}", added.item.entry_id, added.item.revision,
-        ))).await?;
+    for payload in [
+        " padded ",
+        "",
+        " ",
+        "\t",
+        "\u{2003}padded",
+        "padded\u{2003}",
+    ] {
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            submit(&format!(
+                "correct {}@{} {payload}",
+                added.item.entry_id, added.item.revision,
+            )),
+        )
+        .await?;
         let refused = result(&mut events).await;
         let AppEvent::StatefulMemoryResult { cell, .. } = &refused else {
             unreachable!("memory result");
         };
-        let rendered = cell.display_lines(/*width*/ 200).iter()
-            .map(ToString::to_string).collect::<Vec<_>>().join("\n");
+        let rendered = cell
+            .display_lines(/*width*/ 200)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(rendered.contains("Nothing was corrected"), "{rendered}");
         if payload == " padded " {
             insta::assert_snapshot!("memory_correction_padded_refusal", rendered);
@@ -191,14 +211,23 @@ async fn memory_application_fences_generations_binding_and_client() -> Result<()
         assert_eq!(after, before);
     }
     let content = "é e\u{301}\t中\r\nsecond  line";
-    app.handle_event(&mut tui, &mut server, submit(&format!(
-        "correct {}@{} {content}", added.item.entry_id, added.item.revision,
-    ))).await?;
+    app.handle_event(
+        &mut tui,
+        &mut server,
+        submit(&format!(
+            "correct {}@{} {content}",
+            added.item.entry_id, added.item.revision,
+        )),
+    )
+    .await?;
     let accepted = result(&mut events).await;
     app.handle_event(&mut tui, &mut server, accepted).await?;
     let after: codex_app_server_protocol::StatefulMemoryReadResponse =
         handle.request_typed(read()).await?;
-    let corrected = after.data.iter().find(|item| item.content == content)
+    let corrected = after
+        .data
+        .iter()
+        .find(|item| item.content == content)
         .expect("public correction preserves Unicode and internal whitespace");
     // Forget must now name the actual correction successor.
     let corrected_target = (corrected.entry_id.clone(), corrected.revision);

@@ -3027,8 +3027,8 @@ impl ChatComposer {
             text_elements = expanded_elements;
         }
 
-        let preserve_correction = !input_starts_with_space
-            && self.slash_input().is_memory_correction(&text);
+        let preserve_correction =
+            !input_starts_with_space && self.slash_input().is_memory_correction(&text);
         self.draft.textarea.set_text_clearing_elements("");
         self.draft.is_bash_mode = false;
         if self.config.trim_submission && !preserve_correction {
@@ -3119,7 +3119,8 @@ impl ChatComposer {
                 remote_image_urls: self.attachments.remote_image_urls(),
                 mention_bindings: original_mention_bindings,
                 pending_pastes: if pending_paste_handling == PendingPasteHandling::Preserve
-                    || preserve_literal_paste || preserve_correction
+                    || preserve_literal_paste
+                    || preserve_correction
                 {
                     original_pending_pastes.clone()
                 } else {
@@ -3262,7 +3263,8 @@ impl ChatComposer {
                 self.record_pending_slash_command_history();
                 return (InputResult::None, true);
             }
-            let result = self.prepare_inline_args_submission(/*record_history*/ false)
+            let result = self
+                .prepare_inline_args_submission(/*record_history*/ false)
                 .map_or(InputResult::None, |(args, elements)| {
                     InputResult::CommandWithArgs(SlashCommand::Memory, args, elements)
                 });
@@ -3448,7 +3450,11 @@ impl ChatComposer {
             return;
         }
         let text = self.draft.textarea.text();
-        let text = if self.expanded_memory_correction() { text } else { text.trim() };
+        let text = if self.expanded_memory_correction() {
+            text
+        } else {
+            text.trim()
+        };
         self.stage_slash_command_history_text(text.to_string());
     }
 

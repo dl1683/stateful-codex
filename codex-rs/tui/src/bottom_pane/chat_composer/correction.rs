@@ -8,7 +8,9 @@ impl ChatComposer {
             return false;
         }
         let (expanded, _) = Self::expand_pending_pastes(
-            &text, self.current_text_elements(), &self.draft.pending_pastes,
+            &text,
+            self.current_text_elements(),
+            &self.draft.pending_pastes,
         );
         self.slash_input().is_memory_correction(&expanded)
     }
