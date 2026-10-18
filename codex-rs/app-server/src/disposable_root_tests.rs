@@ -1,5 +1,6 @@
 use super::*;
 use crate::config_manager::ConfigManager;
+use anyhow::Context;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
@@ -8,7 +9,41 @@ use codex_core::config::ConfigOverrides;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
-fn guard(root: &Path) -> DisposableRoot {
+pub(super) fn parent_path(root: &Path, leaf: &str) -> PathBuf {
+    let mut path = root.as_os_str().to_os_string();
+    for component in ["home", "..", leaf] {
+        path.push(std::path::MAIN_SEPARATOR_STR);
+        path.push(component);
+    }
+    let path = PathBuf::from(path);
+    assert!(path.is_absolute());
+    assert!(path.components().any(|c| matches!(c, Component::ParentDir)));
+    path
+}
+
+pub(super) fn assert_refused(result: io::Result<Config>, stage: &str) {
+    match result {
+        Err(error) => assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{stage}"),
+        Ok(config) => panic!(
+            "{stage}: expected refusal; managed log/sqlite/auth present: {:?}",
+            (
+                config.config_layer_stack.requirements().log_dir.is_some(),
+                config
+                    .config_layer_stack
+                    .requirements()
+                    .sqlite_home
+                    .is_some(),
+                config
+                    .config_layer_stack
+                    .requirements()
+                    .cli_auth_credentials_store
+                    .is_some(),
+            )
+        ),
+    }
+}
+
+pub(super) fn guard(root: &Path) -> DisposableRoot {
     DisposableRoot::parse(
         Some(root.as_os_str().to_owned()),
         /*strict_config*/ true,
@@ -18,7 +53,17 @@ fn guard(root: &Path) -> DisposableRoot {
     .unwrap()
 }
 
-fn manager(root: &Path, cloud: CloudConfigBundleLoader) -> ConfigManager {
+pub(super) fn manager(root: &Path, cloud: CloudConfigBundleLoader) -> ConfigManager {
+    let mut loader = LoaderOverrides::without_managed_config_for_tests();
+    loader.ignore_project_config = true;
+    manager_for_loader(root, cloud, loader)
+}
+
+pub(super) fn manager_for_loader(
+    root: &Path,
+    cloud: CloudConfigBundleLoader,
+    loader: LoaderOverrides,
+) -> ConfigManager {
     let mut overrides = vec![
         ("cli_auth_credentials_store".into(), "file".into()),
         ("mcp_oauth_credentials_store".into(), "file".into()),
@@ -38,7 +83,7 @@ fn manager(root: &Path, cloud: CloudConfigBundleLoader) -> ConfigManager {
     ConfigManager::new(
         root.join("home"),
         overrides,
-        LoaderOverrides::without_managed_config_for_tests(),
+        loader,
         /*strict_config*/ true,
         cloud,
         Arg0DispatchPaths::default(),
@@ -87,7 +132,7 @@ fn opt_in_requires_strict_private_existing_routes() -> io::Result<()> {
     );
     let guard = guard(&root);
     guard.contains(&root.join("home/new/auth.json"))?;
-    assert!(guard.contains(&root.join("home/../escape")).is_err());
+    assert!(guard.contains(&parent_path(&root, "escape")).is_err());
     assert!(guard.contains(outside.path()).is_err());
     fs::remove_dir(root.join("home"))?;
     assert!(
@@ -130,25 +175,112 @@ async fn every_config_return_refuses_managed_escape_and_keeps_policy() -> anyhow
         .load_latest_config(Some(root.join("home")))
         .await?;
     assert_eq!(effective.log_dir, outside.path());
-    for requirement in [
-        format!("log_dir = {path}"),
-        format!("sqlite_home = {path}"),
-        "cli_auth_credentials_store = 'keyring'".to_owned(),
+    let outside = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(outside.path())?;
+    for (requirement, expected) in [
+        (
+            format!("log_dir = {path}"),
+            ManagedRoute::LogDir(outside.clone()),
+        ),
+        (
+            format!("sqlite_home = {path}"),
+            ManagedRoute::SqliteHome(outside),
+        ),
+        (
+            "cli_auth_credentials_store = 'keyring'".to_owned(),
+            ManagedRoute::Keyring,
+        ),
     ] {
-        let cloud = CloudConfigBundleFixture::loader_with_enterprise_requirement(requirement);
-        let guarded = manager(&root, cloud).with_disposable_root(Some(guard(&root)));
-        for result in [
+        let mut loader = LoaderOverrides::without_managed_config_for_tests();
+        loader.ignore_project_config = true;
+        let cloud = match &expected {
+            // Cloud layers cannot set authentication policy. Exercise the supported
+            // local exact requirement rather than changing that authority boundary.
+            ManagedRoute::Keyring => {
+                let path = root.join("home/auth-requirements.toml");
+                fs::write(&path, &requirement)?;
+                loader.system_requirements_path = Some(path);
+                CloudConfigBundleLoader::default()
+            }
+            ManagedRoute::LogDir(_) | ManagedRoute::SqliteHome(_) => {
+                let cloud = CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                    requirement.clone(),
+                );
+                let snapshot = cloud.get().await?.context("fixture bundle missing")?;
+                assert_eq!(
+                    snapshot.requirements_toml.enterprise_managed[0].contents,
+                    requirement
+                );
+                cloud
+            }
+        };
+        let plain = manager_for_loader(&root, cloud.clone(), loader.clone());
+        let refreshed = plain
+            .load_config_layers_for_cwd(
+                codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(root.join("home"))?,
+            )
+            .await
+            .context("unguarded raw requirements")?;
+        expected.assert_stack(&refreshed, &format!("{requirement}: refreshed raw stack"));
+        let assert_plain = |stage: &str, config: Config| {
+            let stage = format!("{requirement}: unguarded {stage}");
+            expected.assert_stack(&config.config_layer_stack, &stage);
+            match &expected {
+                ManagedRoute::LogDir(path) => {
+                    assert_eq!(config.log_dir.as_path(), path.as_path(), "{stage}")
+                }
+                ManagedRoute::SqliteHome(path) => {
+                    assert_eq!(config.sqlite_config().home(), path.as_path(), "{stage}")
+                }
+                ManagedRoute::Keyring => assert_eq!(
+                    config.cli_auth_credentials_store_mode,
+                    AuthCredentialsStoreMode::Keyring,
+                    "{stage}"
+                ),
+            }
+        };
+        assert_plain(
+            "normal",
+            plain
+                .load_latest_config(Some(root.join("home")))
+                .await
+                .context("unguarded normal config")?,
+        );
+        assert_plain(
+            "session",
+            plain
+                .load_latest_config_with_session_layers(layers, &current.cwd)
+                .await
+                .context("unguarded session config")?,
+        );
+        assert_plain(
+            "retained",
+            plain
+                .load_retained_session_config(layers, &current.cwd)
+                .await
+                .context("unguarded retained config")?,
+        );
+        let guarded =
+            manager_for_loader(&root, cloud, loader).with_disposable_root(Some(guard(&root)));
+        assert_refused(
             guarded.load_latest_config(Some(root.join("home"))).await,
+            &format!("{requirement}: guarded normal"),
+        );
+        assert_refused(
             guarded
                 .load_latest_config_with_session_layers(layers, &current.cwd)
                 .await,
+            &format!("{requirement}: guarded session"),
+        );
+        assert_refused(
             guarded
                 .load_retained_session_config(layers, &current.cwd)
                 .await,
+            &format!("{requirement}: guarded retained"),
+        );
+        assert_refused(
             guarded.load_default_config().await,
-        ] {
-            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
-        }
+            &format!("{requirement}: guarded default"),
+        );
     }
     for rebuilt in [
         admitted
@@ -176,6 +308,49 @@ async fn every_config_return_refuses_managed_escape_and_keeps_policy() -> anyhow
             .is_err()
     );
     Ok(())
+}
+
+enum ManagedRoute {
+    LogDir(codex_utils_absolute_path::AbsolutePathBuf),
+    SqliteHome(codex_utils_absolute_path::AbsolutePathBuf),
+    Keyring,
+}
+
+impl ManagedRoute {
+    fn assert_stack(&self, stack: &codex_config::ConfigLayerStack, stage: &str) {
+        let typed = stack.requirements();
+        let raw = stack.requirements_toml();
+        match self {
+            Self::LogDir(path) => {
+                assert_eq!(raw.log_dir.as_ref(), Some(path), "{stage}: raw");
+                assert_eq!(
+                    typed.log_dir.as_ref().map(|r| &r.value),
+                    Some(path),
+                    "{stage}: typed"
+                );
+            }
+            Self::SqliteHome(path) => {
+                assert_eq!(raw.sqlite_home.as_ref(), Some(path), "{stage}: raw");
+                assert_eq!(
+                    typed.sqlite_home.as_ref().map(|r| &r.value),
+                    Some(path),
+                    "{stage}: typed"
+                );
+            }
+            Self::Keyring => {
+                assert_eq!(
+                    raw.cli_auth_credentials_store,
+                    Some(AuthCredentialsStoreMode::Keyring),
+                    "{stage}: raw"
+                );
+                assert_eq!(
+                    typed.cli_auth_credentials_store.as_ref().map(|r| &r.value),
+                    Some(&AuthCredentialsStoreMode::Keyring),
+                    "{stage}: typed"
+                );
+            }
+        }
+    }
 }
 
 #[tokio::test]
