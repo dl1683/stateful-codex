@@ -437,6 +437,13 @@ fn log_format_from_env() -> LogFormat {
     LogFormat::from_env_value(value.as_deref())
 }
 
+/// Admits disposable routes before the binary wrapper can consume the home.
+///
+/// Strict configuration is checked later against parsed arguments, before config loading.
+pub fn app_server_arg0_prelude() -> IoResult<codex_arg0::Arg0Prelude> {
+    disposable_root::DisposableRoot::prelude()
+}
+
 pub async fn run_main(
     arg0_paths: Arg0DispatchPaths,
     cli_config_overrides: CliConfigOverrides,

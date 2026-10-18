@@ -25,6 +25,19 @@ fn refused() -> io::Error {
 }
 
 impl DisposableRoot {
+    pub(crate) fn prelude() -> io::Result<codex_arg0::Arg0Prelude> {
+        let guard = Self::parse_routes(
+            std::env::var_os("CODEX_APP_SERVER_DISPOSABLE_ROOT"),
+            |key| std::env::var_os(key),
+        )?;
+        if let Some(root) = guard {
+            root.contains(&std::env::current_dir()?)?;
+            Ok(codex_arg0::Arg0Prelude::Disposable)
+        } else {
+            Ok(codex_arg0::Arg0Prelude::Normal)
+        }
+    }
+
     pub(crate) fn from_env(strict_config: bool) -> io::Result<Option<Self>> {
         let guard = Self::parse(
             std::env::var_os("CODEX_APP_SERVER_DISPOSABLE_ROOT"),
@@ -42,12 +55,19 @@ impl DisposableRoot {
         strict_config: bool,
         env: impl Fn(&str) -> Option<OsString>,
     ) -> io::Result<Option<Self>> {
+        if root.is_some() && !strict_config {
+            return Err(refused());
+        }
+        Self::parse_routes(root, env)
+    }
+
+    fn parse_routes(
+        root: Option<OsString>,
+        env: impl Fn(&str) -> Option<OsString>,
+    ) -> io::Result<Option<Self>> {
         let Some(root) = root else {
             return Ok(None);
         };
-        if !strict_config {
-            return Err(refused());
-        }
         let root = PathBuf::from(root);
         check_components(&root)?;
         if !root.is_dir() {

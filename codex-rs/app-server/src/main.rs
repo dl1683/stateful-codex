@@ -7,7 +7,7 @@ use codex_app_server::AppServerTransport;
 use codex_app_server::PluginStartupTasks;
 use codex_app_server::run_main_with_transport_options;
 use codex_arg0::Arg0DispatchPaths;
-use codex_arg0::arg0_dispatch_or_else;
+use codex_arg0::arg0_dispatch_or_else_with_prelude;
 use codex_config::LoaderOverrides;
 use codex_protocol::protocol::SessionSource;
 use codex_utils_cli::CliConfigOverrides;
@@ -78,7 +78,9 @@ struct AppServerArgs {
 
 fn main() -> anyhow::Result<()> {
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
-    arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
+    arg0_dispatch_or_else_with_prelude(
+        || codex_app_server::app_server_arg0_prelude().map_err(Into::into),
+        move |arg0_paths: Arg0DispatchPaths| async move {
         let AppServerArgs {
             config_overrides,
             code_mode_host,
@@ -133,7 +135,8 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(0);
         }
         Ok(())
-    })
+        },
+    )
 }
 
 fn disable_managed_config_from_debug_env() -> bool {
