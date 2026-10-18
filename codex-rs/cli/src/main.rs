@@ -7,7 +7,7 @@ use codex_app_server_daemon::BootstrapOptions as AppServerBootstrapOptions;
 use codex_app_server_daemon::LifecycleCommand as AppServerLifecycleCommand;
 use codex_app_server_daemon::RemoteControlMode as AppServerRemoteControlMode;
 use codex_arg0::Arg0DispatchPaths;
-use codex_arg0::arg0_dispatch_or_else;
+use codex_arg0::arg0_dispatch_or_else_with_prelude;
 use codex_chatgpt::apply_command::ApplyCommand;
 use codex_chatgpt::apply_command::run_apply_command;
 use codex_cli::read_access_token_from_stdin;
@@ -1016,11 +1016,14 @@ fn stage_str(stage: Stage) -> &'static str {
 fn main() -> anyhow::Result<()> {
     codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
-    arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
-        // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
-        Box::pin(cli_main(arg0_paths, remote_control_disabled)).await?;
-        Ok(())
-    })
+    arg0_dispatch_or_else_with_prelude(
+        || codex_app_server::app_server_arg0_prelude().map_err(Into::into),
+        move |arg0_paths: Arg0DispatchPaths| async move {
+            // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
+            Box::pin(cli_main(arg0_paths, remote_control_disabled)).await?;
+            Ok(())
+        },
+    )
 }
 
 async fn cli_main(

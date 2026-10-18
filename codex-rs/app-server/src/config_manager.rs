@@ -42,6 +42,7 @@ pub(crate) struct ModelProviderRequirementsChanged;
 /// Shared app-server entry point for loading effective Codex configuration.
 #[derive(Clone)]
 pub(crate) struct ConfigManager {
+    disposable_root: Option<crate::disposable_root::DisposableRoot>,
     codex_home: PathBuf,
     cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
     runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
@@ -81,6 +82,7 @@ impl ConfigManager {
     ) -> Self {
         let network_policy = codex_http_client::NetworkPolicyController::default();
         Self {
+            disposable_root: None,
             codex_home,
             cli_overrides: Arc::new(RwLock::new(cli_overrides)),
             runtime_feature_enablement: Arc::new(RwLock::new(BTreeMap::new())),
@@ -98,6 +100,29 @@ impl ConfigManager {
 
     pub(crate) fn codex_home(&self) -> &Path {
         self.codex_home.as_path()
+    }
+
+    pub(crate) fn with_disposable_root(
+        mut self,
+        root: Option<crate::disposable_root::DisposableRoot>,
+    ) -> Self {
+        self.disposable_root = root;
+        self
+    }
+
+    fn admit_config(&self, config: Config) -> std::io::Result<Config> {
+        if let Some(root) = &self.disposable_root {
+            root.contains(self.user_config_path()?.as_path())?;
+            root.validate(&config)?;
+        }
+        Ok(config)
+    }
+
+    fn admit_load(&self, cwd: Option<&Path>) -> std::io::Result<()> {
+        if let Some(root) = &self.disposable_root {
+            root.before_load(&self.codex_home, &self.loader_overrides, cwd)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn with_embedded_network_policy(
@@ -214,6 +239,7 @@ impl ConfigManager {
         session_layers: &ConfigLayerStack,
         cwd: &Path,
     ) -> std::io::Result<Config> {
+        self.admit_load(Some(cwd))?;
         let codex_home = AbsolutePathBuf::from_absolute_path(&self.codex_home)?;
         let layers = self
             .load_config_layers_for_cwd(AbsolutePathBuf::from_absolute_path(cwd)?)
@@ -229,7 +255,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     /// Refreshes global settings and managed requirements using already fetched session layers.
@@ -238,6 +264,7 @@ impl ConfigManager {
         session_layers: &ConfigLayerStack,
         cwd: &Path,
     ) -> std::io::Result<Config> {
+        self.admit_load(Some(cwd))?;
         let mut manager = self.clone();
         manager.thread_config_loader = Arc::new(codex_config::NoopThreadConfigLoader);
         let refreshed_layers = manager
@@ -255,7 +282,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     /// Checks the retained session route against current managed provider requirements.
@@ -263,6 +290,7 @@ impl ConfigManager {
         &self,
         current: &Config,
     ) -> std::io::Result<()> {
+        self.admit_load(Some(&current.cwd))?;
         let policy_load = self.refresh_application_network_policy().await?;
         // Existing threads retain their session route; only managed
         // requirements can invalidate it.
@@ -338,6 +366,12 @@ impl ConfigManager {
     }
 
     pub(crate) async fn load_default_config(&self) -> std::io::Result<Config> {
+        if self.disposable_root.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "disposable app-server cannot use configuration recovery defaults",
+            ));
+        }
         let mut loader_overrides = self.loader_overrides.clone();
         loader_overrides.ignore_user_config = true;
         loader_overrides.ignore_project_config = true;
@@ -354,7 +388,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     pub(crate) async fn load_with_overrides(
@@ -431,8 +465,19 @@ impl ConfigManager {
         cli_overrides: &[(String, TomlValue)],
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
-        fallback_cwd: Option<PathBuf>,
+        mut fallback_cwd: Option<PathBuf>,
     ) -> std::io::Result<Config> {
+        if self.disposable_root.is_some() {
+            let cwd = typesafe_overrides
+                .cwd
+                .as_ref()
+                .or(fallback_cwd.as_ref())
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(std::env::current_dir)?;
+            self.admit_load(Some(&cwd))?;
+            fallback_cwd = Some(cwd);
+        }
         let policy_load = self.refresh_application_network_policy().await?;
         let mut request_overrides = request_overrides.unwrap_or_default();
         if let Some(value) = request_overrides.remove("bypass_hook_trust") {
@@ -468,7 +513,7 @@ impl ConfigManager {
         self.apply_network_policy(&mut config);
         self.apply_runtime_feature_enablement(&mut config);
         self.apply_arg0_paths(&mut config);
-        Ok(config)
+        self.admit_config(config)
     }
 
     pub(crate) async fn load_config_layers_for_cwd(
@@ -482,6 +527,7 @@ impl ConfigManager {
         &self,
         cwd: Option<AbsolutePathBuf>,
     ) -> std::io::Result<ConfigLayerStack> {
+        self.admit_load(cwd.as_deref())?;
         let policy_load = self.refresh_application_network_policy().await?;
         let result = load_config_layers_state(
             LOCAL_FS.as_ref(),
@@ -498,6 +544,9 @@ impl ConfigManager {
         .await;
         let layers = result?;
         self.check_application_policy_load(&policy_load)?;
+        if let Some(root) = &self.disposable_root {
+            root.validate_sources(&layers)?;
+        }
         Ok(layers)
     }
 

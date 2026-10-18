@@ -14,9 +14,10 @@ use codex_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
 use codex_utils_home_dir::find_codex_home;
 #[cfg(target_os = "windows")]
 use codex_windows_sandbox::CODEX_WINDOWS_SANDBOX_ARG1;
-#[cfg(unix)]
-use std::os::unix::fs::symlink;
 use tempfile::TempDir;
+
+mod prelude;
+pub use prelude::Arg0Prelude;
 
 const APPLY_PATCH_ARG0: &str = "apply_patch";
 const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
@@ -58,6 +59,16 @@ impl Arg0PathEntryGuard {
 }
 
 pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
+    // This hook cannot fail; keep startup fail-closed if that invariant changes.
+    match arg0_dispatch_with_prelude(|| Ok(Arg0Prelude::Normal)) {
+        Ok(paths) => paths,
+        Err(_) => std::process::exit(/*code*/ 1),
+    }
+}
+
+fn arg0_dispatch_with_prelude(
+    prelude: impl FnOnce() -> anyhow::Result<Arg0Prelude>,
+) -> anyhow::Result<Option<Arg0PathEntryGuard>> {
     #[cfg(target_os = "linux")]
     codex_utils_pty::init_spawn_helper(std::env::args_os());
     // Determine if we were invoked via the special alias.
@@ -161,13 +172,26 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
 
     // This modifies the environment, which is not thread-safe, so do this
     // before creating any threads/the Tokio runtime.
-    load_dotenv();
+    let prelude = prelude()?;
+    if matches!(prelude, Arg0Prelude::Normal) {
+        load_dotenv();
+    }
 
-    let (path_entry_guard, updated_path_env_var) = prepare_path_env_var_with_aliases(
-        InstallContext::current(),
-        std::env::var_os("PATH"),
-        prepare_path_entry_for_codex_aliases,
-    );
+    let existing_path = std::env::var_os("PATH");
+    let (path_entry_guard, updated_path_env_var) = match prelude {
+        Arg0Prelude::Normal => {
+            prepare_path_env_var_with_aliases(InstallContext::current(), existing_path, |path| {
+                prepare_path_entry_for_codex_aliases(path, prelude)
+            })
+        }
+        Arg0Prelude::Disposable => {
+            let path =
+                path_env_with_package_path_dir(InstallContext::current(), existing_path.clone())
+                    .or(existing_path);
+            let (guard, path) = prepare_path_entry_for_codex_aliases(path, prelude)?;
+            (Some(guard), Some(path))
+        }
+    };
     if let Some(updated_path_env_var) = updated_path_env_var {
         // It is safe to call set_var() because our process is single-threaded at
         // this point in its execution.
@@ -175,7 +199,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
             std::env::set_var("PATH", updated_path_env_var);
         }
     }
-    path_entry_guard
+    Ok(path_entry_guard)
 }
 
 fn prepare_path_env_var_with_aliases(
@@ -226,10 +250,24 @@ where
     F: FnOnce(Arg0DispatchPaths) -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<()>>,
 {
+    arg0_dispatch_or_else_with_prelude(|| Ok(Arg0Prelude::Normal), main_fn)
+}
+
+/// Runs admission after direct helper dispatch, before dotenv and helper creation.
+///
+/// The hook must admit disposable routing before returning `Disposable`; errors stop startup.
+pub fn arg0_dispatch_or_else_with_prelude<F, Fut>(
+    prelude: impl FnOnce() -> anyhow::Result<Arg0Prelude>,
+    main_fn: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(Arg0DispatchPaths) -> Fut + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
     // Retain the TempDir so it exists for the lifetime of the invocation of
     // this executable. Admittedly, we could invoke `keep()` on it, but it
     // would be nice to avoid leaving temporary directories behind, if possible.
-    let path_entry_guard = arg0_dispatch();
+    let path_entry_guard = arg0_dispatch_with_prelude(prelude)?;
     let current_exe = std::env::current_exe().ok();
 
     // Regular invocation. Run the async entry point on a thread with the same
@@ -342,7 +380,10 @@ where
 /// IMPORTANT: Callers must update PATH before multiple threads are spawned.
 fn prepare_path_entry_for_codex_aliases(
     existing_path: Option<OsString>,
+    prelude: Arg0Prelude,
 ) -> std::io::Result<(Arg0PathEntryGuard, OsString)> {
+    #[cfg(windows)]
+    let _ = prelude;
     let codex_home = find_codex_home()?;
     #[cfg(not(debug_assertions))]
     {
@@ -402,7 +443,7 @@ fn prepare_path_entry_for_codex_aliases(
         #[cfg(unix)]
         {
             let link = path.join(filename);
-            symlink(&exe, &link)?;
+            prelude::create_alias(&exe, &link, prelude)?;
         }
 
         #[cfg(windows)]
