@@ -1643,3 +1643,21 @@ A follow-up confidentiality repair refuses repository-tracked home files before
 private policies/config/login are seeded; Git errors inside a repository refuse
 startup too. Existing legitimate untracked home files stay untouched. The real
 Git regression and all joint launcher checks pass10/10 (home_guard_joint.log).
+
+## SC-REBUILD-20261018-D25-INACTIVE-FRAME-IO
+
+A fresh real Droid proposer/critic dialogue adopted an inactive, private bounded
+LF byte-framing component, not a complete transport. It caps frames at8MiB,
+retains cancelled-read state, checks absolute deadlines and poisons failed or
+dropped writes. A different fresh real Codex session ran the unchanged project
+normal suite: **15/15 PASS**, including ten causal framing tests, zero selected
+skips or retries. `just bazel-lock-update` passed with no lockfile drift.
+Tests bind pre-cleanup source; final scoped fix/fmt and one whole-feature review
+are separate gates. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/frame_io_20261018/`.
+
+No caller, configuration, RPC or model behavior is activated. Queue16MiB,
+continuous stderr64KiB drain, phase/total/shutdown budgets, native pipe
+cancellation, owned-child reap and controller/journey remain outstanding.
+No native launcher, model, compaction, installed artifact or release acceptance.
+All restoration/exact-recall, foreign-write, ordinary/Work/PartB, B0, matched216,
+placement EXIT1, migration59/60 and HAL/customer/offline/capacity holds remain.
