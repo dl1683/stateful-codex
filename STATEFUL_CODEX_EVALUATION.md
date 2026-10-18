@@ -1734,3 +1734,19 @@ No descendant/pipe/task containment, shutdown-clock integration, controller,
 guard/launcher/model/compaction/installation or release acceptance follows.
 All inherited holds and original failures remain. Evidence:
 `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_child_20261018/`.
+
+## SC-REBUILD-20261018-D25-INACTIVE-OWNED-PUMPS
+
+Private fixed-pair task ownership aborts synchronously, retains handles/outcomes
+across canceled joins and never renews the caller's first shutdown end. Expired
+requests still abort; post-expiry harvesting retains facts but refuses success.
+Only observed joins prove task completion. Drop aborts without guaranteeing join
+or absence of detach; wrapper Completed does not establish transport success.
+Fresh real Droid proposer/critic/settlement preceded implementation. Different
+fresh real Codex normal gate:81PASS(74old+7new),1retained ignored fixture,0retries/errors.
+Mirrored partial/panic identities, cancellation/resources, exact expiry and
+in-memory stdoutPartialEof/stderrIo alongside wrapperCompleted pass.
+Elapsed-timer/post-harvest crossing remain unforced; current-thread scheduler
+tests do not qualify OS pipes/processes, descendants or production integration.
+All guard/controller/launcher/model/compaction/installation/release holds remain.
+Evidence:`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_pumps_20261018/`.

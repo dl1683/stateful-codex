@@ -103,6 +103,8 @@ mod bounded_frame_io;
 // Inactive shared admission and typed writing; no transport or process owner.
 #[allow(dead_code)]
 mod bounded_payload;
+#[allow(dead_code)]
+mod bounded_pumps;
 
 // Inactive caller-owned stderr collector; no raw diagnostics or process owner.
 #[allow(dead_code)]
