@@ -1670,3 +1670,12 @@ Fresh26case JUnit is in the checkout target and bound to its run UUID/logs; the 
 Bazel refresh passed without lock drift. Cleanup/source review are separate recorded gates, with complete pre-cleanup bodies retained.
 No caller, outbound sharing, stderr drain, native lifecycle, controller, model/launcher or memory-survival qualification; all inherited holds remain.
 Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/transport_20261018/`.
+
+## SC-REBUILD-20261018-D25-INACTIVE-STDERR
+
+Private caller-owned drainage continuously reads beyond its64KiB raw ring, with8KiB scratch, saturating evictions, immutable end and sticky fixed stop kinds; no raw diagnostics or production caller.
+Two fresh real Droid design sessions settled this boundary. Different fresh real Codex normal1 and strengthened normal2 each passed35/35, including9stderr cases,0skips/retries; results overlap, not70unique tests.
+After normal1 RELEASE, tests added actual deadline-boundary repoll and terminal reader-lifetime assertions; normal2 verifies these. Production was unchanged; both original results and complete bodies remain retained.
+Fresh checkout JUnit run UUIDs/case names match logs/archives; stale shared-target reports rejected without alternate target or location hold. Cleanup/review are separate recorded gates.
+Generic async only, not native Windows cancellation, task/child cleanup, shared outbound/phase budgets, controller, launcher/model or memory survival. Guard65failures/native denial and all inherited holds remain.
+Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/stderr_20261018/`.

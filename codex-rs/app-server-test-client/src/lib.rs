@@ -92,6 +92,10 @@ use uuid::Uuid;
 #[allow(dead_code)]
 mod bounded_frame_io;
 
+// Inactive caller-owned stderr collector; no raw diagnostics or process owner.
+#[allow(dead_code)]
+mod bounded_stderr;
+
 // Inactive stdout-only accounting; no controller or process owner.
 #[allow(dead_code)]
 mod bounded_stdout;
