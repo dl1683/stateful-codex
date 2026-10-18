@@ -1826,3 +1826,76 @@ writes/upgrades, ordinary/Work/PartB, independent upstream B0, matched216,
 placement journey EXIT1, migration59/60 and HAL/customer/offline/capacity holds
 remain. The normal test-built standalone startup evidence is not qualification
 of the current default CLI.
+
+## Active compaction release attempt, 2026-10-18: HELD
+
+**No new user-visible compaction capability is qualified or released.** The
+owner's active-delivery priority supersedes further inactive-component work.
+An own main-derived worktree integrated reviewed primary `d46d9fd5c6` and guard
+`a71699214f`, preserving their histories and evaluation appends, at `551602131c`.
+The 40 integration-bound source files still match their reviewed parents.
+This is local integration, not a main merge, installation or release.
+
+Fresh real Droid proposer/critic agreed to a direct native-stdio Python
+qualification controller under D25's existing admission, payload and deadline
+contract. It is report-local executable tooling, not delivery of the named
+Rust test-client command. A two-compaction/source-edit/cold-resume protocol and
+separate wording/root/current-truth/host-state dimension records are present,
+but none has native empirical acceptance.
+
+Droid's one combined default candidate build passed (exit 0, source unchanged).
+The CLI, app-server and matching code-mode companion were frozen separately
+under `release_compaction_20261018/candidate/`; `candidate.json` binds their
+full hashes to the build source. Normal test compilation subsequently replaced
+shared-target executables. Those are not substituted for the frozen candidate.
+The candidate remains **not installed, runtime unqualified**.
+
+A different fresh real Codex session ran the normal touched-crate gates with
+jobs 2, the 23,221,225,472-byte RAM gate, unchanged defaults and serialized Rust:
+
+| Crate | Pass | Failure | Timeout | Runner skip | Exit |
+|---|---:|---:|---:|---:|---:|
+| history | 64 | 0 | 0 | 0 | 0 |
+| arg0 | 9 | 0 | 0 | 0 | 0 |
+| CLI | 459 | 8 | 0 | 2 | 1 |
+| app-server | 1845 | 46 | 18 | 11 | 1 |
+| stateful-extension | 337 | 2 | 1 | 0 | 1 |
+| core | 4292 | 26 | 0 | 77 | 1 |
+
+App-server/core passes include 228/1385 identified guard early returns, not
+executed product integration bodies. Extension/core each include three flaky
+passes. All attempt bodies, current-source bindings and fresh JUnit identities
+are retained. The original broader failures are not waived or replaced.
+Core's `source_unchanged:false` records its generated failing skills snapshot;
+tracked inputs and HEAD were unchanged. That output was preserved byte-for-byte
+outside the worktree, not accepted as a new baseline and not retested.
+
+The independent full controller gate remains **23 tests, 8 PASS, 15 ERROR,
+exit 1**: six private-directory setup/cleanup denials, eight masked native
+starts and one start-barrier timeout. Fresh real Droid blocker dialogue held
+release. One authorized unchanged-sandbox diagnostic measured
+`permission / errno 13 / winerror 5`; the denying API/control is unknown.
+It did not prove child absence or successful native settlement. No denied
+fixture retry, alternative access route or permission/security change followed.
+
+C1 native-refusal proof, C2 complete artifact binding, C3 duplicate lifecycle
+rejection, explicit returned network policy, bounded identity retention and
+the shared pre-spawn initialization deadline were corrected directly.
+Different fresh Codex logical gates passed 12, then 13, then 15 selected cases
+at their retained source hashes. These overlap and are synthetic only, not
+40 distinct passes or a regrade of the original native errors.
+
+Post-test scoped `just fix` and final `just fmt` exited 0. Clippy removed one
+unused test import and a redundant test-only clone; formatting made no further
+change. The 40 integration-bound files were unaffected. No tests ran after
+cleanup. The exact final implementation review is recorded separately in
+`FINAL_REVIEW.md`/`.json`; source review cannot authorize runtime release.
+
+No real authentication was staged, and no current native guard contrast,
+model compaction journey or `scodex` launcher acceptance ran. A supported,
+authorized private-scratch/Proactor verification context is not established.
+Do not retry denied paths, replace transport or weaken controls to obtain one.
+Restoration/exact recall, foreign writes/live upgrades, ordinary/Work/PartB,
+independent B0, matched216, placement EXIT1, migration59/60 and HAL/customer/
+offline/capacity holds remain. Evidence and all failures:
+`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/release_compaction_20261018/`.

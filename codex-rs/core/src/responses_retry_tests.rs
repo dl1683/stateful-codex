@@ -32,7 +32,7 @@ fn retry_reasoning_filter_preserves_original_items_and_non_reasoning_tails() {
         (vec![], vec![]),
         (original.clone(), original.clone()),
         (
-            vec![user.clone(), earlier.clone(), interrupted.clone()],
+            vec![user, earlier.clone(), interrupted.clone()],
             original.clone(),
         ),
         // History normalization may move original items; membership, rather
