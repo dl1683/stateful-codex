@@ -1019,9 +1019,9 @@ fn main() -> anyhow::Result<()> {
     arg0_dispatch_or_else_with_prelude(
         || codex_app_server::app_server_arg0_prelude().map_err(Into::into),
         move |arg0_paths: Arg0DispatchPaths| async move {
-        // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
-        Box::pin(cli_main(arg0_paths, remote_control_disabled)).await?;
-        Ok(())
+            // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
+            Box::pin(cli_main(arg0_paths, remote_control_disabled)).await?;
+            Ok(())
         },
     )
 }

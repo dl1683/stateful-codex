@@ -59,8 +59,11 @@ impl Arg0PathEntryGuard {
 }
 
 pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
-    arg0_dispatch_with_prelude(|| Ok(Arg0Prelude::Normal))
-        .expect("normal arg0 prelude is infallible")
+    // This hook cannot fail; keep startup fail-closed if that invariant changes.
+    match arg0_dispatch_with_prelude(|| Ok(Arg0Prelude::Normal)) {
+        Ok(paths) => paths,
+        Err(_) => std::process::exit(/*code*/ 1),
+    }
 }
 
 fn arg0_dispatch_with_prelude(
@@ -176,14 +179,15 @@ fn arg0_dispatch_with_prelude(
 
     let existing_path = std::env::var_os("PATH");
     let (path_entry_guard, updated_path_env_var) = match prelude {
-        Arg0Prelude::Normal => prepare_path_env_var_with_aliases(
-            InstallContext::current(),
-            existing_path,
-            |path| prepare_path_entry_for_codex_aliases(path, prelude),
-        ),
+        Arg0Prelude::Normal => {
+            prepare_path_env_var_with_aliases(InstallContext::current(), existing_path, |path| {
+                prepare_path_entry_for_codex_aliases(path, prelude)
+            })
+        }
         Arg0Prelude::Disposable => {
-            let path = path_env_with_package_path_dir(InstallContext::current(), existing_path.clone())
-                .or(existing_path);
+            let path =
+                path_env_with_package_path_dir(InstallContext::current(), existing_path.clone())
+                    .or(existing_path);
             let (guard, path) = prepare_path_entry_for_codex_aliases(path, prelude)?;
             (Some(guard), Some(path))
         }
