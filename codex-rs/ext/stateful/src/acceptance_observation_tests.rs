@@ -939,27 +939,68 @@ async fn oversized_commands_end_forget_and_expire_with_bounded_evidence() {
 async fn a_newly_matching_ordinal_has_no_captured_revision_to_certify() {
     let fixture = fixture("new-ordinal").await;
     let root = fixture.project.path();
-    fixture.start("held", "pytest -q tests/test_parse.py", root).await;
-    let before = fixture.store.acceptance_ledger(&fixture.run_id).await.expect("ledger");
-    fixture.store.revise_acceptance(
-        &fixture.run_id, before.revision,
-        vec![AcceptanceChange::Add {
-            origin: AcceptanceOrigin::Derived, kind: AcceptanceKind::Check,
-            statement: "An additional check.".to_string(), request_span: None,
-            terms: CriterionTerms {
-                required: true, artifacts: vec!["src/parse.py".to_string()],
-                checker: vec!["tests/test_parse.py".to_string()],
-                check_command: Some("pytest -q tests/test_parse.py".to_string()),
-                expected_observation: Some("Every test passes.".to_string()),
-                ..CriterionTerms::default()
-            },
-        }], "add-while-held", /*project_root*/ None,
-    ).await.expect("added");
-    fixture.finish("held", "pytest -q tests/test_parse.py", root, "completed", 0, "unknown").await;
-    let after = fixture.store.acceptance_ledger(&fixture.run_id).await.expect("ledger");
+    fixture
+        .start("held", "pytest -q tests/test_parse.py", root)
+        .await;
+    let before = fixture
+        .store
+        .acceptance_ledger(&fixture.run_id)
+        .await
+        .expect("ledger");
+    fixture
+        .store
+        .revise_acceptance(
+            &fixture.run_id,
+            before.revision,
+            vec![AcceptanceChange::Add {
+                origin: AcceptanceOrigin::Derived,
+                kind: AcceptanceKind::Check,
+                statement: "An additional check.".to_string(),
+                request_span: None,
+                terms: CriterionTerms {
+                    required: true,
+                    artifacts: vec!["src/parse.py".to_string()],
+                    checker: vec!["tests/test_parse.py".to_string()],
+                    check_command: Some("pytest -q tests/test_parse.py".to_string()),
+                    expected_observation: Some("Every test passes.".to_string()),
+                    ..CriterionTerms::default()
+                },
+            }],
+            "add-while-held",
+            /*project_root*/ None,
+        )
+        .await
+        .expect("added");
+    fixture
+        .finish(
+            "held",
+            "pytest -q tests/test_parse.py",
+            root,
+            "completed",
+            0,
+            "unknown",
+        )
+        .await;
+    let after = fixture
+        .store
+        .acceptance_ledger(&fixture.run_id)
+        .await
+        .expect("ledger");
     assert_eq!(after.criteria[1].evidence, None);
-    assert_eq!(after.criteria[0].evidence.as_ref().expect("captured C1").criterion_revision,
-        before.criteria[0].revision);
-    assert_eq!((after.workspace_generation, after.observed_executions, after.pending_commands),
-        (before.workspace_generation + 1, 1, 0));
+    assert_eq!(
+        after.criteria[0]
+            .evidence
+            .as_ref()
+            .expect("captured C1")
+            .criterion_revision,
+        before.criteria[0].revision
+    );
+    assert_eq!(
+        (
+            after.workspace_generation,
+            after.observed_executions,
+            after.pending_commands
+        ),
+        (before.workspace_generation + 1, 1, 0)
+    );
 }

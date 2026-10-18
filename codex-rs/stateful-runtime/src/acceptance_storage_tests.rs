@@ -1006,37 +1006,78 @@ async fn socratic_runs_record_no_evidence_before_execution() {
 #[tokio::test]
 async fn rejected_start_revisions_neither_insert_nor_prune_current_evidence() {
     let (_home, _sqlite, store, id) = store_with_run(WorkflowMode::Collaborative).await;
-    let r1 = store.revise_acceptance(
-        &id, 0, vec![user_check("All tests must pass.", "pytest -q")],
-        "declare", /*project_root*/ None,
-    ).await.expect("declared");
+    let r1 = store
+        .revise_acceptance(
+            &id,
+            0,
+            vec![user_check("All tests must pass.", "pytest -q")],
+            "declare",
+            /*project_root*/ None,
+        )
+        .await
+        .expect("declared");
     let obsolete = observed(&r1, 1, 0);
-    let r2 = store.revise_acceptance(
-        &id, r1.revision, vec![AcceptanceChange::Refine {
-            ordinal: 1, statement: None, required: None,
-            terms: TermsUpdate {
-                expected_observation: Some("Every parser test passes.".to_string()),
-                ..TermsUpdate::default()
-            },
-        }], "refine", /*project_root*/ None,
-    ).await.expect("refined before any receipt");
+    let r2 = store
+        .revise_acceptance(
+            &id,
+            r1.revision,
+            vec![AcceptanceChange::Refine {
+                ordinal: 1,
+                statement: None,
+                required: None,
+                terms: TermsUpdate {
+                    expected_observation: Some("Every parser test passes.".to_string()),
+                    ..TermsUpdate::default()
+                },
+            }],
+            "refine",
+            /*project_root*/ None,
+        )
+        .await
+        .expect("refined before any receipt");
     for n in 0..super::RETAINED_EVIDENCE_PER_CRITERION {
         let mut evidence = observed(&r2, 1, 0);
         evidence.source_id = format!("current-{n}");
-        assert_eq!(store.record_command_evidence(&id, vec![evidence]).await.expect("insert"), 1);
+        assert_eq!(
+            store
+                .record_command_evidence(&id, vec![evidence])
+                .await
+                .expect("insert"),
+            1
+        );
     }
     let before = store.acceptance_ledger(&id).await.expect("ledger");
     let retained = sqlx::query_scalar::<_, i64>(
         "SELECT sequence FROM stateful_acceptance_evidence WHERE run_id = ? ORDER BY sequence",
-    ).bind(id.as_str()).fetch_all(&store.pool).await.expect("retained sequences");
-    assert_eq!(retained.len() as i64, super::RETAINED_EVIDENCE_PER_CRITERION);
+    )
+    .bind(id.as_str())
+    .fetch_all(&store.pool)
+    .await
+    .expect("retained sequences");
+    assert_eq!(
+        retained.len() as i64,
+        super::RETAINED_EVIDENCE_PER_CRITERION
+    );
     for n in 0..super::RETAINED_EVIDENCE_PER_CRITERION + 2 {
         let mut late = obsolete.clone();
         late.source_id = format!("obsolete-{n}");
-        assert_eq!(store.record_command_evidence(&id, vec![late]).await.expect("rejected"), 0);
+        assert_eq!(
+            store
+                .record_command_evidence(&id, vec![late])
+                .await
+                .expect("rejected"),
+            0
+        );
     }
     assert_eq!(store.acceptance_ledger(&id).await.expect("ledger"), before);
-    assert_eq!(sqlx::query_scalar::<_, i64>(
-        "SELECT sequence FROM stateful_acceptance_evidence WHERE run_id = ? ORDER BY sequence",
-    ).bind(id.as_str()).fetch_all(&store.pool).await.expect("retained sequences"), retained);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT sequence FROM stateful_acceptance_evidence WHERE run_id = ? ORDER BY sequence",
+        )
+        .bind(id.as_str())
+        .fetch_all(&store.pool)
+        .await
+        .expect("retained sequences"),
+        retained
+    );
 }
