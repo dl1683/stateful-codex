@@ -92,7 +92,7 @@ use uuid::Uuid;
 #[allow(dead_code)]
 mod bounded_frame_io;
 
-// Inactive shared compact-payload admission; outbound writing remains separate.
+// Inactive shared admission and typed writing; no transport or process owner.
 #[allow(dead_code)]
 mod bounded_payload;
 

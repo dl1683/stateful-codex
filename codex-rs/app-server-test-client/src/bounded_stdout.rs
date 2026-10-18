@@ -1,7 +1,8 @@
 //! Inactive stdout admission using an explicitly supplied shared payload budget.
 //! Reader staging/compaction can add approximately 16 MiB plus fixed buffers;
 //! these are requested-payload bounds, not RSS limits. Independently held leases
-//! compete with queued/delivered frames, but outbound writes are not enforced.
+//! compete with queued/delivered frames. Only typed writes use these leases;
+//! raw outbound I/O remains outside this accounting.
 
 use super::bounded_frame_io::FrameError;
 use super::bounded_frame_io::FrameReader;

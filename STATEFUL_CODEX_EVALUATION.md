@@ -1689,3 +1689,13 @@ Causal admissions prove queued/delivered/independent retention, failure/expiry/d
 No outbound writer consumes leases yet; raw FrameWriter remains unenforced. Serialization/staging/allocator/RSS/global/process/native/phase/shutdown/controller/journey/installation/release guarantees remain outside scope.
 Separate old-c598 fixture-only run: complete preflight PASS,2PASS/1FAIL/3NOT RUN,3children reaped; generic case3 refusal cause UNKNOWN. Old0/6,65broader failures and all inherited holds remain, guard runtime RELEASE NO.
 Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/shared_transport_20261018/`; native evidence: sibling `fixture_repair_20261018/`. Cleanup/review remain separate recorded gates.
+
+## SC-REBUILD-20261018-D25-LEASED-WRITER
+
+Separate settled stage adds private pool-bound typed writes over unchanged FrameWriter; the previous admission-only entry describes the earlier stage, not this new API.
+The consuming async future owns the whole frame from construction through unpolled/pending write/flush and completion/drop; explicit release precedes return, foreign-pool refusal neither writes nor poisons.
+Different fresh real Codex normal1 passed53/53, all43existing plus10writer cases,0skips/retries; test-time bodies/profile/versions and fresh checkout JUnit UUID/case names independently bound.
+Causal admissions prove retained bytes/empty-message slots, Ready-future release, unpolled drop/clean reuse, actual pre-byte/partial blockage and pending-flush cancellation/recovery/permanent poisoning.
+Fixed-end active expiry, clean expired/invalid/foreign preflight, successful payload/empty LF and normalized write/flush Io errors are covered; local foreign-refusal byte balance is runtime-probed, message balance is source-supported.
+Private inactive typed ownership only: raw I/O, pre-admission input/encoding/staging/allocator/RSS/global/native/phase/total/shutdown/task/process/controller/journey/installation/release guarantees remain outside scope.
+Guard runtime RELEASE NO,65broader failures, old0/6 and separate old-c598 fixture2PASS/1FAIL/3NOT RUN plus every inherited hold remain. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/leased_writer_20261018/`; cleanup/review remain separate recorded gates.
