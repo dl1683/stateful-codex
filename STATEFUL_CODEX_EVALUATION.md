@@ -1718,3 +1718,19 @@ Fresh Droid dialogue and different fresh Codex source verification support a con
 A separate agreed fresh Public synthetic topology preserved the retained historical-c598 artifact/build/five-provenance/21-byte config/oracle/capture gates. Different fresh real Codex ran exactly once:1test/1child PASS, natural exit1/config.toml unclosed-array diagnostic, original oracle and separate resource acceptance PASS, stdout0/stderr313 observed/retained bytes, no timeout/overflow/reader exceptions or remaining owned child/readers; artifact unchanged.
 Fresh final real Droid implementation/evidence review APPROVE exact wrapper ce96d1ae83893fb341ea9f1791bd40b5be6ea270cd6e9887a243e1d06808641e. Point-in-time topology is not race-free; absent-root metadata/pipe closure are source-supported, capture replacement-decoded not raw-byte fidelity, no descendant or hard20s whole-wrapper guarantee.
 Only this old artifact's new fixture/oracle qualifies, not current guard/runtime/controller/launcher/installation/compaction. Original2PASS/1FAIL/3NOT RUN, old0of6,65broader failures and every inherited hold remain. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/{guard_diagnosis_20261018,guard_contrast_20261018}/`.
+
+## SC-REBUILD-20261018-D25-INACTIVE-OWNED-CHILD
+
+Private inactive direct-child ownership retains the child across canceled waits,
+uses the caller's first shutdown end, attempts termination once and records only
+observed reaping. Cached request errors and sticky expiry never renew the end.
+Drop is best-effort termination, not guaranteed reaping; native calls are cooperative.
+Fresh real Droid proposer/critic/settlement preceded implementation. Different fresh
+real Codex ran the normal crate gate:74PASS,1intentionally ignored child fixture,
+0retries/errors; seven separate fixture invocations are source-derived, not telemetry.
+Native readiness/reaping, unpolled/Pending cancellation and exact expiry pass.
+Kernel error/race/post-call crossing/Drop branches remain source-reviewed only.
+No descendant/pipe/task containment, shutdown-clock integration, controller,
+guard/launcher/model/compaction/installation or release acceptance follows.
+All inherited holds and original failures remain. Evidence:
+`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_child_20261018/`.

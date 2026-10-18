@@ -88,6 +88,10 @@ use tungstenite::stream::MaybeTlsStream;
 use url::Url;
 use uuid::Uuid;
 
+// Inactive direct-child ownership, not a controller or descendant container.
+#[allow(dead_code)]
+mod bounded_child;
+
 // Inactive deadline bookkeeping, not a controller or native process owner.
 #[allow(dead_code)]
 mod bounded_deadlines;
