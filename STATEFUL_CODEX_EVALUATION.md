@@ -1643,3 +1643,46 @@ A follow-up confidentiality repair refuses repository-tracked home files before
 private policies/config/login are seeded; Git errors inside a repository refuse
 startup too. Existing legitimate untracked home files stay untouched. The real
 Git regression and all joint launcher checks pass10/10 (home_guard_joint.log).
+
+## SC-REBUILD-20261018-D25-GUARD-CONTINUATION
+
+Fresh Droid proposer/critic pairs adopted early child admission before
+dotenv/home/helper preparation, independent Unix helper copies, and route/source
+topology admission before managed-policy refresh or config discovery. Disabled
+layers and hooks remain audited. A demonstrated Windows canonical-prefix
+comparison error was repaired without changing managed policy.
+
+Different fresh real Codex sessions verified Windows arg0 9/9, guard units 7/7
+and standalone startup 4/4. All eleven guard cases also passed in the normal
+app-server suite. Normal results remain **FAIL**: CLI 459 passed/8 failed with
+2 runner exclusions; app-server 1850 passed/57 failed with 11 exclusions.
+Retries and all original compile/runtime failures are retained. There is no
+baseline-equivalence waiver or hidden conditional-pass credit.
+
+Three default builds passed, including one necessary current-artifact build
+after normal test compilation replaced the earlier CLI. The current default CLI
+is pinned as `c5988637e948a5647a29f7195e85853676d0e3c96765e573af4537748da0d5cb`,
+separately from HEAD `ccfa34ce8689d5b32934a2fe117c4ec1a1390105` and all thirteen
+frozen source hashes. Earlier exact-hash native attempts correctly refused before
+execution. A separate current-candidate check verified source/artifact identity,
+but Windows denied executable launch: version not observed, zero of six native
+cases launched, five follow-on cases NOT RUN. Hash-change cause is unknown;
+neither reproducibility nor verification of the earlier binary is claimed.
+
+The interrupted original CLI attempt is INCOMPLETE, not a test verdict.
+A transient misplaced proposer report during normal testing was moved out with
+hash verification; all thirteen Rust source paths stayed unchanged. Source was
+explicitly released after independent verification. Cleanup/final source review
+and complete commits remain separate gates; the index was older than tested
+working bytes. A prior Shield git write-tree scan-read failure was not bypassed.
+
+Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/guard_20261018/`
+(`verification_continuation_0500`, `verification_default_native_0615`,
+`verification_candidate_native_0630`, `CANDIDATE_IDENTITY_0630` and audit exception).
+No installation, launcher/Luna/model/compaction journey or release acceptance.
+Unix alias/inode execution, Linux/macOS and foreign app/exec combinations are
+NOT RUN. D25 bounded transport/controller, restoration/exact recall, foreign
+writes/upgrades, ordinary/Work/PartB, independent upstream B0, matched216,
+placement journey EXIT1, migration59/60 and HAL/customer/offline/capacity holds
+remain. The normal test-built standalone startup evidence is not qualification
+of the current default CLI.
