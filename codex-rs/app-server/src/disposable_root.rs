@@ -133,7 +133,9 @@ impl DisposableRoot {
         }
         for layer in config.config_layer_stack.layers_low_to_high() {
             if let codex_config::ConfigLayerSource::User { file: path, .. }
-            | codex_config::ConfigLayerSource::Project { dot_codex_folder: path } = &layer.name
+            | codex_config::ConfigLayerSource::Project {
+                dot_codex_folder: path,
+            } = &layer.name
             {
                 self.contains(path.as_path())?;
             }

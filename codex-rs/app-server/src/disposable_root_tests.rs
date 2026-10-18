@@ -25,7 +25,10 @@ fn manager(root: &Path, cloud: CloudConfigBundleLoader) -> ConfigManager {
         ("features.sqlite".into(), true.into()),
         ("features.token_budget".into(), false.into()),
         ("model_auto_compact_token_limit".into(), 100000_i64.into()),
-        ("model_post_turn_compact_threshold_percent".into(), 0_i64.into()),
+        (
+            "model_post_turn_compact_threshold_percent".into(),
+            0_i64.into(),
+        ),
         ("memories.generate_memories".into(), false.into()),
         ("memories.use_memories".into(), false.into()),
     ];
@@ -46,9 +49,13 @@ fn manager(root: &Path, cloud: CloudConfigBundleLoader) -> ConfigManager {
 #[test]
 fn opt_in_requires_strict_private_existing_routes() -> io::Result<()> {
     assert!(
-        DisposableRoot::parse(/*root*/ None, /*strict_config*/ false, |_| panic!("opt out"))
-            .unwrap()
-            .is_none()
+        DisposableRoot::parse(
+            /*root*/ None,
+            /*strict_config*/ false,
+            |_| panic!("opt out")
+        )
+        .unwrap()
+        .is_none()
     );
     let scratch = tempfile::tempdir()?;
     let root = fs::canonicalize(scratch.path())?;
@@ -160,7 +167,11 @@ async fn every_config_return_refuses_managed_escape_and_keeps_policy() -> anyhow
     )]));
     assert!(
         admitted
-            .load_for_cwd(overrides, ConfigOverrides::default(), Some(root.join("home")))
+            .load_for_cwd(
+                overrides,
+                ConfigOverrides::default(),
+                Some(root.join("home"))
+            )
             .await
             .is_err()
     );
@@ -168,7 +179,8 @@ async fn every_config_return_refuses_managed_escape_and_keeps_policy() -> anyhow
 }
 
 #[tokio::test]
-async fn admission_rechecks_credentials_thresholds_memory_and_existing_leaves() -> anyhow::Result<()> {
+async fn admission_rechecks_credentials_thresholds_memory_and_existing_leaves() -> anyhow::Result<()>
+{
     let scratch = tempfile::tempdir()?;
     let root = fs::canonicalize(scratch.path())?;
     fs::create_dir(root.join("home"))?;
