@@ -91,6 +91,10 @@ use uuid::Uuid;
 // Inactive building block for the disposable journey, not the interactive client.
 #[allow(dead_code)]
 mod bounded_frame_io;
+
+// Inactive stdout-only accounting; no controller or process owner.
+#[allow(dead_code)]
+mod bounded_stdout;
 mod loopback_responses_server;
 mod plugin_analytics_capture;
 mod plugin_analytics_mutation_smoke;

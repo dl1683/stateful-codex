@@ -1661,3 +1661,12 @@ cancellation, owned-child reap and controller/journey remain outstanding.
 No native launcher, model, compaction, installed artifact or release acceptance.
 All restoration/exact-recall, foreign-write, ordinary/Work/PartB, B0, matched216,
 placement EXIT1, migration59/60 and HAL/customer/offline/capacity holds remain.
+
+## SC-REBUILD-20261018-D25-INACTIVE-STDOUT
+
+Private caller-driven stdout admission bounds compact queued/delivered leases to16MiB and64frames, using existing8MiB framing. Independent terminal state, fixed deadlines, sticky EOF/errors and cancellation-safe delivery remain inactive.
+Two fresh real Droid design sessions settled this boundary. Different fresh real Codex normal scoped tests26/26PASS include11new cases,0skips/retries. Initial normal1 OS5 before compilation remains failed; normal2 used supported exact-target admission.
+Fresh26case JUnit is in the checkout target and bound to its run UUID/logs; the shared-target JUnit was stale and rejected. No alternate build target or test rerun was used.
+Bazel refresh passed without lock drift. Cleanup/source review are separate recorded gates, with complete pre-cleanup bodies retained.
+No caller, outbound sharing, stderr drain, native lifecycle, controller, model/launcher or memory-survival qualification; all inherited holds remain.
+Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/transport_20261018/`.
