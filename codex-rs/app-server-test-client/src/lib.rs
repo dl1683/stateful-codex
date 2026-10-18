@@ -88,6 +88,10 @@ use tungstenite::stream::MaybeTlsStream;
 use url::Url;
 use uuid::Uuid;
 
+// Inactive deadline bookkeeping, not a controller or native process owner.
+#[allow(dead_code)]
+mod bounded_deadlines;
+
 // Inactive building block for the disposable journey, not the interactive client.
 #[allow(dead_code)]
 mod bounded_frame_io;
