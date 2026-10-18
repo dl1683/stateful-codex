@@ -282,3 +282,183 @@ async fn total_then_parent_then_child_precedence_is_sticky() {
         assert_eq!(clock.finish(Scope::Phase), Err(error));
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_after_total_exhaustion_has_unclipped_success_and_finality() {
+    let mut clock = JourneyDeadlines::new();
+    tokio::time::advance(Duration::from_secs(/*secs*/ 900)).await;
+    clock.begin_shutdown().unwrap();
+    let end = clock.end(Scope::Shutdown).unwrap();
+    assert_eq!(
+        clock.begin_phase(Phase::Initialization),
+        Err(DeadlineError::TotalExpired)
+    );
+    tokio::time::advance(Duration::from_secs(/*secs*/ 4)).await;
+    assert_eq!(
+        clock
+            .wait(Scope::Shutdown, ready(Ok::<_, ()>("cleanup")))
+            .await,
+        Ok(Ok("cleanup"))
+    );
+    clock.begin_shutdown().unwrap();
+    assert_eq!(clock.end(Scope::Shutdown), Ok(end));
+    clock.finish(Scope::Shutdown).unwrap();
+    tokio::time::advance(Duration::from_secs(/*secs*/ 900)).await;
+    assert_eq!(clock.begin_shutdown(), Err(DeadlineError::Closed));
+    assert_eq!(clock.finish(Scope::Shutdown), Err(DeadlineError::Closed));
+    assert_eq!(
+        clock.begin_phase(Phase::Turn),
+        Err(DeadlineError::TotalExpired)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_permanently_closes_live_slots_and_preserves_failure() {
+    for initialize in [false, true] {
+        let mut clock = if initialize {
+            initialized()
+        } else {
+            JourneyDeadlines::new()
+        };
+        assert_eq!(clock.end(Scope::Shutdown), Err(DeadlineError::InvalidState));
+        assert_eq!(
+            clock.finish(Scope::Shutdown),
+            Err(DeadlineError::InvalidState)
+        );
+        clock.begin_shutdown().unwrap();
+        assert_eq!(
+            clock.begin_phase(Phase::Initialization),
+            Err(DeadlineError::Closed)
+        );
+        assert_eq!(clock.begin_rpc(), Err(DeadlineError::Closed));
+        tokio::time::advance(Duration::from_secs(/*secs*/ 900)).await;
+        assert_eq!(clock.finish(Scope::Phase), Err(DeadlineError::Closed));
+    }
+    for phase in [
+        Phase::Initialization,
+        Phase::Rpc,
+        Phase::Turn,
+        Phase::Compaction,
+    ] {
+        let mut clock = if phase == Phase::Initialization {
+            JourneyDeadlines::new()
+        } else {
+            initialized()
+        };
+        clock.begin_phase(phase).unwrap();
+        if phase != Phase::Rpc {
+            clock.begin_rpc().unwrap();
+        }
+        clock.begin_shutdown().unwrap();
+        assert_eq!(clock.end(Scope::Phase), Err(DeadlineError::Closed));
+        assert_eq!(clock.finish(Scope::Rpc), Err(DeadlineError::Closed));
+        assert_eq!(
+            clock.wait(Scope::Shutdown, ready("cleanup")).await,
+            Ok("cleanup")
+        );
+    }
+    let mut clock = initialized();
+    clock.begin_phase(Phase::Turn).unwrap();
+    tokio::time::advance(Duration::from_secs(/*secs*/ 180)).await;
+    assert_eq!(clock.finish(Scope::Phase), Err(DeadlineError::TurnExpired));
+    clock.begin_shutdown().unwrap();
+    tokio::time::advance(Duration::from_secs(/*secs*/ 900)).await;
+    assert_eq!(
+        clock.end(Scope::Shutdown),
+        Err(DeadlineError::ShutdownExpired)
+    );
+    assert_eq!(clock.begin_rpc(), Err(DeadlineError::TurnExpired));
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_pending_drop_and_repeat_cannot_renew_original_end() {
+    let mut clock = JourneyDeadlines::new();
+    clock.begin_shutdown().unwrap();
+    let end = clock.end(Scope::Shutdown).unwrap();
+    drop(Box::pin(clock.wait(Scope::Shutdown, pending::<()>())));
+    {
+        let mut wait = Box::pin(clock.wait(Scope::Shutdown, pending::<()>()));
+        pending_poll(wait.as_mut()).await;
+        tokio::time::advance(Duration::from_secs(/*secs*/ 2)).await;
+        pending_poll(wait.as_mut()).await;
+    }
+    clock.begin_shutdown().unwrap();
+    assert_eq!(clock.end(Scope::Shutdown), Ok(end));
+    assert_eq!(
+        clock.wait(Scope::Shutdown, ready("notification")).await,
+        Ok("notification")
+    );
+    tokio::time::advance(Duration::from_secs(/*secs*/ 2)).await;
+    let mut wait = Box::pin(clock.wait(Scope::Shutdown, pending::<()>()));
+    pending_poll(wait.as_mut()).await;
+    tokio::time::advance(Duration::from_secs(/*secs*/ 1)).await;
+    assert_eq!(wait.await, Err(DeadlineError::ShutdownExpired));
+    assert_eq!(clock.begin_shutdown(), Err(DeadlineError::ShutdownExpired));
+    assert_eq!(
+        clock.finish(Scope::Shutdown),
+        Err(DeadlineError::ShutdownExpired)
+    );
+    assert_eq!(
+        clock.begin_phase(Phase::Initialization),
+        Err(DeadlineError::Closed)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_exact_expiry_rejects_ready_before_inner_poll() {
+    for initial_pending in [false, true] {
+        let mut clock = JourneyDeadlines::new();
+        clock.begin_shutdown().unwrap();
+        let polls = Cell::<usize>::default();
+        let ready = Cell::<bool>::default();
+        let inner = poll_fn(|_| {
+            polls.set(polls.get() + 1);
+            if ready.get() {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        });
+        let mut wait = Box::pin(clock.wait(Scope::Shutdown, inner));
+        if initial_pending {
+            pending_poll(wait.as_mut()).await;
+        }
+        tokio::time::advance(Duration::from_secs(/*secs*/ 5)).await;
+        ready.set(/*val*/ true);
+        assert_eq!(wait.await, Err(DeadlineError::ShutdownExpired));
+        assert_eq!(polls.get(), usize::from(initial_pending));
+        assert_eq!(clock.begin_shutdown(), Err(DeadlineError::ShutdownExpired));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_crossing_poll_discards_output_and_latches_only_shutdown() {
+    struct Output(Rc<Cell<usize>>);
+    impl Drop for Output {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let drops = Rc::new(Cell::default());
+    let mut clock = JourneyDeadlines::new();
+    clock.begin_shutdown().unwrap();
+    let mut advance = Box::pin(tokio::time::advance(Duration::from_secs(/*secs*/ 5)));
+    let inner = poll_fn(|cx| {
+        assert!(advance.as_mut().poll(cx).is_pending());
+        Poll::Ready(Output(Rc::clone(&drops)))
+    });
+    let mut wait = Box::pin(clock.wait(Scope::Shutdown, inner));
+    assert!(matches!(
+        wait.as_mut().await,
+        Err(DeadlineError::ShutdownExpired)
+    ));
+    assert_eq!(drops.get(), 1);
+    drop(wait);
+    assert_eq!(drops.get(), 1);
+    assert_eq!(clock.begin_shutdown(), Err(DeadlineError::ShutdownExpired));
+    tokio::time::advance(Duration::from_secs(/*secs*/ 900)).await;
+    assert_eq!(
+        clock.begin_phase(Phase::Initialization),
+        Err(DeadlineError::Closed)
+    );
+}

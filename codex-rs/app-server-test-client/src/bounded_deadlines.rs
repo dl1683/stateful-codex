@@ -20,16 +20,19 @@ pub(super) enum Phase {
 pub(super) enum Scope {
     Phase,
     Rpc,
+    Shutdown,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DeadlineError {
     InvalidState,
+    Closed,
     InitializationExpired,
     RpcExpired,
     TurnExpired,
     CompactionExpired,
     TotalExpired,
+    ShutdownExpired,
 }
 
 enum Work {
@@ -41,11 +44,20 @@ enum Work {
         rpc_end: Option<Instant>,
     },
     Failed(DeadlineError),
+    Closed,
+}
+
+enum Shutdown {
+    NotStarted,
+    Active(Instant),
+    Completed,
+    Expired,
 }
 
 pub(super) struct JourneyDeadlines {
     work_end: Instant,
     work: Work,
+    shutdown: Shutdown,
 }
 
 impl JourneyDeadlines {
@@ -53,6 +65,7 @@ impl JourneyDeadlines {
         Self {
             work_end: Instant::now() + Duration::from_secs(/*secs*/ 900),
             work: Work::Uninitialized,
+            shutdown: Shutdown::NotStarted,
         }
     }
 
@@ -61,7 +74,7 @@ impl JourneyDeadlines {
             Work::Active { end, rpc_end, .. } => {
                 self.work_end.min(*end).min(rpc_end.unwrap_or(*end))
             }
-            Work::Uninitialized | Work::Idle | Work::Failed(_) => self.work_end,
+            Work::Uninitialized | Work::Idle | Work::Failed(_) | Work::Closed => self.work_end,
         }
     }
 
@@ -69,6 +82,7 @@ impl JourneyDeadlines {
         let now = Instant::now();
         let error = match &self.work {
             Work::Failed(error) => Some(*error),
+            Work::Closed => return Err(DeadlineError::Closed),
             Work::Uninitialized | Work::Idle | Work::Active { .. } if now >= self.work_end => {
                 Some(DeadlineError::TotalExpired)
             }
@@ -88,6 +102,33 @@ impl JourneyDeadlines {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// Cleanup gets one independent allowance; work never reopens.
+    pub(super) fn begin_shutdown(&mut self) -> Result<(), DeadlineError> {
+        if !matches!(self.shutdown, Shutdown::NotStarted) {
+            self.shutdown_end()?;
+            return Ok(());
+        }
+        let _ = self.check_work();
+        if !matches!(self.work, Work::Failed(_)) {
+            self.work = Work::Closed;
+        }
+        self.shutdown = Shutdown::Active(Instant::now() + Duration::from_secs(/*secs*/ 5));
+        Ok(())
+    }
+
+    fn shutdown_end(&mut self) -> Result<Instant, DeadlineError> {
+        match self.shutdown {
+            Shutdown::NotStarted => Err(DeadlineError::InvalidState),
+            Shutdown::Completed => Err(DeadlineError::Closed),
+            Shutdown::Expired => Err(DeadlineError::ShutdownExpired),
+            Shutdown::Active(end) if Instant::now() >= end => {
+                self.shutdown = Shutdown::Expired;
+                Err(DeadlineError::ShutdownExpired)
+            }
+            Shutdown::Active(end) => Ok(end),
+        }
     }
 
     pub(super) fn begin_phase(&mut self, phase: Phase) -> Result<(), DeadlineError> {
@@ -130,6 +171,9 @@ impl JourneyDeadlines {
     /// Snapshots are not revocable transport capabilities. Both work scopes
     /// include an earlier active child; Scope::Rpc names only the nested slot.
     pub(super) fn end(&mut self, scope: Scope) -> Result<Instant, DeadlineError> {
+        if matches!(scope, Scope::Shutdown) {
+            return self.shutdown_end();
+        }
         self.check_work()?;
         if matches!(
             (&self.work, scope),
@@ -173,7 +217,7 @@ impl JourneyDeadlines {
         match timeout_at(end, checked).await {
             Ok(result) => result,
             Err(_) => {
-                self.check_work()?;
+                self.end(scope)?;
                 Err(DeadlineError::InvalidState)
             }
         }
@@ -182,6 +226,7 @@ impl JourneyDeadlines {
     pub(super) fn finish(&mut self, scope: Scope) -> Result<(), DeadlineError> {
         self.end(scope)?;
         match scope {
+            Scope::Shutdown => self.shutdown = Shutdown::Completed,
             Scope::Rpc => {
                 if let Work::Active { rpc_end, .. } = &mut self.work {
                     *rpc_end = None;
