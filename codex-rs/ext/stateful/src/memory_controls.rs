@@ -195,8 +195,11 @@ pub async fn correct_entry(
     expected_revision: u64,
     content: &str,
 ) -> Result<Succession, MemoryControlError> {
-    let content = content.trim();
-    if content.is_empty() || content.len() > MAX_CORRECTION_BYTES {
+    if content.is_empty()
+        || content.len() > MAX_CORRECTION_BYTES
+        || content.trim() != content
+        || content.contains('\0')
+    {
         return Err(MemoryControlError::Refused(format!(
             "the corrected text must be 1-{MAX_CORRECTION_BYTES} bytes"
         )));
@@ -288,6 +291,13 @@ pub async fn correct_entry(
             .ok_or_else(|| {
                 MemoryControlError::Refused("the corrected rule cannot be identified".to_string())
             })?;
+        // Normalization can identify the predecessor even when the bytes differ. Refuse
+        // before skipping retired generations or attempting a self-succession.
+        if &candidate == id {
+            return Err(MemoryControlError::Refused(
+                "the corrected text is the same as the current text".to_string(),
+            ));
+        }
         match store.get_entry(project_id, &candidate).await? {
             Some(existing) if existing.state != BlackboardEntryState::Active => continue,
             Some(_) => {

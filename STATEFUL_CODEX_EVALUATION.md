@@ -1750,3 +1750,36 @@ Elapsed-timer/post-harvest crossing remain unforced; current-thread scheduler
 tests do not qualify OS pipes/processes, descendants or production integration.
 All guard/controller/launcher/model/compaction/installation/release holds remain.
 Evidence:`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_pumps_20261018/`.
+
+## 2026-10-17 — Placement assertion scope reconciliation
+
+An independent fresh Codex CLI audit checked retained executor bytes and hashes.
+The original whole journey remains **EXIT1**: its final assertion tests whether
+any top-level `*.sqlite*` filename exists in the shared home, without a baseline,
+project filter or writer attribution. The eight SQLite sets were created before
+the project journey. A retained old-launcher run has matching times, a raw shared
+home rollout and a launcher binding that sets the shared `CODEX_HOME`; it is a
+supported attribution confounder. Unique OS-level creator and later SHM-write
+cause remain unknown. Timestamp evidence does not establish write-free operation.
+
+The retained canary counts project1/shared0 support that canary's scoped placement;
+they were not recomputed and do not establish global emptiness or general isolation.
+This audit opened no live database, ran no product journey and performed no cleanup
+or regrade. Raw support and recomputed hashes are recorded in
+`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/behavior_20261017/placement_recheck.md`.
+
+## D22 behavior candidate, 2026-10-18 UTC (local and UNLANDED)
+
+At this evidence append, tested candidate f81dc189667ca2cef2a5cdfc70b831a8bdea2d4b is local on rebuild/primary-integration-20261017; main6a1e962faa and installed launchers/artifacts remain unchanged. Mandatory lint/format cleanup and fresh implementation reviews follow these tests; no source promotion or native Luna qualification is implied.
+
+Fresh independent real Codex CLI results: exact correction/Forget/cold-restart/add-and-correction replay/competing effective root-and-tool reads1PASS; normal history64PASS/0skip; compaction API3PASS, including the new five-request remote-manual and automatic-post-turn first-ordinary-request current-root/revision/omission/project-isolation assertions. The separate focused code-mode isolation retry1PASS with a same-source debug companion; pure host packet capture/checkpoint/carry/reset/invalid-previous units5PASS. No assertions in these focused cases were skipped and no configured retry was needed on the passing gates.
+
+Original normal extension340case result stays FAILED:337PASS,2ACLsetupFAIL,1TIMEOUT/0runner skips; all5memory-control tests PASS and the5000directory witness PASS657.169s. A different fresh real Codex session on exact clean unchanged main6a reproduced exactly those3failure stages under normal profile/default retries/timeouts; all9646tracked-file before/after hashes agree. This is Windows/current-profile baseline evidence, not a general platform waiver.
+
+The broader memory55case gate stays FAILED:53PASS,1missing-code-mode-hostFAIL,1public-fan-inTIMEOUT. The initial companion build failed on the default V8 archive download; a fresh Droid retry built the companion from the unchanged source/debug profile using the existing documented150.4.0 sandbox archive/binding pair, independently verified through the committed manifest hash chain. No version/dependency/lock, sandbox feature, protected flag or managed-policy change. A different fresh Codex session then passed only the causal code-mode case; no regrade of the original55case run.
+
+Read-only postmortem of correctly bound synthetic timeout homes observed3671 and3299superseded predecessors, supporting unfinished4096row construction after the64row branch. Byte hashes stayed stable, SHMtimes changed and home-specific actor inspection was denied. Precise kill-time operation, product performance cause, current-main reproduction of this PUBLIC timeout and4096read qualification remain unestablished. No timeout/checker weakening or arbitrary rerun.
+
+Core network-macro integration bodies remain NOT RUN under the inherited profile; the supported network-profile attempt required elevated backend setup, which canceled1223 before commands. No guard/flag removal or lower-profile bypass. Normal app-server/core crates, complete workspace suite, other-platform qualification, guard-bearing controller/two-compaction-source-edit-cold-resume journey, launcher/native Luna check and exact historical recall/restoration activation remain NOT RUN/HELD. A5, D25guard/PATH and TUI ingress drafts are separate unqualified work; TUI's actual refusal snapshot is not yet generated. Original placement whole journey EXIT1, migration59/60 and matched216 release debt remain retained.
+
+Exact source/command/JUnit/artifact/asset bindings and fresh CLI receipts: lsr_drivers/reports/stateful_rebuild/behavior_20261017/{primary_verification3.md,primary_verification4.md,baseline_extension_verification.md,companion_retry_note.md,v8_asset_receipt.json,public_fanin_postmortem.md}. At append time, implementation reviews/installation/main merge/push have not occurred; later external run receipts govern their eventual status.

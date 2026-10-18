@@ -262,6 +262,8 @@ async fn run_compact_task_inner_impl(
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
 
     let mut history = sess.clone_history().await;
+    // Capture before the synthetic prompt, retries or compactor output alter the history.
+    let conversation_packet = history.capture_conversation_packet(sess.thread_id());
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
     history.record_items(
         &[initial_input_for_turn.into()],
@@ -396,7 +398,7 @@ async fn run_compact_task_inner_impl(
             compaction_response_id: Some(compaction_response.response_id),
             compaction_model_hash: turn_context.model_info().comp_hash.clone(),
             reviewer_compaction_hash: None,
-            conversation_packet: ConversationPacketUpdate::CarryForward,
+            conversation_packet,
         },
     )
     .await;
