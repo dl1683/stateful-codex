@@ -334,7 +334,7 @@ async fn corrections_preserve_exact_bytes_at_the_bounds() {
     {
         for (index, content) in [
             "x".to_string(),
-            format!("é{}Z", "a".repeat(1_997)),
+            format!("é{}Z", "a".repeat(/*n*/ 1_997)),
             "Keep  double spaces,\ttabs,\r\nnewlines and café e\u{301}.".to_string(),
         ]
         .into_iter()

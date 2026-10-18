@@ -471,20 +471,28 @@ async fn exact_correction_refusals_and_forget_replay_survive_restart() -> Result
         background_section: true,
     };
     let original_add = add(ORIGINAL, "exact-original");
-    let original: StatefulMemoryAddResponse = server.request(|request_id| {
-        ClientRequest::StatefulMemoryAdd { request_id, params: original_add.clone() }
-    }).await?;
-    let competing: StatefulMemoryAddResponse = server.request(|request_id| {
-        ClientRequest::StatefulMemoryAdd { request_id, params: add(COMPETING, "exact-competing") }
-    }).await?;
+    let original: StatefulMemoryAddResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: original_add.clone(),
+        })
+        .await?;
+    let competing: StatefulMemoryAddResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryAdd {
+            request_id,
+            params: add(COMPETING, "exact-competing"),
+        })
+        .await?;
     let before = read(&mut server, &thread, &project).await?;
-    let correction = |content: &str, revision: u64| json!({
-        "threadId": thread, "expectedProjectId": project,
-        "entryId": original.item.entry_id, "expectedRevision": revision,
-        "content": content, "backgroundSection": true,
-    });
-    let too_long = "é".repeat(1_001);
-    let oversized_padded = format!(" {} ", "a".repeat(2_000));
+    let correction = |content: &str, revision: u64| {
+        json!({
+            "threadId": thread, "expectedProjectId": project,
+            "entryId": original.item.entry_id, "expectedRevision": revision,
+            "content": content, "backgroundSection": true,
+        })
+    };
+    let too_long = "é".repeat(/*n*/ 1_001);
+    let oversized_padded = format!(" {} ", "a".repeat(/*n*/ 2_000));
     for (content, revision) in [
         ("", original.item.revision),
         (" \t\n", original.item.revision),
@@ -497,64 +505,112 @@ async fn exact_correction_refusals_and_forget_replay_survive_restart() -> Result
         ("Prefer  SQLite\tfor local storage.", original.item.revision),
         (EXACT, original.item.revision + 1),
     ] {
-        let id = server.send_request("statefulMemory/correct", Some(correction(content, revision))).await?;
-        let refusal = server.read_stream_until_error_message(RequestId::Integer(id)).await?;
+        let id = server
+            .send_request(
+                "statefulMemory/correct",
+                Some(correction(content, revision)),
+            )
+            .await?;
+        let refusal = server
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
         assert_eq!(refusal.error.code, -32602);
         if content == "Prefer  SQLite\tfor local storage." {
-            assert_eq!(refusal.error.message,
-                "the corrected text is the same as the current text; nothing was changed");
+            assert_eq!(
+                refusal.error.message,
+                "the corrected text is the same as the current text; nothing was changed"
+            );
         }
         assert_eq!(read(&mut server, &thread, &project).await?, before);
     }
-    let id = server.send_request("statefulMemory/correct",
-        Some(correction(EXACT, original.item.revision))).await?;
+    let id = server
+        .send_request(
+            "statefulMemory/correct",
+            Some(correction(EXACT, original.item.revision)),
+        )
+        .await?;
     let corrected: StatefulMemoryCorrectResponse = server.read_response(id).await?;
     assert_eq!(corrected.item.content.as_bytes(), EXACT.as_bytes());
     let current = read(&mut server, &thread, &project).await?;
     assert_eq!(current.data.len(), 2);
     assert!(current.data.contains(&competing.item));
     // A stale request with different words must neither replay nor replace the successor.
-    let id = server.send_request("statefulMemory/correct",
-        Some(correction("Use a remote service instead.", original.item.revision))).await?;
-    let _ = server.read_stream_until_error_message(RequestId::Integer(id)).await?;
+    let id = server
+        .send_request(
+            "statefulMemory/correct",
+            Some(correction(
+                "Use a remote service instead.",
+                original.item.revision,
+            )),
+        )
+        .await?;
+    let _ = server
+        .read_stream_until_error_message(RequestId::Integer(id))
+        .await?;
     assert_eq!(read(&mut server, &thread, &project).await?, current);
-    let _: StatefulMemoryForgetResponse = server.request(|request_id| {
-        ClientRequest::StatefulMemoryForget {
+    let _: StatefulMemoryForgetResponse = server
+        .request(|request_id| ClientRequest::StatefulMemoryForget {
             request_id,
             params: StatefulMemoryForgetParams {
-                thread_id: thread.clone(), expected_project_id: project.clone(),
-                entry_id: corrected.item.entry_id.clone(), expected_revision: corrected.item.revision,
+                thread_id: thread.clone(),
+                expected_project_id: project.clone(),
+                entry_id: corrected.item.entry_id.clone(),
+                expected_revision: corrected.item.revision,
             },
-        }
-    }).await?;
+        })
+        .await?;
     let after = read(&mut server, &thread, &project).await?;
     assert_eq!(after.data, vec![competing.item.clone()]);
     assert!(server.shutdown_gracefully().await?.success());
-    server = TestAppServer::builder().with_codex_home(home.path()).build_initialized().await?;
+    server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .build_initialized()
+        .await?;
     let fresh = start_thread(&mut server, &project).await?;
     let mut replay = correction(EXACT, original.item.revision);
     replay["threadId"] = json!(fresh);
-    let id = server.send_request("statefulMemory/correct", Some(replay)).await?;
-    let _ = server.read_stream_until_error_message(RequestId::Integer(id)).await?;
+    let id = server
+        .send_request("statefulMemory/correct", Some(replay))
+        .await?;
+    let _ = server
+        .read_stream_until_error_message(RequestId::Integer(id))
+        .await?;
     let mut replay = serde_json::to_value(&original_add)?;
     replay["threadId"] = json!(fresh);
-    let id = server.send_request("statefulMemory/add", Some(replay)).await?;
-    let refusal = server.read_stream_until_error_message(RequestId::Integer(id)).await?;
+    let id = server
+        .send_request("statefulMemory/add", Some(replay))
+        .await?;
+    let refusal = server
+        .read_stream_until_error_message(RequestId::Integer(id))
+        .await?;
     assert!(refusal.error.message.contains("nothing was restored"));
     assert_eq!(read(&mut server, &fresh, &project).await?, after);
-    assert_eq!(super::capture_boundaries_tests::root_contents(&home, &project).await?,
-        vec![COMPETING.to_string()]);
+    assert_eq!(
+        super::capture_boundaries_tests::root_contents(&home, &project).await?,
+        vec![COMPETING.to_string()]
+    );
     // A new ordinary request and an effective model read see the competing entry only.
-    let log = responses::mount_sse_sequence(&responses_server, vec![
-        responses::sse(vec![responses::ev_function_call("after-forget", "blackboard_query",
-            &json!({"text":"local storage", "detail":"full"}).to_string()),
-            responses::ev_completed("read")]),
-        responses::sse(vec![responses::ev_completed("done")]),
-    ]).await;
+    let log = responses::mount_sse_sequence(
+        &responses_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_function_call(
+                    "after-forget",
+                    "blackboard_query",
+                    &json!({"text":"local storage", "detail":"full"}).to_string(),
+                ),
+                responses::ev_completed("read"),
+            ]),
+            responses::sse(vec![responses::ev_completed("done")]),
+        ],
+    )
+    .await;
     run_turn(&mut server, &fresh, "Review the current project memory.").await?;
     let requests = log.requests();
     let packet = requests[0].body_json().to_string();
-    let output = requests[1].function_call_output_text("after-forget").expect("read output");
+    let output = requests[1]
+        .function_call_output_text("after-forget")
+        .expect("read output");
     for text in [&packet, &output] {
         assert!(text.contains(COMPETING));
         assert!(!text.contains(ORIGINAL));
