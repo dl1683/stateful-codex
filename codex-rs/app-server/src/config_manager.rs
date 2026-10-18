@@ -118,6 +118,13 @@ impl ConfigManager {
         Ok(config)
     }
 
+    fn admit_load(&self, cwd: Option<&Path>) -> std::io::Result<()> {
+        if let Some(root) = &self.disposable_root {
+            root.before_load(&self.codex_home, &self.loader_overrides, cwd)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn with_embedded_network_policy(
         mut self,
         policy: crate::in_process::EmbeddedNetworkPolicy,
@@ -232,6 +239,7 @@ impl ConfigManager {
         session_layers: &ConfigLayerStack,
         cwd: &Path,
     ) -> std::io::Result<Config> {
+        self.admit_load(Some(cwd))?;
         let codex_home = AbsolutePathBuf::from_absolute_path(&self.codex_home)?;
         let layers = self
             .load_config_layers_for_cwd(AbsolutePathBuf::from_absolute_path(cwd)?)
@@ -256,6 +264,7 @@ impl ConfigManager {
         session_layers: &ConfigLayerStack,
         cwd: &Path,
     ) -> std::io::Result<Config> {
+        self.admit_load(Some(cwd))?;
         let mut manager = self.clone();
         manager.thread_config_loader = Arc::new(codex_config::NoopThreadConfigLoader);
         let refreshed_layers = manager
@@ -281,6 +290,7 @@ impl ConfigManager {
         &self,
         current: &Config,
     ) -> std::io::Result<()> {
+        self.admit_load(Some(&current.cwd))?;
         let policy_load = self.refresh_application_network_policy().await?;
         // Existing threads retain their session route; only managed
         // requirements can invalidate it.
@@ -455,8 +465,19 @@ impl ConfigManager {
         cli_overrides: &[(String, TomlValue)],
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
-        fallback_cwd: Option<PathBuf>,
+        mut fallback_cwd: Option<PathBuf>,
     ) -> std::io::Result<Config> {
+        if self.disposable_root.is_some() {
+            let cwd = typesafe_overrides
+                .cwd
+                .as_ref()
+                .or(fallback_cwd.as_ref())
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(std::env::current_dir)?;
+            self.admit_load(Some(&cwd))?;
+            fallback_cwd = Some(cwd);
+        }
         let policy_load = self.refresh_application_network_policy().await?;
         let mut request_overrides = request_overrides.unwrap_or_default();
         if let Some(value) = request_overrides.remove("bypass_hook_trust") {
@@ -506,6 +527,7 @@ impl ConfigManager {
         &self,
         cwd: Option<AbsolutePathBuf>,
     ) -> std::io::Result<ConfigLayerStack> {
+        self.admit_load(cwd.as_deref())?;
         let policy_load = self.refresh_application_network_policy().await?;
         let result = load_config_layers_state(
             LOCAL_FS.as_ref(),
@@ -522,6 +544,9 @@ impl ConfigManager {
         .await;
         let layers = result?;
         self.check_application_policy_load(&policy_load)?;
+        if let Some(root) = &self.disposable_root {
+            root.validate_sources(&layers)?;
+        }
         Ok(layers)
     }
 

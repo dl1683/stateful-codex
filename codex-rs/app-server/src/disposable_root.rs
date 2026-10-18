@@ -11,6 +11,9 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[path = "disposable_sources.rs"]
+mod sources;
+
 #[derive(Clone)]
 pub(crate) struct DisposableRoot {
     root: PathBuf,
@@ -151,15 +154,7 @@ impl DisposableRoot {
         for path in &config.workspace_roots {
             self.contains(path.as_path())?;
         }
-        for layer in config.config_layer_stack.layers_low_to_high() {
-            if let codex_config::ConfigLayerSource::User { file: path, .. }
-            | codex_config::ConfigLayerSource::Project {
-                dot_codex_folder: path,
-            } = &layer.name
-            {
-                self.contains(path.as_path())?;
-            }
-        }
+        self.validate_sources(&config.config_layer_stack)?;
         if config.cli_auth_credentials_store_mode != AuthCredentialsStoreMode::File
             || config.mcp_oauth_credentials_store_mode != OAuthCredentialsStoreMode::File
             || !config.features.enabled(Feature::Sqlite)
