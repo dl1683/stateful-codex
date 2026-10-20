@@ -1750,3 +1750,34 @@ Elapsed-timer/post-harvest crossing remain unforced; current-thread scheduler
 tests do not qualify OS pipes/processes, descendants or production integration.
 All guard/controller/launcher/model/compaction/installation/release holds remain.
 Evidence:`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_pumps_20261018/`.
+
+## SC-REBUILD-20261020-CONTINUATION-SCOPE
+
+No new user-visible capability is qualified or released. Two fresh real Droid
+sessions checked the next-action boundary, not the unchanged implementation.
+The proposer found no new active-compaction defect to repair. The critic
+returned REVISE for an overbroad stop; its narrower direction is adopted:
+correction/Forget may qualify independently, and the separate upstream
+executor may reassess B0 without inheriting compaction's access hold.
+
+The existing source-approved correction and capture/provenance/root-request
+changes remain unlanded. R1's source approval is retained; its independent
+execution attempt remains NOT ACCEPTED. The original controller result remains
+23 total / 8 PASS / 15 ERROR / exit 1, and failed normal Rust suites are not
+regraded. No new product source, build, test, fix/fmt, native artifact access,
+launcher journey, installation or push occurred here. No denied operation was
+retried, and no shell, identity, policy, backend or fixture workaround was used.
+
+Own worktree starts from main0a5fbb5a30; ff-main was already current.
+Inventory records75branches/2775pairs/maxbehind1319historical. Upstream
+HEAD/status/all seven dirty-file hashes match retained custody. RAM observations
+varied from25,182,896,128 to20,716,576,768bytes; the latter is below B0's historical
+23,221,225,472-byte command gate. Neither observation is build admission.
+The merge executor retains exclusive upstream custody.
+
+Qualification needs its prescribed operations in an actually supported
+independent context, not another copy of already reviewed code. That is an
+operation-specific prerequisite, not a blanket stop or a new approval ladder.
+All restoration/recall, foreign-write/live-upgrade, ordinary/Work/PartB,
+migration59/60, matched216, original placementEXIT1 and HAL holds remain.
+Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/continuity_20261020/`.
