@@ -37,9 +37,10 @@ The runner starts a fixture-backed production gateway, not a native app-server.
 
 The [justfile](./justfile) selects nextest's `local` profile, 8 MiB Rust stack
 and `--no-fail-fast`. These recipe expansions were checked with `--dry-run`;
-they were **not executed**. The earlier cold-build reserve was unavailable;
-the resumed paired-binary build failed at its required V8 download (HTTP 404).
-No Rust source changed, so these crate suites were not needed for the review fix.
+they were **not executed**. The earlier resource refusal and default V8 download
+404 are historical; the fresh Windows paired build now passes with the
+[matched archive/binding overrides](./DEVELOPMENT.md#windows-v8-archive-and-binding).
+No Rust source changed, so these crate suites were not needed for the docs repair.
 Run only the package(s) affected by your change:
 
 ```text
@@ -138,6 +139,11 @@ Cargo success alone does not prove Bazel can see those inputs.
    build. Check edits it makes.
 4. Run **`just fmt` inside `codex-rs`**, even for documentation-only changes.
    It formats Just, Rust, Bazel/Starlark and Python, not Markdown.
+   On Windows use the verified [short LF checkout](./DEVELOPMENT.md#windows-formatting).
+   Long checkout paths can exceed the rustfmt process command limit (error 206);
+   `core.longpaths` alone is not a fix. Record a failed full gate honestly.
+   The scoped `cargo fmt -p <changed-crate>` alternative formats only that crate,
+   not the other formatter groups or the entire repository.
 5. Inspect formatting output, diff and status. Do **not** rerun tests after
    fix/fmt merely for reassurance, per AGENTS. Disclose any unresolved concern.
 

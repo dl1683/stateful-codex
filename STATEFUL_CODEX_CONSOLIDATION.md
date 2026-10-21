@@ -87,6 +87,16 @@ Six isolated guard-removal mutations each fail their affected tests. This
 changes tests/fixtures only, imports no additional archive source and does not
 qualify native persistence or lift any release hold.
 
+Cold-follow documentation repair, 2026-10-21: the Windows Cargo onboarding
+now selects the same publicly obtainable sandbox archive/binding pair as Cargo
+CI, with manifest and artifact hashes. The prior default-publisher 404 is
+retained as a failure, not attributed to Python. Short-path formatting and LF
+Bazel/Starlark attributes are verified separately. README-reachable historical
+records are explicitly archived, machine paths/identifiers redacted and
+`path:line` destinations replaced by pinned source permalinks or section links.
+No archive tag, runtime behavior, dependency, disposition or held qualification
+changes. See [development](./DEVELOPMENT.md) for build and runtime evidence.
+
 ## Baseline and 53 other contained local tips
 
 All 54 sources in this section are already ancestors of baseline

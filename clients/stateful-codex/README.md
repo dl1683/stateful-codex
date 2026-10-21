@@ -8,15 +8,18 @@ and [configuration](../../CONFIGURATION.md) guides first.
 Baseline: `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`, 2026-10-20.
 Review-fix pin: `b8d095182c703849c1371b35f9232d2cd4867d78`, 2026-10-21.
 Windows web suite: **132/132 PASS**. Launcher tests: **10/10 PASS**.
-Native pairing/login/memory and WSL/Linux/macOS: **UNVERIFIED** in this pass.
-The Windows one-job paired build was attempted but **failed** at the pinned V8
-sandbox archive download (HTTP 404). See [development](../../DEVELOPMENT.md);
-the runnable fixture check below does not need that archive or native binaries.
+Windows paired build and isolated CLI/app-server initialization: **PASS** with
+the [matched V8 overrides](../../DEVELOPMENT.md#windows-v8-archive-and-binding).
+The earlier default Deno download failed with HTTP 404. Native browser startup,
+login/model/memory and WSL/Linux/macOS remain **UNVERIFIED** in this pass.
+The runnable fixture check below needs no Rust build or native binaries.
 
 ## Native startup, UNVERIFIED
 
 Build the CLI and its companion from the **same checkout**, after reserving
-the single build slot and RAM headroom described in development:
+the single build slot and RAM headroom described in development. On Windows,
+first complete the [V8 archive and binding recipe](../../DEVELOPMENT.md#windows-v8-archive-and-binding)
+in the same VS Developer PowerShell; the default Deno URL returns 404:
 
 ```powershell
 cd codex-rs

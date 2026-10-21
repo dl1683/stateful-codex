@@ -55,9 +55,11 @@ At the documentation baseline `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`:
 
 **Verification, 2026-10-21:** Windows/Node 22.19.0 web tests pass **132/132**
 at review-fix pin `b8d095182c703849c1371b35f9232d2cd4867d78`; ten launcher
-tests pass. The one-job native build **failed** downloading its required Windows
-V8 sandbox archive (HTTP 404). No paired binaries were produced; login/model
-turns and native memory remain **UNVERIFIED**. WSL, macOS and Linux instructions
+tests pass. The fresh one-job Windows native build **passes** using the
+[verified OpenAI V8 archive and binding](./DEVELOPMENT.md#windows-v8-archive-and-binding),
+not the default Deno URL, which returns 404. Both binaries were produced;
+CLI/app-server initialization in disposable storage passed. Login/model turns
+and native memory remain **UNVERIFIED**. WSL, macOS and Linux instructions
 are **UNVERIFIED** in this documentation pass. The runnable
 [fixture quickstart](#verified-web-only-check) needs no account or Rust build.
 Do not interpret historical results below as measurements of today's checkout.
@@ -302,6 +304,10 @@ memory, not a native app-server or a real login.
 ### Native CLI, UNVERIFIED
 
 See [development prerequisites and resource gates](./DEVELOPMENT.md) first.
+On Windows, complete the
+[matched V8 archive/binding setup](./DEVELOPMENT.md#windows-v8-archive-and-binding)
+in a short checkout and the same VS Developer PowerShell before building.
+The unconfigured default Deno download does not supply this sandbox variant.
 From the repository root in PowerShell:
 
 ```powershell
@@ -346,7 +352,7 @@ follow [development](./DEVELOPMENT.md) and the [client guide](./clients/stateful
 - [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md): the evaluation record, including negative and
   invalidated runs; earlier entries are in the
   [history file](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md).
-- [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md): the build plan.
+- [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md): the archived historical build plan.
 - [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md): architecture and what has landed.
 - [`codex-rs/project-intelligence`](./codex-rs/project-intelligence) and [`codex-rs/ext/stateful`](./codex-rs/ext/stateful)
   hold the durable project knowledge and the agent integration, outside `codex-core`.

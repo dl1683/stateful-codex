@@ -36,18 +36,20 @@ See [architecture](./ARCHITECTURE.md) and
 | Web suite | Windows **132/132 PASS** at the review-fix pin, including fixture-module discovery, no skipped tests; six individual guard-removal mutations detected |
 | Launcher tests | Windows **10/10 PASS**, disposable/mocked launches, not model turns |
 | Gateway walkthrough | Production HTTP handler with disposable synthetic bridge; not native storage qualification |
-| Native CLI/companion | One-job Windows build **FAILED** at missing V8 sandbox archive (HTTP 404); no paired artifacts produced |
+| Native CLI/companion | Fresh one-job Windows build **PASS** at intake `3e831c98ecfc7136f500feb1f7426c931aad1fde`, using verified OpenAI V8 archive/binding overrides; both binaries produced |
+| Native startup without credentials | CLI version, companion help and disposable CLI/app-server initialize **PASS**; login status correctly reports not logged in |
 | Native login/model/memory/cold restart | **UNVERIFIED**; not inferred from fixture results or a different installed binary |
 | Rust scoped tests | Recipe/source checked, **execution UNVERIFIED** in this pass |
 | WSL/Linux/macOS newcomer instructions | **UNVERIFIED** in this pass |
-| Independent clean-clone follow | **Outstanding**; author checks are not fresh cross-engine review |
+| Independent clean-clone follow | Earlier review **FAIL** retained; repaired native/formatting route author-verified, independent re-review outstanding |
 
 The earlier pass refused a build at 20.11 GiB free under its stricter gate.
-The resumed task uses a 12 GiB floor plus a 4 GiB admission reserve, one build
-slot and one Cargo job. It admitted the Windows build at about 32 GiB free;
-later observations were 29.79 and 24.61 GiB. The V8 build script failed
-downloading the exact pinned sandbox archive; a separate request confirmed
-HTTP 404. No Rust process was killed and no sandbox/dependency workaround used.
+The current task uses a 12 GiB floor plus a 4 GiB admission reserve, one build
+slot and one Cargo job. The earlier default-publisher V8 failure remains a
+failure. The fresh Windows build used the already-pinned CI publisher's matching
+archive **and binding**, not a dependency or sandbox change. It completed in
+about 60 minutes with sampled minimum free RAM **17.87 GiB** (two-second
+sampling, not a continuous-memory guarantee). No Rust process was killed.
 See [development](./DEVELOPMENT.md) and [testing](./TESTING.md).
 
 ## Consolidation landings
