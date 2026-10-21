@@ -23,6 +23,7 @@ export const WEB_RPC_METHODS = new Set([
   "projectIntelligence/tree",
   "statefulMeasurement/summary",
   "statefulMemory/correct",
+  "statefulMemory/add",
   "statefulMemory/forget",
   "statefulMemory/read",
   "statefulRun/cancel",
@@ -169,6 +170,14 @@ const EXECUTION_PARAMS = {
     threadId: isString, expectedProjectId: isString, entryId: isString, expectedRevision: isRevision,
     content: isEntryText, backgroundSection: isBoolean,
   },
+  "statefulMemory/add": {
+    threadId: isString, expectedProjectId: isString,
+    kind: (kind) => ["rule", "background", "decision", "note"].includes(kind),
+    content: isEntryText,
+    reason: (reason) => reason === null || typeof reason === "string",
+    clientActionId: (id) => isString(id) && id.trim().length > 0 && Buffer.byteLength(id, "utf8") <= 128,
+    backgroundSection: isBoolean,
+  },
 };
 
 // Returns null when the parameters are acceptable, otherwise a message naming the problem.
@@ -181,7 +190,13 @@ export function checkRpcParams(method, params) {
     if (!shape[key](value)) return `${method} ${key} has an unsupported value`;
   }
   const missing = Object.keys(shape).find((key) => !Object.hasOwn(params, key));
-  return missing ? `${method} requires ${missing}` : null;
+  if (missing) return `${method} requires ${missing}`;
+  if (method === "statefulMemory/add" && params.reason?.trim()) {
+    if (params.kind !== "decision") return "reason is only for a decision";
+    if (!isEntryText(`${params.content.trim()} Reason: ${params.reason.trim()}`))
+      return "text with its reason must fit 2000 UTF-8 bytes";
+  }
+  return null;
 }
 
 // Every key present, none extra, each value accepted by its check.

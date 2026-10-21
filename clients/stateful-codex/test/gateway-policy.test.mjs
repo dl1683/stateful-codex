@@ -46,6 +46,18 @@ test("memory mutations require project binding, safe revisions and whole UTF-8 t
   }
 });
 
+test("additions have current action identities and no legacy scope or authority overrides", () => {
+  const params = { threadId: "t", expectedProjectId: "p", kind: "decision", content: "é".repeat(990),
+    reason: null, clientActionId: "action", backgroundSection: true };
+  assert.equal(checkRpcParams("statefulMemory/add", params), null);
+  assert.match(checkRpcParams("statefulMemory/add", { ...params, reason: "é".repeat(10) }), /2000 UTF-8/);
+  assert.match(checkRpcParams("statefulMemory/add", { ...params, clientActionId: "é".repeat(65) }), /clientActionId/);
+  assert.match(checkRpcParams("statefulMemory/add", { ...params, kind: "rule", reason: "why" }), /only for a decision/);
+  for (const override of [{ scope: null }, { authority: "humanDirect" }]) {
+    assert.match(checkRpcParams("statefulMemory/add", { ...params, ...override }), /does not accept/);
+  }
+});
+
 test("a foreign Origin is refused even with the right Host", () => {
   assert.deepEqual(
     admitRequest({ headers: { ...own, origin: "http://attacker.example" } }, PORT),

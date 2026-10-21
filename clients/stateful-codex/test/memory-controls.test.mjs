@@ -82,3 +82,87 @@ test("typing during a delayed correction survives the save and reload", async ()
   await reloaded.refresh();
   assert.deepEqual(reloaded.drafts.correction("e"), { baseRevision: 2, content: "Typed while saving" });
 });
+
+test("addition retries keep their action but changed words survive an older delayed save", async () => {
+  const state = { projectId: "p", threadId: "t" };
+  const calls = [];
+  let finish;
+  let attempt = 0;
+  const controls = createMemoryControls({ state, newId: () => `a${calls.length}`, rpc: async (method, params) => {
+    assert.equal(checkRpcParams(method, params), null);
+    calls.push({ method, params });
+    if (++attempt === 1) throw new Error("lost response");
+    if (attempt === 2) return new Promise((resolve) => { finish = resolve; });
+    return { outcome: "added" };
+  } });
+  controls.drafts.editAddition("kind", "decision");
+  controls.drafts.editAddition("content", "Use mth.");
+  controls.drafts.editAddition("reason", "Avoid confusion");
+  await assert.rejects(controls.add(), /lost response/);
+  const pending = controls.add();
+  controls.drafts.editAddition("content", "Use mo.");
+  finish({ outcome: "alreadyDone" });
+  await pending;
+  assert.equal(controls.drafts.addition().content, "Use mo.");
+  assert.deepEqual(calls.map((call) => call.params.clientActionId), ["a0", "a0"]);
+  assert.deepEqual(calls[0], { method: "statefulMemory/add", params: { threadId: "t", expectedProjectId: "p",
+    kind: "decision", content: "Use mth.", reason: "Avoid confusion", clientActionId: "a0", backgroundSection: true } });
+  await controls.add();
+  assert.deepEqual([calls[2].params.clientActionId, controls.drafts.addition().content], ["a2", ""]);
+});
+
+test("decision limits include the reason and addition drafts are never shortened", async () => {
+  const { controls, calls } = setup();
+  controls.drafts.editAddition("kind", "decision");
+  controls.drafts.editAddition("content", "é".repeat(990));
+  controls.drafts.editAddition("reason", "é".repeat(10));
+  await assert.rejects(controls.add(), /UTF-8 bytes/);
+  assert.equal(controls.drafts.addition().reason, "é".repeat(10));
+  assert.deepEqual(calls, []);
+});
+
+test("paging continues the cursor, replays opened pages on refresh and recovers changed revisions", async () => {
+  const state = { projectId: "p", threadId: "t" };
+  const cursors = [];
+  let changed = false;
+  let revision = 1;
+  const controls = createMemoryControls({ state, rpc: async (method, params) => {
+    assert.equal(checkRpcParams(method, params), null);
+    cursors.push(params.cursor);
+    if (changed && params.cursor) {
+      changed = false;
+      revision = 2;
+      throw Object.assign(new Error("project memory changed since this page was read"), { code: -32602 });
+    }
+    return { projectId: "p", data: [{ entryId: params.cursor ? `second-${revision}` : `first-${revision}` }],
+      nextCursor: params.cursor ? null : `p:${revision}:50` };
+  } });
+  await controls.refresh();
+  changed = true;
+  await controls.more();
+  assert.deepEqual(cursors, [null, "p:1:50", null, "p:2:50"]);
+  assert.deepEqual(state.memory.items, [{ entryId: "first-2" }, { entryId: "second-2" }]);
+  cursors.length = 0;
+  await controls.refresh();
+  assert.deepEqual(cursors, [null, "p:2:50"]);
+});
+
+test("a late old read cannot replace a newer memory list", async () => {
+  const state = { projectId: "p", threadId: "t" };
+  const pending = [];
+  const controls = createMemoryControls({ state, rpc: () => new Promise((resolve) => pending.push(resolve)) });
+  const old = controls.refresh();
+  const latest = controls.refresh();
+  pending[1]({ projectId: "p", data: [{ entryId: "new" }], nextCursor: null });
+  await latest;
+  pending[0]({ projectId: "p", data: [{ entryId: "old" }], nextCursor: null });
+  await old;
+  assert.deepEqual(state.memory.items, [{ entryId: "new" }]);
+});
+
+test("a response naming another project is unavailable rather than displayed", async () => {
+  const state = { projectId: "p", threadId: "t" };
+  const controls = createMemoryControls({ state, rpc: async () => ({ projectId: "other", data: [{ entryId: "foreign" }] }) });
+  await controls.refresh();
+  assert.deepEqual(state.memory, { items: [], error: "Memory belongs to another project" });
+});

@@ -250,6 +250,7 @@ function render() {
     name: active.name, start: active.selectionStart, end: active.selectionEnd,
   } : null;
   state.memoryDrafts = memory.drafts.corrections();
+  state.memoryAddition = memory.drafts.addition();
   app.innerHTML = renderWorkspace(state);
   if (focus) {
     const form = [...app.querySelectorAll("form[data-memory-correct], form[data-memory-add]")]
@@ -263,6 +264,12 @@ function render() {
 app.addEventListener("input", (event) => {
   const form = event.target.closest("form[data-memory-correct]");
   if (form && event.target.name === "content") memory.drafts.edit(form.dataset.memoryCorrect, event.target.value);
+  if (event.target.closest("form[data-memory-add]") && ["kind", "content", "reason"].includes(event.target.name))
+    memory.drafts.editAddition(event.target.name, event.target.value);
+});
+app.addEventListener("change", (event) => {
+  if (event.target.closest("form[data-memory-add]") && event.target.name === "kind")
+    memory.drafts.editAddition("kind", event.target.value);
 });
 
 function handleEvent(message) {
@@ -280,6 +287,11 @@ app.addEventListener("submit", async (event) => {
   try {
     if (form.dataset.memoryCorrect) {
       await action("Saving correction", () => memory.correct(form.dataset.memoryCorrect));
+      await refresh();
+      return;
+    }
+    if (form.dataset.memoryAdd) {
+      await action("Adding to memory", () => memory.add());
       await refresh();
       return;
     }
@@ -338,6 +350,9 @@ app.addEventListener("click", async (event) => {
   if (!button) return;
   try {
     switch (button.dataset.action) {
+      case "memory-more":
+        await action("Reading more memory", () => memory.more());
+        break;
       case "memory-correct":
         memory.open(button.dataset.entryId);
         render();
