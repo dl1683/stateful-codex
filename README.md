@@ -13,6 +13,54 @@
 
 </div>
 
+## Start here
+
+This is the Stateful fork, not the released upstream Codex package. The canonical
+repository is [stateful-codex](https://github.com/dl1683/stateful-codex), and
+**`main` is the only maintained development branch**. Historical
+`archive/20261020/...` tags are recovery references, not development branches.
+Temporary contributor PR heads target `main`; they are not parallel product lines.
+Upstream OpenAI changes enter through pinned, reviewed batches into `main`, not
+by replacing it with upstream. See [contributing](./CONTRIBUTING.md).
+
+### Reading map
+
+| You want to… | Read |
+| --- | --- |
+| Build the CLI and companion | [Development](./DEVELOPMENT.md) |
+| Try the CLI in disposable storage | [Quickstart](#try-it), then [configuration](./CONFIGURATION.md) |
+| Start the browser and exercise memory/Forget | [Client walkthrough](./clients/stateful-codex/README.md) |
+| Understand the code and vocabulary | [Architecture](./ARCHITECTURE.md), [glossary](./STATEFUL_CODEX_GLOSSARY.md) |
+| Make and test a first PR | [Contributing](./CONTRIBUTING.md), [testing](./TESTING.md), [AGENTS.md](./AGENTS.md) |
+| Separate implemented behavior from promises | [Current state](./STATEFUL_CODEX_CURRENT_STATE.md), [110-item roadmap](./STATEFUL_CODEX_ROADMAP.md) |
+| Understand holds and rejected designs | [Decisions](./STATEFUL_CODEX_DECISIONS.md) |
+| Recover historical work | [Consolidation ledger](./STATEFUL_CODEX_CONSOLIDATION.md) |
+| Read product intent and historical measurements | [Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md), [evaluation ledger](./STATEFUL_CODEX_EVALUATION.md), [evaluation history](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md) |
+| Read earlier plans, as history rather than current instructions | [Master plan](./STATEFUL_CODEX_MASTER_PLAN.md), [memory design](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md), [plan history](./STATEFUL_CODEX_PLAN_HISTORY.md) |
+
+### Capability labels
+
+**Landed** means present in source, not universally reliable or release-qualified.
+At the documentation baseline `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`:
+
+| Status | Capability and limit |
+| --- | --- |
+| Landed | Project hierarchy, blackboards, context maps, bounded memory/context reads and direct add/correct/Forget controls. |
+| Landed | Project-local native storage through `scripts/scodex.py`; direct native/web startup needs explicit home routing. This is not one physical database. |
+| Landed | Loopback gateway Host/Origin/cookie protection, typed replies, memory paging and revision-keyed drafts. Windows web tests pass 128/128; fixtures do not prove native behavior. |
+| Landed | Ask without a run; autonomous, collaborative and socratic Work modes. Work completion reliability remains limited. |
+| Inactive | Canonical `memory.sqlite` domain components and offline capsule experiments. Source presence does not activate native cutover. |
+| Held | Exact historical recall after repeated compaction, packet restoration, foreign-agent writes, populated migration 59/60 upgrades, broader Work/installation activation and HAL/offline acceptance. |
+| Rejected | Regex confirmation as user authorization, automatic authority promotion, unsafe foreign Host writes, and merging the failing compaction stack behind a disabled flag. |
+
+**Verification, 2026-10-20:** Windows/Node 22.19.0 web tests and ten launcher
+tests pass. Native CLI/companion build, login/model turns and native memory
+walkthrough are **UNVERIFIED**: no paired artifacts were present and the cold
+build lacked RAM reserve above the required 20 GiB free floor. WSL, macOS and
+Linux instructions are **UNVERIFIED** in this documentation pass. The runnable
+[fixture quickstart](#verified-web-only-check) needs no account or Rust build.
+Do not interpret historical results below as measurements of today's checkout.
+
 ## What it is
 
 Coding agents forget. Every new thread starts cold, compaction drops details, and you end up re-explaining
@@ -21,8 +69,8 @@ durable project, and keeps what the agent learns about it:
 
 - **Project memory.** Facts, decisions, rules, contradictions, open questions and rejected approaches, stored as
   structured blackboards that mirror your file tree and link back to source.
-- **Your rules, word for word.** Stated project rules are saved verbatim with a receipt, placed first in every new
-  thread, and can be corrected or forgotten with `/memory`.
+- **Reviewable project rules.** Supported declarations and direct controls retain rules with receipts.
+  Eligibility and context bounds determine what applies; `/memory` exposes correction and Forget.
 - **Continuity across threads.** A fresh thread starts from what the project already knows instead of rereading
   everything.
 - **One harness across models.** The same Codex bundle runs OpenAI, Google and open-weight models through provider
@@ -36,7 +84,14 @@ with a memory layer that other agents can use too: a Codex → Droid → Codex j
 > [evaluation record](./STATEFUL_CODEX_EVALUATION.md), which keeps losses and regressions beside wins. Updated
 > October 9–10 DSG results are sourced from experiment logs whose redacted evidence has not yet been published.
 
-## How we tested it
+## Historical testing and results
+
+The following sections retain the September–October experiments and their
+original limitations. “Newest” and “next” inside those experiment descriptions
+are historical, not a release claim about the current baseline. Current
+verification is stated above and in [current state](./STATEFUL_CODEX_CURRENT_STATE.md).
+
+### How we tested it
 
 - **Real work, not toy prompts.** Multi-session tasks on real repositories and document sets: data rooms, contracts,
   bug fixes, test suites, memos, tutoring and research briefs.
@@ -100,7 +155,7 @@ and idle time for the retained attempt; runner CPU and discarded attempts exclud
 > [!NOTE]
 > **Measured on bundle 83eee86b6, before the acceptance-ledger completion gate; these results do not describe later
 > bundles.** Our newest harness check
-> ([SC-EVAL-044](./STATEFUL_CODEX_EVALUATION.md#sc-eval-044-harness-regression-check-original-83eee86b6-vs-control-7c4707230-vs-3b-64e6176ed-pre-grading-2026-10-12))
+> ([SC-EVAL-044](./STATEFUL_CODEX_EVALUATION.md#sc-eval-044-harness-regression-check-original-83eee86b6-vs-control-7c4707230-vs-3b-64e6176ed-2026-10-12))
 > found an open-model regression in later bundles: Qwen3.6-35B-A3B clean exits fell from 98 to 3 of 108 sessions.
 > We are fixing it (see [what's next](#whats-next)).
 
@@ -216,54 +271,69 @@ runs, non-Luna arms used one trial per task. Gemini used high effort; Luna used 
 
 ## What's next
 
-The newest harness check showed open models failing far more often after a stricter completion gate was added. Next,
-in order: bounded hydration during headless continuation; answer safety; Git-independent workspace identity; simpler
-opt-in Work verification; refrozen completion-loop recovery; a matched 216-session Mistral/Qwen release check plus a
-Luna non-Git journey; then explicit activation, Apply and truthful pending status.
+Follow the [current roadmap](./STATEFUL_CODEX_ROADMAP.md), not the old
+experiment ordering. Memory correctness, compaction qualification and upstream
+compatibility remain distinct tracks. The matched-216 release panel and broader
+Work/installation activation remain held; documentation and archived source do
+not establish release readiness.
 
 ## Try it
 
-Stateful Codex builds from source. Build the CLI and its code-mode companion from the same checkout (they must sit
-beside each other, as in a normal Codex package), sign in once with your ChatGPT account, then point it at the
-directory that should define the project.
+### Verified web-only check
 
-Windows (PowerShell):
+From a clone of the canonical repository, with Node 22 or newer:
+
+```powershell
+git clone --origin stateful --single-branch --branch main --no-tags https://github.com/dl1683/stateful-codex.git
+cd stateful-codex
+npm --prefix clients/stateful-codex test
+node clients/stateful-codex/eval/gateway-smoke.mjs
+```
+
+Clone/network access is **UNVERIFIED** in this pass; the two local Node commands
+were executed. The runner prints an ephemeral loopback URL and creates a
+disposable project under ignored `clients/stateful-codex/eval/artifacts/`.
+Open that URL, select its fixture project/thread and Ask, then follow the
+[memory walkthrough](./clients/stateful-codex/README.md#memory-walkthrough).
+Stop the runner with Ctrl+C. It uses the production HTTP handler with synthetic
+memory, not a native app-server or a real login.
+
+### Native CLI, UNVERIFIED
+
+See [development prerequisites and resource gates](./DEVELOPMENT.md) first.
+From the repository root in PowerShell:
 
 ```powershell
 cd codex-rs
-cargo build -p codex-cli -p codex-code-mode-host
-$statefulCodex = (Resolve-Path .\target\debug\codex.exe).Path
-& $statefulCodex login
-& $statefulCodex -C "PATH_TO_PROJECT" --stateful collaborative "Map this project and start resolving its open questions."
+cargo build --locked -j 2 -p codex-cli -p codex-code-mode-host
+cd ..
+$repo = (Get-Location).Path
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ("stateful-intro-" + [guid]::NewGuid())
+$project = Join-Path $scratch "project"
+New-Item -ItemType Directory -Path $project | Out-Null
+git init --quiet $project
+$launcher = Join-Path $repo "scripts/scodex.py"
+python $launcher -C $project login
+python $launcher -C $project --stateful ask "Describe this empty disposable project."
 ```
 
-Headless: `& $statefulCodex exec -C "PATH_TO_PROJECT" --stateful collaborative "YOUR_GOAL"`. For a project outside a Git repository, add `--skip-git-repo-check`.
+The launcher keeps the native schema/locks but routes its home to
+`<project>/.stateful/`. It seeds missing config/login files from
+`~/.codex-stateful` if present, never knowledge. Review that template locally
+before use; do not copy or publish credentials. Explicit `--stateful ask` avoids
+starting a Work run. The launcher's default model is `gpt-6-luna`; use
+`--model <available-model>` if your provider does not offer it.
 
-Linux and macOS (bash):
+Headless counterpart, also **UNVERIFIED**:
 
-```bash
-cd codex-rs
-cargo build -p codex-cli -p codex-code-mode-host
-STATEFUL_CODEX="$(pwd)/target/debug/codex"
-"$STATEFUL_CODEX" login
-"$STATEFUL_CODEX" -C "PATH_TO_PROJECT" --stateful collaborative "Map this project and start resolving its open questions."
+```powershell
+python $launcher exec -C $project --stateful ask "Describe this empty disposable project."
 ```
 
-Headless: `"$STATEFUL_CODEX" exec -C "PATH_TO_PROJECT" --stateful collaborative "YOUR_GOAL"`. For a project outside a Git repository, add `--skip-git-repo-check`.
-
-A bare `--stateful` starts **Ask**, which answers from project memory without starting a run. `autonomous`,
-`collaborative` and `socratic` start a Work run.
-
-Or start the browser client (Node.js 22 or newer) and open `http://127.0.0.1:4173`:
-
-```bash
-cd ../clients/stateful-codex
-npm start
-```
-
-The first screen asks for the project, whether to create, continue or fork the thread, the mode, and the desired
-outcome. The gateway binds only to loopback and uses the cached ChatGPT login; it never needs an API key. Set
-`CODEX_BIN` only when the branch CLI is elsewhere.
+Outside Git, add `--skip-git-repo-check` to `exec`. Keep both built binaries
+beside each other. Do not point a new build at a valuable old store: populated
+migration compatibility remains held. For Bash/WSL and browser home isolation,
+follow [development](./DEVELOPMENT.md) and the [client guide](./clients/stateful-codex/README.md).
 
 <p align="center">
   <img src="./clients/stateful-codex/assets/setup-ready.png" alt="Stateful Codex project, thread, and workflow-mode setup" width="88%" />
@@ -284,7 +354,8 @@ outcome. The gateway binds only to loopback and uses the cached ChatGPT login; i
 
 Stateful Codex is a fork of the open-source [OpenAI Codex CLI](https://github.com/openai/codex). To install released
 upstream Codex instead, follow the [upstream installation instructions](https://github.com/openai/codex#quickstart)
-or the [Codex documentation](https://developers.openai.com/codex). Upstream's [contributing](./docs/contributing.md)
-and [installing and building](./docs/install.md) guides are kept in `docs/`.
+or the [Codex documentation](https://developers.openai.com/codex). Imported
+upstream guides remain in `docs/` as upstream references. For this fork,
+use the reading map above, especially its contribution and build instructions.
 
 This repository is licensed under the [Apache-2.0 License](LICENSE).
