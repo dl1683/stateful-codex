@@ -1,3 +1,4 @@
+import { acceptedReplyResult, isJsonObject, isRequestId } from "./gateway-policy.mjs";
 import { belongsToWorkspace, eventScope } from "./public/event-scope.mjs";
 
 const UNSUPPORTED_REQUEST = -32601;
@@ -53,9 +54,13 @@ export class EventRouter {
     }
   }
 
-  // Forward a browser's answer only if the request is still open and belongs to its thread.
+  // Build the answer from the stored request, never forward arbitrary browser response fields.
   reply({ threadId, response }) {
-    const key = requestKey(response?.id);
+    if (!isJsonObject(response) || Object.keys(response).length !== 2 ||
+        !isRequestId(response.id) || !Object.hasOwn(response, "result")) {
+      return { accepted: false, code: "invalid", reason: "a reply carries only an id and a result" };
+    }
+    const key = requestKey(response.id);
     const request = this.outstanding.get(key);
     if (!request) {
       return { accepted: false, code: "resolved", reason: "request is no longer open" };
@@ -63,8 +68,12 @@ export class EventRouter {
     if (request.threadId !== threadId) {
       return { accepted: false, code: "foreignThread", reason: "request belongs to another thread" };
     }
+    const result = acceptedReplyResult(request.message, response.result);
+    if (!result) {
+      return { accepted: false, code: "invalid", reason: "this reply does not answer that request" };
+    }
+    this.replyToServer({ id: request.message.id, result });
     this.outstanding.delete(key);
-    this.replyToServer(response);
     return { accepted: true };
   }
 

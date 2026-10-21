@@ -95,8 +95,8 @@ test("request ids keep their JSON type", () => {
   const { router, toServer } = setup();
   router.route(approval(1, "thread-a"));
   assert.equal(router.reply({ threadId: "thread-a", response: { id: "1", result: {} } }).accepted, false);
-  assert.equal(router.reply({ threadId: "thread-a", response: { id: 1, result: {} } }).accepted, true);
-  assert.deepEqual(toServer, [{ id: 1, result: {} }]);
+  assert.equal(router.reply({ threadId: "thread-a", response: { id: 1, result: { decision: "accept" } } }).accepted, true);
+  assert.deepEqual(toServer, [{ id: 1, result: { decision: "accept" } }]);
 });
 
 test("a workspace subscription starts with an authoritative snapshot of its open requests", () => {
@@ -119,7 +119,7 @@ test("a tab that was away while another tab answered reconnects to an empty draw
   router.subscribe(tabB, { threadId: "thread-a", projectId: "project-1" });
   router.route(approval(8, "thread-a"));
   unsubscribeA();
-  assert.equal(router.reply({ threadId: "thread-a", response: { id: 8, result: {} } }).accepted, true);
+  assert.equal(router.reply({ threadId: "thread-a", response: { id: 8, result: { decision: "decline" } } }).accepted, true);
   const tabAAgain = sink();
   router.subscribe(tabAAgain, { threadId: "thread-a", projectId: "project-1" });
   assert.deepEqual(tabAAgain.received, [snapshot("thread-a", [])]);
@@ -176,4 +176,39 @@ test("unsubscribing one workspace leaves the others connected", () => {
   router.route(delta("thread-a", "still here"));
   assert.deepEqual(a.received, [snapshot("thread-a", [])]);
   assert.deepEqual(b.received, [snapshot("thread-a", []), delta("thread-a", "still here")]);
+});
+
+test("a mismatched reply cannot retire or change the stored request", () => {
+  const { router, toServer } = setup();
+  router.route(approval(42, "thread-a"));
+  for (const response of [
+    { id: 42, error: { code: -1, message: "forged" } },
+    { id: 42, result: { decision: "acceptForSession" } },
+    { id: 42, result: { decision: "accept", extra: true } },
+    { id: 42, result: { answers: {} } },
+    { id: 42, result: { decision: "accept" }, method: "command/exec" },
+  ]) {
+    assert.equal(router.reply({ threadId: "thread-a", response }).code, "invalid");
+  }
+  assert.deepEqual(toServer, []);
+  assert.deepEqual(router.pendingSnapshot("thread-a"), snapshot("thread-a", [approval(42, "thread-a")]));
+  assert.deepEqual(router.reply({
+    threadId: "thread-a", response: { id: 42, result: { decision: "accept" } },
+  }), { accepted: true });
+});
+
+test("user input replies answer exactly the stored question ids", () => {
+  const { router, toServer } = setup();
+  router.route({
+    id: "question", method: "item/tool/requestUserInput",
+    params: { threadId: "thread-a", questions: [{ id: "choice" }] },
+  });
+  const answer = (answers) => router.reply({
+    threadId: "thread-a", response: { id: "question", result: { answers } },
+  });
+  for (const answers of [{}, { other: { answers: ["x"] } }, { choice: { answers: ["a", "b"] } }]) {
+    assert.equal(answer(answers).code, "invalid");
+  }
+  assert.deepEqual(answer({ choice: { answers: ["a"] } }), { accepted: true });
+  assert.deepEqual(toServer, [{ id: "question", result: { answers: { choice: { answers: ["a"] } } } }]);
 });

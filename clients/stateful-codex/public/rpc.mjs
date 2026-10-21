@@ -1,16 +1,11 @@
 import { interpretReplyResult } from "./reply-result.mjs";
 
-const sessionToken = document
-  .querySelector('meta[name="stateful-session"]')
-  .getAttribute("content");
+// Same-origin fetch and EventSource carry the gateway's HttpOnly session cookie.
 
 export async function rpc(method, params = {}) {
   const response = await fetch("/rpc", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Stateful-Session": sessionToken,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ method, params }),
   });
   const body = await response.json();
@@ -25,7 +20,7 @@ export async function rpc(method, params = {}) {
 
 // scope: { threadId, projectId } in a workspace; omit on the setup page (gateway events only).
 export function subscribe(onMessage, scope = {}) {
-  const query = new URLSearchParams({ token: sessionToken });
+  const query = new URLSearchParams();
   if (scope.threadId) query.set("thread", scope.threadId);
   if (scope.projectId) query.set("project", scope.projectId);
   const source = new EventSource(`/events?${query}`);
@@ -42,10 +37,7 @@ export function subscribe(onMessage, scope = {}) {
 export async function reply(threadId, response) {
   const result = await fetch("/reply", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Stateful-Session": sessionToken,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ threadId, response }),
   });
   const body = result.ok ? null : await result.json().catch(() => null);

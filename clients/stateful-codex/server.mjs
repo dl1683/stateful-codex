@@ -3,11 +3,20 @@ import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { EventRouter } from "./event-router.mjs";
+import {
+  admitApiRequest,
+  admitRequest,
+  admitRpcMethod,
+  checkRpcParams,
+  isApiPath,
+  isJsonObject,
+  sessionCookie,
+} from "./gateway-policy.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const publicRoot = resolve(here, "public");
@@ -163,37 +172,50 @@ function codeModeHostBeside(executable) {
   return resolve(dirname(executable), name);
 }
 
-const bridge = new AppServerBridge();
-await bridge.ready;
-const server = createServer(async (request, response) => {
+// The HTTP gateway is also exercised with a fixture bridge when native binaries are unavailable.
+export function createGateway(bridge, { sessionToken: token } = {}) {
+  const sessionToken = token ?? randomBytes(24).toString("base64url");
+  const server = createServer(async (request, response) => {
+  const port = server.address().port;
   try {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
+    const url = new URL(request.url ?? "/", `http://${host}:${port}`);
+    const refused = isApiPath(url.pathname)
+      ? admitApiRequest(request, port, sessionToken)
+      : admitRequest(request, port);
+    if (refused) throw new HttpError(refused.status, refused.message);
     if (request.method === "GET" && url.pathname === "/events") {
-      return openEventStream(url, request, response);
+      return openEventStream(bridge, url, request, response);
     }
     if (request.method === "GET" && url.pathname === "/health") {
       await bridge.ready;
       return json(response, 200, { ready: true, authMode: "chatgpt" });
     }
     if (request.method === "POST" && url.pathname === "/rpc") {
-      authorize(request);
-      const { method, params } = await readJson(request);
+      const body = await readJson(request);
+      if (!isJsonObject(body) || Object.keys(body).some((key) => !["method", "params"].includes(key)))
+        throw new HttpError(400, "request body must contain only method and params");
+      const { method, params = {} } = body;
       if (typeof method !== "string" || !method)
         throw new HttpError(400, "method is required");
+      if (!admitRpcMethod(method))
+        throw new HttpError(403, `${method} is not available through the web gateway`);
+      const invalid = checkRpcParams(method, params);
+      if (invalid) throw new HttpError(400, invalid);
       return json(response, 200, {
-        result: await bridge.request(method, params ?? {}),
+        result: await bridge.request(method, params),
       });
     }
     if (request.method === "POST" && url.pathname === "/reply") {
-      authorize(request);
       const envelope = await readJson(request);
-      if (!Object.hasOwn(envelope.response ?? {}, "id"))
+      if (!isJsonObject(envelope) || Object.keys(envelope).length !== 2 ||
+          typeof envelope.threadId !== "string" || !envelope.threadId ||
+          !isJsonObject(envelope.response) || !Object.hasOwn(envelope.response, "id"))
         throw new HttpError(400, "reply id is required");
       const outcome = bridge.reply(envelope);
-      return json(response, outcome.accepted ? 202 : 409, outcome);
+      return json(response, outcome.accepted ? 202 : outcome.code === "invalid" ? 400 : 409, outcome);
     }
     if (request.method === "GET") {
-      await serveStatic(url.pathname, response);
+      await serveStatic(url.pathname, response, port, sessionToken);
       return;
     }
     throw new HttpError(404, "not found");
@@ -207,11 +229,11 @@ const server = createServer(async (request, response) => {
       },
     });
   }
-});
+  });
+  return server;
+}
 
-function openEventStream(url, request, response) {
-  if (url.searchParams.get("token") !== sessionToken)
-    throw new HttpError(403, "forbidden");
+function openEventStream(bridge, url, request, response) {
   response.writeHead(200, {
     "Cache-Control": "no-cache, no-transform",
     "Connection": "keep-alive",
@@ -226,12 +248,6 @@ function openEventStream(url, request, response) {
     projectId: url.searchParams.get("project"),
   });
   request.once("close", unsubscribe);
-}
-
-function authorize(request) {
-  if (request.headers["x-stateful-session"] !== sessionToken) {
-    throw new HttpError(403, "forbidden");
-  }
 }
 
 async function readJson(request) {
@@ -249,21 +265,18 @@ async function readJson(request) {
   }
 }
 
-async function serveStatic(pathname, response) {
+async function serveStatic(pathname, response, port, sessionToken) {
   const requested = pathname === "/" ? "/index.html" : pathname;
   const path = resolve(publicRoot, `.${decodeURIComponent(requested)}`);
   if (relative(publicRoot, path).startsWith("..") || !(await isFile(path))) {
     throw new HttpError(404, "not found");
   }
-  let body = await readFile(path);
-  if (extname(path) === ".html") {
-    body = Buffer.from(
-      body
-        .toString("utf8")
-        .replaceAll("__STATEFUL_SESSION_TOKEN__", sessionToken),
-    );
-  }
+  const body = await readFile(path);
+  const session = extname(path) === ".html"
+    ? { "Set-Cookie": sessionCookie(port, sessionToken) }
+    : {};
   response.writeHead(200, {
+    ...session,
     "Cache-Control": "no-store",
     "Content-Type": mimeTypes.get(extname(path)) ?? "application/octet-stream",
     "Content-Security-Policy":
@@ -295,13 +308,17 @@ class HttpError extends Error {
   }
 }
 
-server.listen(port, host, () => {
-  console.log(`Stateful Codex: http://${host}:${port}`);
-});
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, () => {
-    bridge.child?.kill();
-    server.close(() => process.exit(0));
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const bridge = new AppServerBridge();
+  await bridge.ready;
+  const server = createGateway(bridge, { sessionToken });
+  server.listen(port, host, () => {
+    console.log(`Stateful Codex: http://${host}:${port}`);
   });
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () => {
+      bridge.child?.kill();
+      server.close(() => process.exit(0));
+    });
+  }
 }
