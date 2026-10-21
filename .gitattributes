@@ -3,3 +3,13 @@ codex-rs/hooks/schema/generated/** linguist-generated
 third_party/voice/sources.json text eol=lf
 codex-rs/**/migrations/*.sql text eol=lf
 codex-rs/**/*_migrations/*.sql text eol=lf
+# Buildifier preserves CR bytes inside multiline strings as literal escapes.
+BUILD text eol=lf
+BUILD.* text eol=lf
+WORKSPACE text eol=lf
+WORKSPACE.* text eol=lf
+MODULE.bazel text eol=lf
+*.bzl text eol=lf
+*.bzl.* text eol=lf
+*.sky text eol=lf
+*.sky.* text eol=lf
