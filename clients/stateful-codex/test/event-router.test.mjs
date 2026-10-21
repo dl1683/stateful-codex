@@ -94,9 +94,33 @@ test("replies are forwarded only from the owning thread, once", () => {
 test("request ids keep their JSON type", () => {
   const { router, toServer } = setup();
   router.route(approval(1, "thread-a"));
-  assert.equal(router.reply({ threadId: "thread-a", response: { id: "1", result: {} } }).accepted, false);
+  assert.deepEqual(router.reply({
+    threadId: "thread-a", response: { id: "1", result: { decision: "accept" } },
+  }), { accepted: false, code: "resolved", reason: "request is no longer open" });
+  assert.deepEqual(toServer, []);
   assert.equal(router.reply({ threadId: "thread-a", response: { id: 1, result: { decision: "accept" } } }).accepted, true);
   assert.deepEqual(toServer, [{ id: 1, result: { decision: "accept" } }]);
+});
+
+test("numeric and string request ids coexist and resolve independently", () => {
+  const { router, toServer } = setup();
+  router.route(approval(1, "thread-a"));
+  router.route(approval("1", "thread-a"));
+  assert.deepEqual(router.pendingSnapshot("thread-a"), snapshot("thread-a", [
+    approval(1, "thread-a"), approval("1", "thread-a"),
+  ]));
+  assert.deepEqual(router.reply({
+    threadId: "thread-a", response: { id: 1, result: { decision: "decline" } },
+  }), { accepted: true });
+  assert.deepEqual(router.pendingSnapshot("thread-a"), snapshot("thread-a", [approval("1", "thread-a")]));
+  assert.deepEqual(router.reply({
+    threadId: "thread-a", response: { id: "1", result: { decision: "accept" } },
+  }), { accepted: true });
+  assert.deepEqual(toServer, [
+    { id: 1, result: { decision: "decline" } },
+    { id: "1", result: { decision: "accept" } },
+  ]);
+  assert.deepEqual(router.pendingSnapshot("thread-a"), snapshot("thread-a", []));
 });
 
 test("a workspace subscription starts with an authoritative snapshot of its open requests", () => {

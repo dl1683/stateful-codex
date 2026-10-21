@@ -45,6 +45,7 @@ test("running gateway admits its page and refuses forged HTTP and RPC requests",
   assert.equal(page.status, 200);
   assert.doesNotMatch(page.text, /stateful-session|SESSION_TOKEN/);
   const cookie = page.headers["set-cookie"][0].split(";")[0];
+  assert.equal(cookie.split("=")[0], `stateful_session_${port}`);
   assert.match(page.headers["set-cookie"][0], /HttpOnly; SameSite=Strict/);
   assert.equal((await send("/health")).status, 403);
   assert.equal((await send("/health", { headers: { cookie: "stateful_session_" + port + "=forged" } })).status, 403);
@@ -57,6 +58,12 @@ test("running gateway admits its page and refuses forged HTTP and RPC requests",
   for (const body of [null, [], { method: "turn/start", params: [] }, { method: "project/list", params: null }]) {
     assert.equal((await post("/rpc", body)).status, 400);
   }
+  for (const extra of [{ id: 1 }, { jsonrpc: "2.0" }]) {
+    assert.equal((await post("/rpc", { method: "project/list", params: {}, ...extra })).status, 400);
+  }
+  assert.equal((await post("/rpc", {
+    method: "project/list", params: { padding: "x".repeat(1024 * 1024) },
+  })).status, 413);
   assert.equal((await post("/rpc", { method: "command/exec", params: {} })).status, 403);
   assert.deepEqual(calls, []);
   assert.equal((await post("/rpc", { method: "project/list", params: { limit: 100 } })).status, 200);
@@ -109,4 +116,24 @@ test("HTTP memory contracts preserve project and revision refusals through the g
   const first = await call("statefulMemory/read", read);
   assert.equal(first.body.result.data.find((item) => item.entryId === "fixture-rule").content,
     "Do not publish this disposable project.");
+  for (const method of ["statefulMemory/forget", "statefulMemory/correct"]) {
+    const params = { ...addition, clientActionId: `retired-${method}` };
+    // Simulate an accepted Add whose response never reached the caller.
+    const { item } = (await call("statefulMemory/add", params)).body.result;
+    const mutation = await call(method, {
+      ...binding, entryId: item.entryId, expectedRevision: item.revision,
+      ...(method.endsWith("/correct") ? { content: "Replacement words", backgroundSection: true } : {}),
+    });
+    assert.equal(mutation.status, 200);
+    const before = await call("statefulMemory/read", read);
+    const replay = await call("statefulMemory/add", params);
+    assert.equal(replay.body.error.code, -32602);
+    assert.match(replay.body.error.message, /entry is retired; nothing was restored/);
+    const after = await call("statefulMemory/read", read);
+    assert.deepEqual(after, before);
+    assert.equal(after.body.result.data.some((entry) => entry.entryId === item.entryId), false);
+    if (method.endsWith("/correct")) {
+      assert.deepEqual(after.body.result.data[0], mutation.body.result.item);
+    }
+  }
 });

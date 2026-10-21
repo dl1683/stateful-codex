@@ -39,7 +39,11 @@ export function createGatewayFixture(projectRoot) {
           const fingerprint = JSON.stringify([params.kind, params.content, params.reason]);
           const old = actions.get(params.clientActionId);
           if (old && old.fingerprint !== fingerprint) refuse("this action already added something else");
-          if (old) return { item: old.item, outcome: "alreadyDone" };
+          if (old) {
+            if (!entries.some((entry) => entry.entryId === old.item.entryId))
+              refuse("this action was already acknowledged, but its entry is retired; nothing was restored");
+            return { item: old.item, outcome: "alreadyDone" };
+          }
           const item = { entryId: `fixture-add-${revision}`, revision: 1,
             section: { rule: "userRule", note: "knowledge" }[params.kind] ?? params.kind,
             content: params.reason ? `${params.content} Reason: ${params.reason}` : params.content,

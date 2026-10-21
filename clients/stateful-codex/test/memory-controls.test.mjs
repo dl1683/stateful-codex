@@ -67,6 +67,21 @@ test("UTF-8 overflow and excerpts never submit a correction", async () => {
   assert.equal(calls.length, 1);
 });
 
+test("refreshing a complete entry into an excerpt keeps the draft without submitting", async () => {
+  const { controls, state, calls, rpc, storage } = setup();
+  await controls.refresh();
+  controls.open("e");
+  controls.drafts.edit("e", "My complete correction");
+  // The next read now exposes only an excerpt, but the original draft remains open.
+  state.memory.items[0].contentTruncated = true;
+  await controls.refresh();
+  assert.equal(state.memory.items[0].contentTruncated, true);
+  await assert.rejects(controls.correct("e"), /Read the complete entry/);
+  assert.deepEqual(calls.map((call) => call.method), ["statefulMemory/read", "statefulMemory/read"]);
+  const reloaded = createMemoryControls({ state, rpc, storage });
+  assert.deepEqual(reloaded.drafts.correction("e"), { baseRevision: 2, content: "My complete correction" });
+});
+
 test("typing during a delayed correction survives the save and reload", async () => {
   const { state, controls, storage } = setup();
   await controls.refresh();

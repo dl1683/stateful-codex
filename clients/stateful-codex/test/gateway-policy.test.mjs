@@ -97,11 +97,15 @@ test("API calls must be same-origin, carry the session cookie, and POSTs the pag
 });
 
 test("the session cookie is HttpOnly, same-site and named for its gateway", () => {
-  assert.equal(
-    sessionCookie(PORT, TOKEN),
-    `stateful_session_${PORT}=${TOKEN}; HttpOnly; SameSite=Strict; Path=/`,
-  );
-  assert.equal(hasSessionCookie({ cookie: sessionCookie(PORT, TOKEN).split(";")[0] }, PORT, TOKEN), true);
+  for (const port of [PORT, PORT + 1]) {
+    assert.equal(
+      sessionCookie(port, TOKEN),
+      `stateful_session_${port}=${TOKEN}; HttpOnly; SameSite=Strict; Path=/`,
+    );
+    const headers = { cookie: sessionCookie(port, TOKEN).split(";")[0] };
+    assert.equal(hasSessionCookie(headers, port, TOKEN), true);
+    assert.equal(hasSessionCookie(headers, port + 1, TOKEN), false);
+  }
 });
 
 test("execution methods accept exactly the parameters the page sends", () => {
