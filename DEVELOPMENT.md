@@ -2,6 +2,8 @@
 
 Start at the [reading map](./README.md#reading-map). These instructions describe
 source baseline `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`, 2026-10-20.
+Verification resumed 2026-10-21 at the test/fixture review-fix pin recorded in
+[current state](./STATEFUL_CODEX_CURRENT_STATE.md).
 Do not confuse the workspace package version, `0.159.2`, with a tested release.
 
 ## Tools and platform evidence
@@ -20,7 +22,8 @@ Do not confuse the workspace package version, `0.159.2`, with a tested release.
 
 **Windows native:** tool discovery, Cargo metadata, web tests and launcher tests
 verified. Visual Studio 2022 Build Tools with x64/x86 C++ tooling was detected.
-**Native build/run UNVERIFIED**, resource gate refused the cold build.
+**Native build FAILED** at the pinned V8 artifact download (HTTP 404);
+**native run UNVERIFIED**. The earlier resource refusal is historical.
 **WSL2/Linux/macOS: UNVERIFIED** here. Earlier component witness documents are
 historical evidence, not verification of these newcomer instructions.
 
@@ -43,9 +46,11 @@ dependency-free client. Do not change dependency locks merely to run its tests.
 ## Before any Rust build or Rust test
 
 Coordinate **one build-producing command machine-wide**, not one per checkout.
-Use two Cargo build jobs. Keep **more than 20 GiB free RAM** throughout the
-operation, with extra headroom for the compiler/linker. In this pass a 4 GiB
-cold-build reserve was required above that floor: 20.11 GiB free was insufficient.
+Use one Cargo build job. The resumed documentation task requires **more than
+12 GiB free RAM** throughout the operation, with extra headroom for the
+compiler/linker. Its admission check reserves another 4 GiB before starting.
+The earlier documentation pass used a stricter 20 GiB floor and refused a
+cold build at 20.11 GiB free; that is historical, not the current task's gate.
 B0 has an additional historical command-specific 23,221,225,472-byte admission
 gate; it is not a replacement for current resource inspection.
 
@@ -56,21 +61,23 @@ requires separate owner approval and is prohibited for this documentation task.
 
 ## Build both binaries
 
-These are source-checked commands, **execution UNVERIFIED** here:
+The Windows command was executed with one job in VS Developer PowerShell and
+**failed** because the required V8 archive is unavailable. It produced no paired
+CLI/companion. WSL/Linux/macOS execution remains **UNVERIFIED**:
 
 ```powershell
 # From the repository root, in a VS Developer PowerShell on Windows:
 cd codex-rs
-$env:CARGO_BUILD_JOBS = "2"
-cargo build --locked -j 2 -p codex-cli -p codex-code-mode-host
+$env:CARGO_BUILD_JOBS = "1"
+cargo build --locked -j 1 -p codex-cli -p codex-code-mode-host
 cd ..
 ```
 
 ```bash
 # WSL/Linux/macOS, UNVERIFIED:
 cd codex-rs
-export CARGO_BUILD_JOBS=2
-cargo build --locked -j 2 -p codex-cli -p codex-code-mode-host
+export CARGO_BUILD_JOBS=1
+cargo build --locked -j 1 -p codex-cli -p codex-code-mode-host
 cd ..
 ```
 
@@ -84,7 +91,7 @@ pair. The Python launcher has no equivalent binary-path override.
 Optional neutral reader, **UNVERIFIED build**:
 
 ```text
-cargo build --locked -j 2 -p codex-stateful-memory
+cargo build --locked -j 1 -p codex-stateful-memory
 ```
 
 Run that command inside `codex-rs`. Its executable is `stateful-memory[.exe]`,
@@ -105,6 +112,13 @@ not `codex-stateful-memory`.
   platform-specific prebuilt V8 archive; Cargo cache availability alone does
   not prove that archive is available. Do not disable the sandbox or substitute
   another V8 version to make a build pass.
+- The Windows attempt requested
+  `rusty_v8_ptrcomp_sandbox_release_x86_64-pc-windows-msvc.lib.gz`.
+  That exact v150.4.0 release asset returns **HTTP 404**; release metadata lists
+  Windows non-sandbox/SIMDUTF variants, not this required variant. The downloader
+  also selected a Microsoft Store `python3` alias; use an actual Python
+  executable via `PYTHON` if needed, but that cannot fix a missing archive.
+  No sandbox weakening, dependency replacement or V8 source build was attempted.
 - Toolchain/version, proxy/certificate access and native artifact availability
   must be recorded with any build result. Offline appliance readiness is held.
 
@@ -139,7 +153,8 @@ selection. Never copy private homes into a repository or PR.
 | --- | --- |
 | Missing code-mode host | Build/install the companion beside the selected CLI. Inspect `CODEX_BIN`; do not accidentally run released upstream Codex. |
 | Rust lock wait or memory pressure | Ask the build-slot owner; wait. Do not kill Rust, delete caches, or start a second build. |
-| V8 archive download fails | Record the exact failed artifact/target; check trusted network/proxy and cache access. Native build remains UNVERIFIED. |
+| V8 archive download fails | Record the build failure and exact artifact/target; check trusted network/proxy and cache access. Native execution remains UNVERIFIED. |
+| V8 invokes the Microsoft Store Python alias | Set `PYTHON` to an absolute working Python executable in the build shell. Check the archive separately; the observed 404 still blocks this Windows build. |
 | Store migration/checksum refusal | Preserve the store and error. Use a fresh disposable home; never edit checksums, delete databases or rebuild valuable history. |
 | No project memory in browser | Verify home routing before gateway startup. Selecting a project in the page does not relocate the app-server home. |
 | Login required | Gateway forces ChatGPT login in the selected home. A separate disposable home does not inherit your ordinary login. |

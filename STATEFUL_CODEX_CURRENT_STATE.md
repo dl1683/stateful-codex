@@ -1,10 +1,11 @@
 # Stateful Codex current state
 
-Updated **2026-10-20** for the standalone canonical `main`.
+Updated **2026-10-21** for the standalone canonical `main`.
 Runtime source baseline:
 **`997007527c5bb1d03c4d6b67cd5f8786b37b3e17`**.
-This documentation series changes no runtime behavior; later independent
-P3b/P3c review fixes, if any, need their own source and verification pins.
+Review-fix pin:
+**`b8d095182c703849c1371b35f9232d2cd4867d78`**.
+The follow-up changes tests and the disposable fixture, not production runtime.
 Start with the [README reading map](./README.md#reading-map).
 
 ## What is current
@@ -32,18 +33,21 @@ See [architecture](./ARCHITECTURE.md) and
 | --- | --- |
 | Source baseline | `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`; package metadata `0.159.2` |
 | Toolchain | Pinned Rust 1.95.0; observed Node 22.19.0, pnpm 10.34.5, Python 3.13.7, just 1.57.0 |
-| Web suite | Windows **128/128 PASS**, including fixture-module discovery, no skipped tests |
+| Web suite | Windows **132/132 PASS** at the review-fix pin, including fixture-module discovery, no skipped tests; six individual guard-removal mutations detected |
 | Launcher tests | Windows **10/10 PASS**, disposable/mocked launches, not model turns |
 | Gateway walkthrough | Production HTTP handler with disposable synthetic bridge; not native storage qualification |
-| Native CLI/companion | **UNVERIFIED**; no paired artifacts present, cold-build resource gate blocked |
+| Native CLI/companion | One-job Windows build **FAILED** at missing V8 sandbox archive (HTTP 404); no paired artifacts produced |
 | Native login/model/memory/cold restart | **UNVERIFIED**; not inferred from fixture results or a different installed binary |
 | Rust scoped tests | Recipe/source checked, **execution UNVERIFIED** in this pass |
 | WSL/Linux/macOS newcomer instructions | **UNVERIFIED** in this pass |
 | Independent clean-clone follow | **Outstanding**; author checks are not fresh cross-engine review |
 
-At build admission, free RAM was 20.11 GiB. The project requires more than
-20 GiB free throughout builds; a 4 GiB cold-build reserve above that floor was
-unavailable. No Rust process was launched or killed to force this gate.
+The earlier pass refused a build at 20.11 GiB free under its stricter gate.
+The resumed task uses a 12 GiB floor plus a 4 GiB admission reserve, one build
+slot and one Cargo job. It admitted the Windows build at about 32 GiB free;
+later observations were 29.79 and 24.61 GiB. The V8 build script failed
+downloading the exact pinned sandbox archive; a separate request confirmed
+HTTP 404. No Rust process was killed and no sandbox/dependency workaround used.
 See [development](./DEVELOPMENT.md) and [testing](./TESTING.md).
 
 ## Consolidation landings
@@ -57,6 +61,7 @@ See [development](./DEVELOPMENT.md) and [testing](./TESTING.md).
 | `8e3747b1120b3c4a5a9ad644f670b0522b5a113b` | Direct memory controls/excerpt guard and default-port repair |
 | `37ea0d07d9a26fbb11d34a30d1fd1559e86638b3` | Add actions, paging and refresh/save reconciliation |
 | `997007527c5bb1d03c4d6b67cd5f8786b37b3e17` | Malformed restored-draft repair, HTTP memory contracts and client guidance |
+| `b8d095182c703849c1371b35f9232d2cd4867d78` | Review regressions for port cookies, HTTP envelopes/body limits, typed IDs and submission-time excerpts; fixture refuses retired/superseded Add retries and retains lost-response drafts |
 
 The [consolidation ledger](./STATEFUL_CODEX_CONSOLIDATION.md) maps source OIDs
 and archive tags to these selective landings. Item6 indexing/attribution remains

@@ -11,11 +11,17 @@ npm --prefix clients/stateful-codex test
 python -m unittest discover -s scripts -p test_scodex.py -v
 ```
 
-Windows/Node 22.19.0: **128/128 PASS**. Python 3.13.7: **10/10 PASS**.
-Node's count includes discovered fixture modules; it is not 128 independent
+Windows/Node 22.19.0: **132/132 PASS** at review-fix pin
+`b8d095182c703849c1371b35f9232d2cd4867d78`, 2026-10-21.
+Python 3.13.7: **10/10 PASS**.
+Node's count includes discovered fixture modules; it is not 132 independent
 product assertions. Tests include real loopback HTTP listeners with fixture
 bridges, gateway refusals, memory contracts, paging and draft reconciliation.
 They do not qualify native writes, models or a production store.
+The review follow-up detects six individual guard-removal mutations: cookie
+name, extra envelope keys, the 1 MiB body limit, typed IDs, submission-time
+excerpts and retired Add actions. HTTP/controller checks also preserve lost
+Add-response drafts when a later Forget or correction retires their entry.
 Python's command is `python3` on Unix, **UNVERIFIED here**.
 
 For a disposable manual web check:
@@ -31,7 +37,9 @@ The runner starts a fixture-backed production gateway, not a native app-server.
 
 The [justfile](./justfile) selects nextest's `local` profile, 8 MiB Rust stack
 and `--no-fail-fast`. These recipe expansions were checked with `--dry-run`;
-they were **not executed** because the cold-build RAM reserve was unavailable.
+they were **not executed**. The earlier cold-build reserve was unavailable;
+the resumed paired-binary build failed at its required V8 download (HTTP 404).
+No Rust source changed, so these crate suites were not needed for the review fix.
 Run only the package(s) affected by your change:
 
 ```text
@@ -45,10 +53,11 @@ just test -p codex-app-server
 just test -p codex-tui
 ```
 
-Do not run all these merely because they are listed. Set `CARGO_BUILD_JOBS=2`
-in the shell, reserve the single build slot and keep free RAM above 20 GiB
-with compiler/linker reserve. Never kill Rust processes or work around a Cargo
-lock by launching another build. Avoid routine `--all-features`.
+Do not run all these merely because they are listed. Set `CARGO_BUILD_JOBS=1`
+in the shell, reserve the single build slot and keep free RAM above 12 GiB
+with the additional admission reserve in development. Never kill Rust processes
+or work around a Cargo lock by launching another build. Avoid routine
+`--all-features`.
 
 After scoped checks pass, changes in common/core/protocol normally require the
 complete `just test`, **only with separate explicit owner approval**.

@@ -47,17 +47,18 @@ At the documentation baseline `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`:
 | --- | --- |
 | Landed | Project hierarchy, blackboards, context maps, bounded memory/context reads and direct add/correct/Forget controls. |
 | Landed | Project-local native storage through `scripts/scodex.py`; direct native/web startup needs explicit home routing. This is not one physical database. |
-| Landed | Loopback gateway Host/Origin/cookie protection, typed replies, memory paging and revision-keyed drafts. Windows web tests pass 128/128; fixtures do not prove native behavior. |
+| Landed | Loopback gateway Host/Origin/cookie protection, typed replies, memory paging and revision-keyed drafts. Windows web tests pass 132/132; fixtures do not prove native behavior. |
 | Landed | Ask without a run; autonomous, collaborative and socratic Work modes. Work completion reliability remains limited. |
 | Inactive | Canonical `memory.sqlite` domain components and offline capsule experiments. Source presence does not activate native cutover. |
 | Held | Exact historical recall after repeated compaction, packet restoration, foreign-agent writes, populated migration 59/60 upgrades, broader Work/installation activation and HAL/offline acceptance. |
 | Rejected | Regex confirmation as user authorization, automatic authority promotion, unsafe foreign Host writes, and merging the failing compaction stack behind a disabled flag. |
 
-**Verification, 2026-10-20:** Windows/Node 22.19.0 web tests and ten launcher
-tests pass. Native CLI/companion build, login/model turns and native memory
-walkthrough are **UNVERIFIED**: no paired artifacts were present and the cold
-build lacked RAM reserve above the required 20 GiB free floor. WSL, macOS and
-Linux instructions are **UNVERIFIED** in this documentation pass. The runnable
+**Verification, 2026-10-21:** Windows/Node 22.19.0 web tests pass **132/132**
+at review-fix pin `b8d095182c703849c1371b35f9232d2cd4867d78`; ten launcher
+tests pass. The one-job native build **failed** downloading its required Windows
+V8 sandbox archive (HTTP 404). No paired binaries were produced; login/model
+turns and native memory remain **UNVERIFIED**. WSL, macOS and Linux instructions
+are **UNVERIFIED** in this documentation pass. The runnable
 [fixture quickstart](#verified-web-only-check) needs no account or Rust build.
 Do not interpret historical results below as measurements of today's checkout.
 
@@ -305,7 +306,7 @@ From the repository root in PowerShell:
 
 ```powershell
 cd codex-rs
-cargo build --locked -j 2 -p codex-cli -p codex-code-mode-host
+cargo build --locked -j 1 -p codex-cli -p codex-code-mode-host
 cd ..
 $repo = (Get-Location).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("stateful-intro-" + [guid]::NewGuid())

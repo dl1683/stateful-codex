@@ -6,8 +6,12 @@ Run commands below from the repository root.
 See the root [reading map](../../README.md#reading-map), [development](../../DEVELOPMENT.md)
 and [configuration](../../CONFIGURATION.md) guides first.
 Baseline: `997007527c5bb1d03c4d6b67cd5f8786b37b3e17`, 2026-10-20.
-Windows web suite: **128/128 PASS**. Launcher tests: **10/10 PASS**.
+Review-fix pin: `b8d095182c703849c1371b35f9232d2cd4867d78`, 2026-10-21.
+Windows web suite: **132/132 PASS**. Launcher tests: **10/10 PASS**.
 Native pairing/login/memory and WSL/Linux/macOS: **UNVERIFIED** in this pass.
+The Windows one-job paired build was attempted but **failed** at the pinned V8
+sandbox archive download (HTTP 404). See [development](../../DEVELOPMENT.md);
+the runnable fixture check below does not need that archive or native binaries.
 
 ## Native startup, UNVERIFIED
 
@@ -16,7 +20,7 @@ the single build slot and RAM headroom described in development:
 
 ```powershell
 cd codex-rs
-cargo build --locked -j 2 -p codex-cli -p codex-code-mode-host
+cargo build --locked -j 1 -p codex-cli -p codex-code-mode-host
 cd ..
 $env:CODEX_BIN = (Resolve-Path .\codex-rs\target\debug\codex.exe).Path
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("stateful-web-" + [guid]::NewGuid())
@@ -108,6 +112,8 @@ In a workspace, scroll to **Project memory**:
 - Repeat with a harmless **rule**, then Forget it. **Add** also supports
   background and decisions (with optional reason).
   Retrying unchanged words keeps one action ID. Changing words starts a new action.
+  If a lost Add response is retried after that entry was forgotten or corrected,
+  the retry refuses and keeps the draft; it never restores the retired entry.
 - **Show more** follows the cursor. Refresh re-reads the pages already opened.
   If memory changes between pages, the client starts again instead of skipping entries.
 
