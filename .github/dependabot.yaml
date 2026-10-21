@@ -3,12 +3,14 @@
 version: 2
 updates:
   - package-ecosystem: bun
+    open-pull-requests-limit: 0
     directory: .github/actions/codex
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
   - package-ecosystem: cargo
+    open-pull-requests-limit: 0
     directories:
       - codex-rs
       - codex-rs/*
@@ -17,18 +19,21 @@ updates:
     cooldown:
       default-days: 7
   - package-ecosystem: docker
+    open-pull-requests-limit: 0
     directory: codex-cli
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
   - package-ecosystem: github-actions
+    open-pull-requests-limit: 0
     directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
   - package-ecosystem: rust-toolchain
+    open-pull-requests-limit: 0
     directory: codex-rs
     schedule:
       interval: weekly
