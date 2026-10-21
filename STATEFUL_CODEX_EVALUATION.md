@@ -1750,3 +1750,72 @@ Elapsed-timer/post-harvest crossing remain unforced; current-thread scheduler
 tests do not qualify OS pipes/processes, descendants or production integration.
 All guard/controller/launcher/model/compaction/installation/release holds remain.
 Evidence:`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_pumps_20261018/`.
+
+## SC-REBUILD-20261020-CONTINUATION-SCOPE
+
+No new user-visible capability is qualified or released. Two fresh real Droid
+sessions checked the next-action boundary, not the unchanged implementation.
+The proposer found no new active-compaction defect to repair. The critic
+returned REVISE for an overbroad stop; its narrower direction is adopted:
+correction/Forget may qualify independently, and the separate upstream
+executor may reassess B0 without inheriting compaction's access hold.
+
+The existing source-approved correction and capture/provenance/root-request
+changes remain unlanded. R1's source approval is retained; its independent
+execution attempt remains NOT ACCEPTED. The original controller result remains
+23 total / 8 PASS / 15 ERROR / exit 1, and failed normal Rust suites are not
+regraded. No new product source, build, test, fix/fmt, native artifact access,
+launcher journey, installation or push occurred here. No denied operation was
+retried, and no shell, identity, policy, backend or fixture workaround was used.
+
+Own worktree starts from main0a5fbb5a30; ff-main was already current.
+Inventory records75branches/2775pairs/maxbehind1319historical. Upstream
+HEAD/status/all seven dirty-file hashes match retained custody. RAM observations
+varied from25,182,896,128 to20,716,576,768bytes; the latter is below B0's historical
+23,221,225,472-byte command gate. Neither observation is build admission.
+The merge executor retains exclusive upstream custody.
+
+Qualification needs its prescribed operations in an actually supported
+independent context, not another copy of already reviewed code. That is an
+operation-specific prerequisite, not a blanket stop or a new approval ladder.
+All restoration/recall, foreign-write/live-upgrade, ordinary/Work/PartB,
+migration59/60, matched216, original placementEXIT1 and HAL holds remain.
+Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/continuity_20261020/`.
+
+## SC-CONSOLIDATION-20261020-ARCHIVED-COMPACTION-AND-B0
+
+Consolidation imports only the operation-scoped continuity accounting above,
+not the held implementation. Historical, annotated `archive/20261020/` tags
+are available locally in the standalone checkout; they are recovery references,
+not development branches, published archives or release qualification.
+The complete compaction graph is retained at
+`archive/20261020/heads/rebuild/active-compaction-20261018` (`e1db7324a6`).
+Its component tips remain under the same `heads/` namespace as
+`rebuild/primary-integration-20261017`, `rebuild/compaction-provenance-20261017`,
+`rebuild/disposable-child-guard-20261017` and `rebuild/exact-correction-20261017`.
+The imported continuity source is
+`archive/20261020/heads/rebuild/compaction-continuity-20261020` (`4a2c965c507e`).
+B0/upstream history is retained at
+`archive/20261020/heads/sync/upstream-20261015` (`04a51b086571`).
+The later dirty compaction evaluation append and all seven dirty upstream
+files remain in the private consolidation backup, not in those tag trees.
+
+The archived active-compaction qualification has four failed normal suites:
+CLI 459 PASS / 8 FAIL / 2 runner skips; app-server 1845 PASS / 46 FAIL /
+18 TIMEOUT / 11 runner skips; stateful-extension 337 PASS / 2 FAIL /
+1 TIMEOUT / 0 runner skips; core 4292 PASS / 26 FAIL / 77 runner skips.
+Each exited 1. Guard early returns and flaky passes retain their original
+qualifications; the earlier broader-memory failure is not superseded.
+The original controller remains **23 total / 8 PASS / 15 ERROR / exit 1**.
+No result is rerun, waived or regraded by archival.
+
+The preserved later append records a full review returning REVISE with P1 R1,
+then controller-only source APPROVE, **RELEASE NO**. Independent execution
+remains NOT ACCEPTED; synthetic results are not native qualification.
+Compaction release remains HELD. B0 remains separate and unqualified;
+correction/Forget and B0 may be assessed only within their own prerequisites,
+without inheriting an unrelated operation's access hold. All existing recall/
+restoration, foreign-write/live-upgrade, ordinary/Work/PartB, migration59/60,
+matched216, original placement EXIT1 and HAL/customer/offline/capacity holds
+remain. This documentation-only consolidation adds no product qualification,
+build, runtime test, installation or publication.
