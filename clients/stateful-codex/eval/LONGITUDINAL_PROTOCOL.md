@@ -2,9 +2,10 @@
 
 > **Historical (September 2026).** This six-project longitudinal protocol froze
 > how the September evidence was collected. It does not govern current
-> acceptance: the current build steps and their acceptance checks are in the
-> [master build plan](../../../STATEFUL_CODEX_MASTER_PLAN.md). The commands and
-> scripts below remain usable for reproduction and new runs.
+> acceptance: current status and work boundaries are in the
+> [roadmap](../../../STATEFUL_CODEX_ROADMAP.md); build and check instructions
+> are in [development](../../../DEVELOPMENT.md) and [testing](../../../TESTING.md).
+> The commands and scripts below remain usable for reproduction and new runs.
 
 This protocol measures whether durable project intelligence improves work over
 time. It is not a search for five favorable demos. The product-intent document

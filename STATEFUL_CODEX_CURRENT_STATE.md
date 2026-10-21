@@ -44,8 +44,10 @@ See [architecture](./ARCHITECTURE.md) and
 | Independent clean-clone follow | Earlier review **FAIL** retained; repaired native/formatting route author-verified, independent re-review outstanding |
 
 The earlier pass refused a build at 20.11 GiB free under its stricter gate.
-The current task uses a 12 GiB floor plus a 4 GiB admission reserve, one build
-slot and one Cargo job. The earlier default-publisher V8 failure remains a
+The recorded native verification used a 12 GiB floor plus a 4 GiB admission
+reserve, one build at a time and one Cargo job; these were that run's resource
+limits, not an internal reservation requirement for contributors on their own
+machines. The earlier default-publisher V8 failure remains a
 failure. The fresh Windows build used the already-pinned CI publisher's matching
 archive **and binding**, not a dependency or sandbox change. It completed in
 about 60 minutes with sampled minimum free RAM **17.87 GiB** (two-second

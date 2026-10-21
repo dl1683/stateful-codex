@@ -1,4 +1,4 @@
-> Archived on 2026-10-12 from STATEFUL_CODEX_MASTER_PLAN.md and STATEFUL_CODEX_CURRENT_STATE.md during the entropy pass; not authoritative. The current build order is in [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md) and the current snapshot in [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md).
+> Archived on 2026-10-12 from the historical STATEFUL_CODEX_MASTER_PLAN.md and STATEFUL_CODEX_CURRENT_STATE.md during the entropy pass; not authoritative. Current inventory and work boundaries are in the [roadmap](./STATEFUL_CODEX_ROADMAP.md), the current snapshot in [current state](./STATEFUL_CODEX_CURRENT_STATE.md), and governing decisions in [decisions](./STATEFUL_CODEX_DECISIONS.md).
 
 > **Archived historical record, not current operating instructions.**
 > Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.

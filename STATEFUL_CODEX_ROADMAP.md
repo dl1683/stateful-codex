@@ -82,7 +82,7 @@ Inventory totals: **14 implemented slices, 90 held, 4 archived, 1 rejected,
 | R59 | Resume/fork/cross-surface continuity | Held | [Evaluation][EVAL]; existing partial fixes do not qualify all routes. |
 | R60 | Browser isolation/Host/Origin/auth | Implemented | [Gateway policy][GATEWAY], [event router][ROUTER]; selected security slice, native multi-session journey unverified. |
 | R61 | Hierarchy paging/large-tree/responsive UI | Held | [Client][CLIENT]; no 21k-node qualification or broad redesign claim. |
-| R62 | Matched packages/first use/model/goal diagnostics | Held | [Development][DEV] records pairing and blocked native build; release/Windows guarantees incomplete. |
+| R62 | Matched packages/first use/model/goal diagnostics | Held | [Development's verified Windows build/startup](./DEVELOPMENT.md#verified-windows-build-and-startup-2026-10-21) records paired build/startup passing with verified V8 overrides; independent clean-clone qualification and login/model/memory acceptance remain separate. |
 | R63 | Images/modality-aware evidence | Implemented | [Evaluation][EVAL] records exec-image slice; original-document verification remains partial. |
 | R64 | Project versus personal/global memory | Held | [Configuration][CONFIG] distinguishes pipelines; comprehensive retention boundaries unqualified. |
 | R65 | Durable versus ephemeral retention | Held | [Configuration][CONFIG]; no universal non-retention/cold-restart guarantee. |

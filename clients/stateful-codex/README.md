@@ -16,8 +16,10 @@ The runnable fixture check below needs no Rust build or native binaries.
 
 ## Native startup, UNVERIFIED
 
-Build the CLI and its companion from the **same checkout**, after reserving
-the single build slot and RAM headroom described in development. On Windows,
+Build the CLI and its companion from the **same checkout**, after following
+[development's process and resource checks](../../DEVELOPMENT.md#before-any-rust-build-or-rust-test).
+On your own machine, wait for existing Cargo/rustc builds; only on a shared
+maintainer machine, coordinate with its other users. On Windows,
 first complete the [V8 archive and binding recipe](../../DEVELOPMENT.md#windows-v8-archive-and-binding)
 in the same VS Developer PowerShell; the default Deno URL returns 404:
 

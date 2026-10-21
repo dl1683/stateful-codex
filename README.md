@@ -6,7 +6,7 @@
 
 **Memory and continuity across sessions for Codex: one harness that remembers what your project has learned.**
 
-[Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md) · [Evaluation record](./STATEFUL_CODEX_EVALUATION.md) · [Master plan](./STATEFUL_CODEX_MASTER_PLAN.md) · [Current state](./STATEFUL_CODEX_CURRENT_STATE.md) · [Web client](./clients/stateful-codex)
+[Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md) · [Evaluation record](./STATEFUL_CODEX_EVALUATION.md) · [Archived master plan](./STATEFUL_CODEX_MASTER_PLAN.md) · [Current state](./STATEFUL_CODEX_CURRENT_STATE.md) · [Web client](./clients/stateful-codex)
 
 ![Research preview](https://img.shields.io/badge/status-research_preview-5eead4?style=flat-square&labelColor=0b1118)
 ![License](https://img.shields.io/badge/license-Apache--2.0-93c5fd?style=flat-square&labelColor=0b1118)
@@ -36,7 +36,7 @@ by replacing it with upstream. See [contributing](./CONTRIBUTING.md).
 | Understand holds and rejected designs | [Decisions](./STATEFUL_CODEX_DECISIONS.md) |
 | Recover historical work | [Consolidation ledger](./STATEFUL_CODEX_CONSOLIDATION.md) |
 | Read product intent and historical measurements | [Product intent](./STATEFUL_CODEX_PRODUCT_INTENT.md), [evaluation ledger](./STATEFUL_CODEX_EVALUATION.md), [evaluation history](./STATEFUL_CODEX_EVALUATION_HISTORY_2026_09_TO_10_08.md) |
-| Read earlier plans, as history rather than current instructions | [Master plan](./STATEFUL_CODEX_MASTER_PLAN.md), [memory design](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md), [plan history](./STATEFUL_CODEX_PLAN_HISTORY.md) |
+| Read earlier plans, as history rather than current instructions | [Archived master plan](./STATEFUL_CODEX_MASTER_PLAN.md), [memory design](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md), [plan history](./STATEFUL_CODEX_PLAN_HISTORY.md) |
 
 ### Capability labels
 

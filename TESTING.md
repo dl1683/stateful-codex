@@ -54,11 +54,12 @@ just test -p codex-app-server
 just test -p codex-tui
 ```
 
-Do not run all these merely because they are listed. Set `CARGO_BUILD_JOBS=1`
-in the shell, reserve the single build slot and keep free RAM above 12 GiB
-with the additional admission reserve in development. Never kill Rust processes
-or work around a Cargo lock by launching another build. Avoid routine
-`--all-features`.
+Do not run all these merely because they are listed. Follow
+[development's process and resource checks](./DEVELOPMENT.md#before-any-rust-build-or-rust-test):
+on your own machine, wait for any existing Cargo/rustc build; only on a shared
+maintainer machine, coordinate with its other users. Set `CARGO_BUILD_JOBS=1`
+if memory is limited. Never kill Rust processes or work around a Cargo lock
+by launching another build. Avoid routine `--all-features`.
 
 After scoped checks pass, changes in common/core/protocol normally require the
 complete `just test`, **only with separate explicit owner approval**.

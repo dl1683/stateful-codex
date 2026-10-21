@@ -47,24 +47,34 @@ dependency-free client. Do not change dependency locks merely to run its tests.
 
 ## Before any Rust build or Rust test
 
-Coordinate **one build-producing command machine-wide**, not one per checkout.
-Use one Cargo build job. The resumed documentation task requires **more than
-12 GiB free RAM** throughout the operation, with extra headroom for the
-compiler/linker. Its admission check reserves another 4 GiB before starting.
-The earlier documentation pass used a stricter 20 GiB floor and refused a
-cold build at 20.11 GiB free; that is historical, not the current task's gate.
-B0 has an additional historical command-specific 23,221,225,472-byte admission
-gate; it is not a replacement for current resource inspection.
+On your own machine, ensure no other Cargo/rustc build is running before
+starting. Check all checkouts, not just this one:
 
-Check available memory, disk, and the shared build-slot owner before starting.
-On a contributor-owned machine, run one build-producing command at a time and
-wait for any existing build to finish. On a shared maintainer machine, obtain the
-slot from its owner through the maintainer's queue before building. No public
-queue is supplied by this repository. If its owner/queue is unavailable, stop
-at the web fixture route. A process-list check alone is not a reservation.
-Do not kill Rust processes to release a Cargo lock. Wait for their owner; never
-delete lockfiles or target trees as a workaround. The complete test suite
-requires separate owner approval and is prohibited for this documentation task.
+```powershell
+# Windows PowerShell:
+Get-Process -Name cargo,rustc -ErrorAction SilentlyContinue | Select-Object Id, ProcessName
+```
+
+```bash
+# WSL/Linux/macOS:
+ps -A -o pid=,comm= | grep -E '(^|[[:space:]/])(cargo|rustc)$'
+```
+
+No matching rows means no Cargo/rustc process was found at that moment; the
+Unix check exits 1 when there are no matches. If a build is running, wait for it
+to finish, then check again. Run one build-producing command at a time.
+Check available RAM and disk; use `-j 1` (or `CARGO_BUILD_JOBS=1`) if memory is
+limited. The recipes below use one job conservatively.
+
+Only on a shared maintainer machine, coordinate with whoever else uses it
+before building so that one build-producing command runs machine-wide.
+A process check does not replace that shared-machine coordination. Contributors
+on their own machines do not need an internal owner, queue or reservation.
+
+Never kill Rust processes to release a Cargo lock. Wait for the existing build
+or coordinate with its owner; never delete lockfiles or target trees as a
+workaround. The complete test suite requires separate maintainer approval;
+this documentation task permits scoped checks only.
 
 ## Build both binaries
 
@@ -327,7 +337,7 @@ selection. Never copy private homes into a repository or PR.
 | Symptom | Check before changing anything |
 | --- | --- |
 | Missing code-mode host | Build/install the companion beside the selected CLI. Inspect `CODEX_BIN`; do not accidentally run released upstream Codex. |
-| Rust lock wait or memory pressure | Ask the build-slot owner; wait. Do not kill Rust, delete caches, or start a second build. |
+| Rust lock wait or memory pressure | Wait for the existing build; coordinate with other users only on a shared machine. Use one Cargo job when memory is limited. Never kill Rust, delete caches, or start a second build to bypass a lock. |
 | V8 archive download fails | Use both verified Windows archive/binding overrides above. Record exact artifact/target and any hash/network failure; never substitute a non-sandbox archive. |
 | V8 invokes the Microsoft Store Python alias | Set `PYTHON` to an absolute working Python executable. Interpreter selection does not repair the default 404; use the matched archive/binding recipe. |
 | Store migration/checksum refusal | Preserve the store and error. Use a fresh disposable home; never edit checksums, delete databases or rebuild valuable history. |

@@ -64,9 +64,11 @@ addresses in documentation examples.
 ## Ownership and review
 
 One executor owns each coherent implementation scope. Coordinate file custody
-and the **single machine-wide build slot** with other executors before writing
-or building. Existing dirty/untracked work belongs to its author, even if it
-looks temporary.
+when others are working in the same checkout. On your own machine, check for
+existing Cargo/rustc builds and wait for them to finish; only on a shared
+maintainer machine must you coordinate builds with its other users. Follow
+[development's process checks](./DEVELOPMENT.md#before-any-rust-build-or-rust-test).
+Existing dirty/untracked work belongs to its author, even if it looks temporary.
 
 The project practice is Droid design/implementation/build, followed by a
 **different fresh real Codex CLI session** for independent tests and hands-on
