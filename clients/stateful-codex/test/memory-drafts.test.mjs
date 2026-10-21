@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MAX_ENTRY_BYTES, createDrafts, fitsEntry } from "../public/memory-drafts.mjs";
+import { renderMemory } from "../public/memory-view.mjs";
 
 function memoryStorage() {
   const values = new Map();
@@ -88,4 +89,29 @@ test("drafts are separated by project and submitted snapshots do not mutate duri
     submitted, drafts.correction("entry"),
     createDrafts(storage, "thread-1", "project-2").correction("entry"),
   ], [{ baseRevision: 2, content: "old" }, { baseRevision: 2, content: "new" }, null]);
+});
+
+test("malformed restored members cannot crash rendering or discard valid drafts", () => {
+  const storage = memoryStorage();
+  storage.setItem('stateful-memory-drafts:["p","t"]', JSON.stringify({
+    corrections: {
+      broken: null, badRevision: { baseRevision: "2", content: "bad" },
+      good: { baseRevision: 3, content: "Keep all my words" },
+    },
+    addition: { kind: "rule", content: "invalid", reason: [] },
+  }));
+  const drafts = createDrafts(storage, "t", "p");
+  assert.deepEqual([drafts.corrections(), drafts.addition()], [
+    { good: { baseRevision: 3, content: "Keep all my words" } },
+    { kind: "rule", content: "", reason: "" },
+  ]);
+  assert.doesNotThrow(() => renderMemory({ memoryDrafts: drafts.corrections(), memoryAddition: drafts.addition() }));
+});
+
+test("unavailable storage and special entry ids still retain in-memory drafts", () => {
+  const storage = { getItem: () => { throw new Error("unavailable"); }, setItem: () => { throw new Error("full"); } };
+  const drafts = createDrafts(storage, "t", "p");
+  drafts.open("__proto__", 1, "My words");
+  drafts.edit("__proto__", "My edited words");
+  assert.deepEqual(drafts.correction("__proto__"), { baseRevision: 1, content: "My edited words" });
 });

@@ -15,7 +15,7 @@ export function fitsEntry(text) {
 
 export function createDrafts(storage, threadId, projectId) {
   const key = `stateful-memory-drafts:${JSON.stringify([projectId, threadId])}`;
-  let drafts = load(storage, key);
+  const drafts = load(storage, key);
 
   const save = () => {
     try {
@@ -79,15 +79,30 @@ export function createDrafts(storage, threadId, projectId) {
 }
 
 function load(storage, key) {
+  const restored = { corrections: Object.create(null), addition: emptyAddition() };
   try {
     const stored = JSON.parse(storage?.getItem(key) ?? "null");
-    if (stored && typeof stored === "object" && stored.corrections && stored.addition) {
-      return stored;
+    if (stored?.corrections && typeof stored.corrections === "object" && !Array.isArray(stored.corrections)) {
+      for (const [entryId, draft] of Object.entries(stored.corrections)) {
+        if (draft && Number.isSafeInteger(draft.baseRevision) && draft.baseRevision > 0 &&
+            typeof draft.content === "string") {
+          restored.corrections[entryId] = { baseRevision: draft.baseRevision, content: draft.content };
+        }
+      }
+    }
+    const addition = stored?.addition;
+    if (addition && ["rule", "background", "decision", "note"].includes(addition.kind) &&
+        typeof addition.content === "string" && typeof addition.reason === "string") {
+      restored.addition = { kind: addition.kind, content: addition.content, reason: addition.reason };
+      if (typeof addition.actionId === "string" && addition.actionId.trim() &&
+          new TextEncoder().encode(addition.actionId).length <= 128) {
+        restored.addition.actionId = addition.actionId;
+      }
     }
   } catch {
-    // A damaged or missing record starts empty.
+    // Unreadable storage starts empty; malformed members never hide valid saved drafts.
   }
-  return { corrections: {}, addition: emptyAddition() };
+  return restored;
 }
 
 // What an addition asks for, as the server compares it (trimmed words).

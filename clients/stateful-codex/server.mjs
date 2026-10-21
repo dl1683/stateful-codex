@@ -176,59 +176,59 @@ function codeModeHostBeside(executable) {
 export function createGateway(bridge, { sessionToken: token } = {}) {
   const sessionToken = token ?? randomBytes(24).toString("base64url");
   const server = createServer(async (request, response) => {
-  const port = server.address().port;
-  try {
-    const url = new URL(request.url ?? "/", `http://${host}:${port}`);
-    const refused = isApiPath(url.pathname)
-      ? admitApiRequest(request, port, sessionToken)
-      : admitRequest(request, port);
-    if (refused) throw new HttpError(refused.status, refused.message);
-    if (request.method === "GET" && url.pathname === "/events") {
-      return openEventStream(bridge, url, request, response);
-    }
-    if (request.method === "GET" && url.pathname === "/health") {
-      await bridge.ready;
-      return json(response, 200, { ready: true, authMode: "chatgpt" });
-    }
-    if (request.method === "POST" && url.pathname === "/rpc") {
-      const body = await readJson(request);
-      if (!isJsonObject(body) || Object.keys(body).some((key) => !["method", "params"].includes(key)))
-        throw new HttpError(400, "request body must contain only method and params");
-      const { method, params = {} } = body;
-      if (typeof method !== "string" || !method)
-        throw new HttpError(400, "method is required");
-      if (!admitRpcMethod(method))
-        throw new HttpError(403, `${method} is not available through the web gateway`);
-      const invalid = checkRpcParams(method, params);
-      if (invalid) throw new HttpError(400, invalid);
-      return json(response, 200, {
-        result: await bridge.request(method, params),
+    const port = server.address().port;
+    try {
+      const url = new URL(request.url ?? "/", `http://${host}:${port}`);
+      const refused = isApiPath(url.pathname)
+        ? admitApiRequest(request, port, sessionToken)
+        : admitRequest(request, port);
+      if (refused) throw new HttpError(refused.status, refused.message);
+      if (request.method === "GET" && url.pathname === "/events") {
+        return openEventStream(bridge, url, request, response);
+      }
+      if (request.method === "GET" && url.pathname === "/health") {
+        await bridge.ready;
+        return json(response, 200, { ready: true, authMode: "chatgpt" });
+      }
+      if (request.method === "POST" && url.pathname === "/rpc") {
+        const body = await readJson(request);
+        if (!isJsonObject(body) || Object.keys(body).some((key) => !["method", "params"].includes(key)))
+          throw new HttpError(400, "request body must contain only method and params");
+        const { method, params = {} } = body;
+        if (typeof method !== "string" || !method)
+          throw new HttpError(400, "method is required");
+        if (!admitRpcMethod(method))
+          throw new HttpError(403, `${method} is not available through the web gateway`);
+        const invalid = checkRpcParams(method, params);
+        if (invalid) throw new HttpError(400, invalid);
+        return json(response, 200, {
+          result: await bridge.request(method, params),
+        });
+      }
+      if (request.method === "POST" && url.pathname === "/reply") {
+        const envelope = await readJson(request);
+        if (!isJsonObject(envelope) || Object.keys(envelope).length !== 2 ||
+            typeof envelope.threadId !== "string" || !envelope.threadId ||
+            !isJsonObject(envelope.response) || !Object.hasOwn(envelope.response, "id"))
+          throw new HttpError(400, "reply id is required");
+        const outcome = bridge.reply(envelope);
+        return json(response, outcome.accepted ? 202 : outcome.code === "invalid" ? 400 : 409, outcome);
+      }
+      if (request.method === "GET") {
+        await serveStatic(url.pathname, response, port, sessionToken);
+        return;
+      }
+      throw new HttpError(404, "not found");
+    } catch (error) {
+      const statusCode = error instanceof HttpError ? error.statusCode : 500;
+      json(response, statusCode, {
+        error: {
+          message: error.message,
+          code: error.code ?? null,
+          data: error.data ?? null,
+        },
       });
     }
-    if (request.method === "POST" && url.pathname === "/reply") {
-      const envelope = await readJson(request);
-      if (!isJsonObject(envelope) || Object.keys(envelope).length !== 2 ||
-          typeof envelope.threadId !== "string" || !envelope.threadId ||
-          !isJsonObject(envelope.response) || !Object.hasOwn(envelope.response, "id"))
-        throw new HttpError(400, "reply id is required");
-      const outcome = bridge.reply(envelope);
-      return json(response, outcome.accepted ? 202 : outcome.code === "invalid" ? 400 : 409, outcome);
-    }
-    if (request.method === "GET") {
-      await serveStatic(url.pathname, response, port, sessionToken);
-      return;
-    }
-    throw new HttpError(404, "not found");
-  } catch (error) {
-    const statusCode = error instanceof HttpError ? error.statusCode : 500;
-    json(response, statusCode, {
-      error: {
-        message: error.message,
-        code: error.code ?? null,
-        data: error.data ?? null,
-      },
-    });
-  }
   });
   return server;
 }

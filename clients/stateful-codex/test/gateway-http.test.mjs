@@ -5,6 +5,7 @@ import test from "node:test";
 
 import { EventRouter } from "../event-router.mjs";
 import { createGateway } from "../server.mjs";
+import { createGatewayFixture } from "./gateway-fixture.mjs";
 
 test("running gateway admits its page and refuses forged HTTP and RPC requests", async (t) => {
   const calls = [];
@@ -67,4 +68,45 @@ test("running gateway admits its page and refuses forged HTTP and RPC requests",
   assert.equal((await post("/reply", { threadId: "t", response: { id: 9, result: { decision: "decline" } } })).status, 202);
   assert.deepEqual(replies, [{ id: 9, result: { decision: "decline" } }]);
   assert.equal((await send("/events?token=forged")).status, 403);
+});
+
+test("HTTP memory contracts preserve project and revision refusals through the gateway", async (t) => {
+  const server = createGateway(createGatewayFixture("C:/disposable/gateway-project"));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = await fetch(origin);
+  const cookie = page.headers.get("set-cookie").split(";")[0];
+  await page.text();
+  const call = async (method, params) => {
+    const response = await fetch(`${origin}/rpc`, {
+      method: "POST", headers: { cookie, origin, "content-type": "application/json" },
+      body: JSON.stringify({ method, params }),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const binding = { threadId: "fixture-thread", expectedProjectId: "fixture-project" };
+  const read = { ...binding, cursor: null, limit: 50, backgroundSection: true };
+  assert.equal((await call("statefulMemory/read", read)).body.result.projectId, "fixture-project");
+  for (const method of ["statefulMemory/forget", "statefulMemory/correct"]) {
+    const params = { ...binding, entryId: "fixture-rule", expectedRevision: 1,
+      ...(method.endsWith("/correct") ? { content: "New words", backgroundSection: true } : {}) };
+    const foreign = await call(method, { ...params, expectedProjectId: "other-project" });
+    assert.equal(foreign.body.error.code, -32602);
+    assert.match(foreign.body.error.message, /wrong project/);
+    const stale = await call(method, { ...params, expectedRevision: 99 });
+    assert.equal(stale.body.error.code, -32602);
+    assert.match(stale.body.error.message, /stale revision/);
+  }
+  const addition = { ...binding, kind: "background", content: "Browser user background", reason: null,
+    clientActionId: "http-addition", backgroundSection: true };
+  const added = await call("statefulMemory/add", addition);
+  assert.equal(added.body.result.item.section, "background");
+  assert.equal((await call("statefulMemory/add", addition)).body.result.outcome, "alreadyDone");
+  assert.equal((await call("statefulMemory/add", { ...addition, content: "é".repeat(1001) })).status, 400);
+  assert.equal((await call("statefulMemory/add", { ...addition, expectedProjectId: "foreign" })).body.error.code, -32602);
+  const first = await call("statefulMemory/read", read);
+  assert.equal(first.body.result.data.find((item) => item.entryId === "fixture-rule").content,
+    "Do not publish this disposable project.");
 });
