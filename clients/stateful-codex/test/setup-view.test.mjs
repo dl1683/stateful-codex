@@ -37,7 +37,7 @@ test("setup screen matches the reviewed snapshot", async () => {
     new URL("snapshots/setup.html", import.meta.url),
     "utf8",
   );
-  assert.equal(`${actual.trim()}\n`, expected);
+  assert.equal(`${actual.trim()}\n`, expected.replaceAll("\r\n", "\n"));
 });
 
 test("setup requires the cached Codex ChatGPT login", () => {

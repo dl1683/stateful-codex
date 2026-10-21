@@ -31,6 +31,21 @@ test("pages are served only to the gateway's own host names", () => {
   }
 });
 
+test("browser default-port normalization remains admissible", () => {
+  assert.equal(admitRequest({ headers: { host: "127.0.0.1", origin: "http://127.0.0.1" } }, 80), null);
+});
+
+test("memory mutations require project binding, safe revisions and whole UTF-8 text", () => {
+  const params = { threadId: "t", expectedProjectId: "p", entryId: "e", expectedRevision: 2,
+    content: "é".repeat(1000), backgroundSection: true };
+  assert.equal(checkRpcParams("statefulMemory/correct", params), null);
+  const { expectedProjectId, ...unbound } = params;
+  assert.match(checkRpcParams("statefulMemory/correct", unbound), /requires expectedProjectId/);
+  for (const patch of [{ expectedRevision: 0 }, { expectedRevision: 2 ** 53 }, { content: "é".repeat(1001) }]) {
+    assert.match(checkRpcParams("statefulMemory/correct", { ...params, ...patch }), /unsupported value/);
+  }
+});
+
 test("a foreign Origin is refused even with the right Host", () => {
   assert.deepEqual(
     admitRequest({ headers: { ...own, origin: "http://attacker.example" } }, PORT),

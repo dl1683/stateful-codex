@@ -11,7 +11,7 @@ test("workspace presents semantic progress and evidence before raw activity", as
     new URL("snapshots/workspace.html", import.meta.url),
     "utf8",
   );
-  assert.equal(`${actual.trim()}\n`, expected);
+  assert.equal(`${actual.trim()}\n`, expected.replaceAll("\r\n", "\n"));
   assert.ok(
     actual.indexOf("Current obligation") <
       actual.indexOf("Supporting activity"),

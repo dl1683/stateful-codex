@@ -22,6 +22,9 @@ export const WEB_RPC_METHODS = new Set([
   "projectIntelligence/status",
   "projectIntelligence/tree",
   "statefulMeasurement/summary",
+  "statefulMemory/correct",
+  "statefulMemory/forget",
+  "statefulMemory/read",
   "statefulRun/cancel",
   "statefulRun/pause",
   "statefulRun/read",
@@ -40,7 +43,7 @@ export const WEB_RPC_METHODS = new Set([
 
 // The Host values a browser sends when the user opens the gateway's own address.
 export function allowedHosts(port) {
-  return new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  return new Set(["127.0.0.1", "localhost"].map((host) => new URL(`http://${host}:${port}`).host));
 }
 
 export function allowedOrigins(port) {
@@ -127,6 +130,9 @@ export function admitRpcMethod(method) {
 const isString = (value) => typeof value === "string" && value.length > 0;
 const isStringList = (value) => Array.isArray(value) && value.every(isString);
 const isBoolean = (value) => typeof value === "boolean";
+const isRevision = (value) => Number.isSafeInteger(value) && value > 0;
+const isEntryText = (value) => isString(value) && value.trim().length > 0 &&
+  Buffer.byteLength(value.trim(), "utf8") <= 2000;
 // The only input the page sends: one plain text item.
 const isTextInput = (value) =>
   Array.isArray(value) &&
@@ -150,6 +156,19 @@ const EXECUTION_PARAMS = {
     excludeTurns: isBoolean,
   },
   "turn/start": { threadId: isString, input: isTextInput },
+  "statefulMemory/read": {
+    threadId: isString, expectedProjectId: isString,
+    cursor: (cursor) => cursor === null || isString(cursor),
+    limit: (limit) => Number.isInteger(limit) && limit > 0 && limit <= 100,
+    backgroundSection: isBoolean,
+  },
+  "statefulMemory/forget": {
+    threadId: isString, expectedProjectId: isString, entryId: isString, expectedRevision: isRevision,
+  },
+  "statefulMemory/correct": {
+    threadId: isString, expectedProjectId: isString, entryId: isString, expectedRevision: isRevision,
+    content: isEntryText, backgroundSection: isBoolean,
+  },
 };
 
 // Returns null when the parameters are acceptable, otherwise a message naming the problem.

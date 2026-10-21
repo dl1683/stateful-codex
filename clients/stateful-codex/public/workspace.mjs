@@ -8,6 +8,7 @@ import { reply, rpc, subscribe } from "./rpc.mjs";
 import { createRefreshGate, needsProjectRefresh } from "./refresh-policy.mjs";
 import { applyHistoryPage, applyWorkspaceEvent } from "./workspace-events.mjs";
 import { renderWorkspace } from "./workspace-view.mjs";
+import { createMemoryControls } from "./memory-controls.mjs";
 
 const projectId = sessionStorage.getItem("stateful-project");
 const threadId = sessionStorage.getItem("stateful-thread");
@@ -53,6 +54,7 @@ const state = {
 
 let refreshTimer;
 const refresh = createRefreshGate(refreshWorkspace);
+const memory = createMemoryControls({ state, rpc, storage: sessionStorage });
 
 async function boot() {
   subscribe(handleEvent, { threadId, projectId });
@@ -202,6 +204,7 @@ async function refreshWorkspace() {
       if (error.code === -32601) return { data: [] };
       throw error;
     }),
+    memory.refresh(),
   ]);
   state.project = project.project;
   state.run = run.run;
@@ -240,8 +243,27 @@ async function readHierarchy() {
 }
 
 function render() {
+  const active = document.activeElement;
+  const editor = active?.closest("form[data-memory-correct], form[data-memory-add]");
+  const focus = editor ? {
+    entryId: editor.dataset.memoryCorrect ?? "memory-add",
+    name: active.name, start: active.selectionStart, end: active.selectionEnd,
+  } : null;
+  state.memoryDrafts = memory.drafts.corrections();
   app.innerHTML = renderWorkspace(state);
+  if (focus) {
+    const form = [...app.querySelectorAll("form[data-memory-correct], form[data-memory-add]")]
+      .find((item) => (item.dataset.memoryCorrect ?? "memory-add") === focus.entryId);
+    const control = form?.elements.namedItem(focus.name);
+    control?.focus();
+    if (control?.setSelectionRange && focus.start !== null) control.setSelectionRange(focus.start, focus.end);
+  }
 }
+
+app.addEventListener("input", (event) => {
+  const form = event.target.closest("form[data-memory-correct]");
+  if (form && event.target.name === "content") memory.drafts.edit(form.dataset.memoryCorrect, event.target.value);
+});
 
 function handleEvent(message) {
   const effect = applyWorkspaceEvent(state, message);
@@ -256,6 +278,11 @@ app.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.target;
   try {
+    if (form.dataset.memoryCorrect) {
+      await action("Saving correction", () => memory.correct(form.dataset.memoryCorrect));
+      await refresh();
+      return;
+    }
     if (form.id === "steering-form") {
       const input = new FormData(form).get("steering")?.toString().trim();
       if (!input) return;
@@ -311,6 +338,19 @@ app.addEventListener("click", async (event) => {
   if (!button) return;
   try {
     switch (button.dataset.action) {
+      case "memory-correct":
+        memory.open(button.dataset.entryId);
+        render();
+        break;
+      case "memory-cancel":
+        memory.drafts.close(button.dataset.entryId);
+        render();
+        break;
+      case "memory-forget":
+        await action("Forgetting memory", () =>
+          memory.forget(button.dataset.entryId, Number(button.dataset.revision)));
+        await refresh();
+        break;
       case "refresh":
         await action("Refreshing workspace", refresh);
         break;

@@ -102,4 +102,3 @@ function request(addition) {
 function emptyAddition() {
   return { kind: "rule", content: "", reason: "" };
 }
-

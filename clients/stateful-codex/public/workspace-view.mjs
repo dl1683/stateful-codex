@@ -1,3 +1,5 @@
+import { renderMemory } from "./memory-view.mjs";
+
 const packetSections = [
   ["examined", "Examined"],
   ["rationale", "Why it matters"],
@@ -44,6 +46,7 @@ export function renderWorkspace(state) {
           ${state.ask ? "" : renderSteering(state)}
         </aside>
         <section class="findings-work">
+          ${renderMemory(state)}
           ${renderFindings(state)}
         </section>
       </div>
