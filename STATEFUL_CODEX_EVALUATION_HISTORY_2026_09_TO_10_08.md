@@ -1,5 +1,11 @@
 > Archived on 2026-10-12 from STATEFUL_CODEX_EVALUATION.md (its lines 91-2936, SC-EVAL-001 to SC-EVAL-037 and the unnumbered records between them), moved verbatim; the index, the evaluation method and SC-EVAL-038 onward stay in [`STATEFUL_CODEX_EVALUATION.md`](./STATEFUL_CODEX_EVALUATION.md).
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 # Stateful Codex evaluation record, history 2026-09-21 to 2026-10-08
 
 ## SC-EVAL-001: trivial exact directory inventory (2026-09-21)
@@ -1719,7 +1725,7 @@ both trials the agent completed, but the official verifier's own setup attempted
 to install `curl` from stale Debian Bullseye security-mirror package URLs.
 Downloads for `libnghttp2-14`, `libcurl4`, and `curl` returned HTTP 404. The
 verifier then had no `curl`, could not install `uv`, had no
-`/root/.local/bin/env`, and had no `uvx`; no substantive task assertion ran.
+`<container-home>/.local/bin/env`, and had no `uvx`; no substantive task assertion ran.
 These verifier-prerequisite failures remain documented and consume no valid
 trial slot. The adapter's earlier CA-package fix did work: both agents ran, so
 this was a separate downstream failure.
@@ -2062,7 +2068,7 @@ those two controls and remain labelled accordingly.
 
 Status: completed on 2026-09-24. All 20 turns and the blind grading (two rounds) are finished.
 
-This was a qualitative probe requested by Devansh, not a protocol-valid longitudinal result. It used one project, one grader, and n=10.
+This was a qualitative probe requested by the owner, not a protocol-valid longitudinal result. It used one project, one grader, and n=10.
 
 **Scope (added 2026-09-27):** this is the *one continuous thread* regime, where ordinary Codex's own conversation already acts as memory. Across **separate sessions** on the same project, hands-on testing found the opposite: Stateful was 20–54% cheaper after the first session, with comparable answers (issue #35; see "Hands-on product testing, issues #24-#42" below). The thesis holds across sessions and is currently inverted within a long thread.
 
@@ -2355,7 +2361,7 @@ Operational notes from the same period: on 2026-09-26 a long-running Codex proce
 Incorrect API key provided` because it predated a fresh `codex login`; no API key or override existed at any scope; a
 newly started `codex-cli 0.157.1` reported `Logged in using ChatGPT` and a read-only `codex exec --json` request
 returned `AUTH_OK`. A Windows scheduled task (`StatefulCodex-Hourly-Droid-Review`, script
-`C:\Users\devan\.codex\automations\stateful-droid-hourly\run-review.ps1`) ran a four-stage Droid and Codex review of
+`historical-evidence`) ran a four-stage Droid and Codex review of
 a detached worktree of the committed head, never overlapping and bounded to three hours, with Codex progress events
 kept separate from the final critique so raw event streams were not fed back as peer analysis; its first full cycle (`%LOCALAPPDATA%\StatefulCodex\hourly-droid-reviews\20260926-110328`)
 drove the confirmation threat-model audit and the hashing fix, after which Factory returned HTTP 402 (usage windows
@@ -2370,10 +2376,10 @@ index-cost attribution (issue #19); authoritative monetary cost (the client sees
 Status: transferred on 2026-10-07 from the retired product-testing handoff. Hands-on use of the CLI, headless and web
 surfaces; A/B arms ran `-m gpt-5.6-luna -c model_reasoning_effort="high"`. Tokens are the CLI's "tokens used",
 uncached input plus output, which excludes Stateful's large cached input (cached input costs about 10% of uncached).
-Raw notes, scripts and logs are outside the repository: `C:/Users/devan/sc_v2/` (campaign scripts `campaign*.sh` and
+Raw notes, scripts and logs are outside the repository: `historical-evidence/campaign/` (campaign scripts `campaign*.sh` and
 `long*_run.sh`, timelines, answers, analysis scripts such as `cite_check.py`, `template_check.py`, `we_len.py`,
 `topic_tokens.py`, `build_packet.py` and `judge_pairs.sh`, and `sc_v2/review/v3_sc_notes.md`) and the PTY TUI driver
-`C:/Users/devan/sc_tui/drive.py`. Test builds then were the headless `codex-exec.exe` at `19222f0` and the CLI/TUI
+`historical-evidence/tui/drive.py`. Test builds then were the headless `codex-exec.exe` at `19222f0` and the CLI/TUI
 plus `codex-code-mode-host.exe` at `926f2ac`, run against an isolated store passed with `-c sqlite_home=...`.
 
 Cross-session series (issue #35): a fresh headless session per question on the same project; the ordinary arm starts
@@ -2413,7 +2419,7 @@ were off by 2-25 lines in 4 of 4 checked cases, where base Codex's were exact; #
 refusal and "resume implementation" is impossible headless; #42 a long single run took a scripted, templated shortcut
 (blinded judge preferred base 19/20). Fork issue #1: background `codex exec` hangs without closed stdin.
 
-Test-design lesson: Devansh's core question is whether nuanced facts and instructions given mid-session survive and are
+Test-design lesson: the owner's core question is whether nuanced facts and instructions given mid-session survive and are
 used many compactions later. Backlogs of independent units cannot answer it. The suggested test (not run then): one
 long session on cumulative work, nuanced facts injected at known times, several forced compactions, then check whether
 later decisions honour them and where they were written, measuring obligation cadence throughout.

@@ -74,7 +74,7 @@ work and migration 59/60 compatibility do not authorize an upstream merge.
 No Stateful contributor is directed to submit fork-specific work to OpenAI.
 
 One executor owns each scope; coordinate one build-producing command
-machine-wide. Use fresh cross-engine review, scoped tests, two Cargo jobs,
+machine-wide. Use fresh cross-engine review, scoped tests, one Cargo job,
 RAM admission and separate full-suite approval. See [contributing](./CONTRIBUTING.md).
 
 The legacy common Git object host remains an **inactive protected dependency**

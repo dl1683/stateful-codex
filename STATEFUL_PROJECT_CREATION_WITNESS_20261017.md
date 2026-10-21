@@ -1,5 +1,11 @@
 # Project-bound run creation witness — 2026-10-17
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Inactive storage prerequisite. Native project attachment, importer, old-writer
 exclusion and lock cutover remain OPEN; the first database milestone is NOT MET.
 Landing is governed by this run's fresh closeout and promotion_after.json.
@@ -52,6 +58,6 @@ unit2 asks bounded failure drain and failure-safe pre/postflight capture. No new
 runtime, guardian, packaging, descendant, offline, customer or translation claim.
 Protected B0/upstream work remains separately owned/unqualified; no home conversion.
 
-Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/run_creation_20261017/
+Receipts: historical-evidence/run_creation_20261017/
 {RECORD.md,witness_manifest.json,source_object_proof.json,cleanup_proof.json,
 helper_review6.txt,source_review3.txt,runs/direct1/,luna1/,promotion_after.json}.

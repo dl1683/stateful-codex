@@ -1,5 +1,11 @@
 # HAL guard-drain diagnostic: component evidence only
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 The [earlier lifetime failure](STATEFUL_HAL_GUARDED_LIFETIME_20261017.md) remains
 FAIL_RETAINED, cause unknown. Separate Direct1 and one original-launcher Luna1 pass;
 Luna observed immediate emptiness, not an explanation or regrade of that failure.
@@ -23,7 +29,7 @@ controls PASS; initial incorrect pure fixture expectation and REVISE reviews rem
 Fresh evidence APPROVE:102evidence/51frozen/65session/40source before-after hashes.
 Freeze SHA256:0c7aa6e9ae7b67d999d98992389d6220b431dc531c7aa1d764575dac9baae654.
 
-Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/hal_guard_drain_20261017/:
+Receipts: historical-evidence/hal_guard_drain_20261017/
 RECORD.md, manifest.json, driver_review3.txt, evidence_review1.txt, runs/direct1/,
 runs/luna1/ and raw luna1/ artifacts. No new Rust source/build/test for this successor.
 Publication is governed by native_attachment_20261017/promotion_after.json separately.

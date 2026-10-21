@@ -1,13 +1,13 @@
 # Stateful Codex master build plan
 
-Execution-order update2026-10-15: the owner-invoked
-[rebuild strategy](C:/Users/devan/sc_dogfood/lsr_drivers/council/STATEFUL_REBUILD_STRATEGY_CURRENT.md)
-governs current sequencing and acceptance. The canonical-order wording below is
-the historical October7 plan, retained as reference. Current rebuild progress and
-open gates are linked at the top of [current state](./STATEFUL_CODEX_CURRENT_STATE.md).
-No historical acceptance is extended to new project-store/native migration work.
+> **Archived historical plan, 2026-10-07, with a 2026-10-15 sequencing note.**
+> This page is not current operating authority. Use
+> [current state](./STATEFUL_CODEX_CURRENT_STATE.md),
+> [roadmap](./STATEFUL_CODEX_ROADMAP.md) and
+> [decisions](./STATEFUL_CODEX_DECISIONS.md). Historical external evidence is
+> not distributed in this repository. The ordering below describes past intent.
 
-Agreed with Devansh on 2026-10-07. This is the canonical build plan. It merges two sources:
+The historical plan merged two sources:
 - the October 2–3 councils and hands-on campaign (evidence in SC-EVAL-035 and `campaign2/FINDINGS.md`);
 - the reference design, reviewed 2026-10-06 and archived unchanged as [`STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md`](./STATEFUL_CODEX_MEMORY_DESIGN_2026_10_06.md).
 
@@ -55,7 +55,7 @@ The reference design stays as a detailed design reference, not as the execution 
 
 ## Canonical build order
 
-This is the one current order. It records the latest binding decisions, in sequence:
+This was the recorded order at that checkpoint, not today's binding sequence:
 - step-back 11i (`47c902e4d`);
 - council 12a, the robustness preflight (`0fdd58ec0`);
 - the coordinator's binding decisions in `sc_dogfood/integrate/briefs/step3_truthful_inputs.md`, from "Order change per step-back 11i" onward.

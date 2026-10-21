@@ -1,5 +1,11 @@
 # Guarded Windows lifetime evidence — 2026-10-17
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 The original-launcher Luna check FAILED. This remains a blocker for this fixture's
 positive runtime qualification. It does not activate native HAL policy or establish
 a production guardian. The earlier run-creation witness's HAL paragraph described
@@ -59,7 +65,7 @@ descendant, hostile-peer, packaged-factory, offline, customer or first project
 database milestone is qualified. Native project attachment, populated import,
 old-writer exclusion and lock cutover remain OPEN.
 
-Receipts: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/hal_job_lifetime_20261017/`:
+Receipts: `historical-evidence/hal_job_lifetime_20261017/`:
 `RECORD.md`, `FAILURE_LUNA1.md`, `witness_manifest.json`, `format_proof.json`,
 `build1.log`, `test1.log`, `runs/direct1/`, `runs/luna1/`, `luna1/`,
 `failure_witness1_scope.json` and `failure_witness1.txt`.
@@ -95,7 +101,7 @@ the two stated ACK boundaries; they do not repair the separate positive-lifetime
 Luna failure or qualify retained-query/live-body crashes, full worker recovery,
 controller crash, descendants or a production guardian.
 
-Fault receipts: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/hal_guard_faults_20261017/`:
+Fault receipts: `historical-evidence/hal_guard_faults_20261017/`:
 `RECORD.md`, `source_scope5.json`, `source_review5.txt`, `runs/direct1/`,
 `runs/luna1/`, `luna1/postflight.json`, `luna1/score.json`, `witness1_scope.json`
 and `witness1.txt`. Publication landing is governed by the separate fresh closeout

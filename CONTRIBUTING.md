@@ -55,7 +55,7 @@ Committed by <name>
 ```
 
 `Committed by <name>` is optional for external contributors. Maintainer
-consolidation commits use `Committed by Devansh`. Preserve configured Git
+consolidation commits use the owner's requested attribution. Preserve configured Git
 author/committer identity; never override it to imitate another contributor.
 Factory's harness additionally requires its bot `Co-authored-by` trailer;
 executor reports must disclose that addition. Do not place personal email

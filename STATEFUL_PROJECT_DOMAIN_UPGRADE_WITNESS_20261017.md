@@ -1,5 +1,11 @@
 # Explicit domain upgrade witness — 2026-10-17
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Inactive library component; first project-database milestone NOT FULFILLED.
 PreparedDomainUpgrade requires complete trusted manifests, identical domains and
 unchanged per-domain prefixes plus suffix. Ordinary admission stays exact.
@@ -29,7 +35,7 @@ busy close-only, reconciliation and old-reader/writer refusal pass. Fresh helper
 review APPROVE precedes the sole original-launcher gpt-6-luna PASS: 18.238 seconds,
 one command, 44 archived bindings, with full durable controller postflight.
 
-Evidence: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/domain_upgrade_20261017/.
+Evidence: historical-evidence/domain_upgrade_20261017/
 Exact closeout/promotion separately determine landing. No production runtime
 index, native routing/import, arbitrary-migration preservation, native CLI
 interoperability for the extra fixture domain, helper cancellation, old-client

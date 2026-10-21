@@ -1,5 +1,11 @@
 # HAL required-response frame witness — 2026-10-17
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Inactive source component only; first project database and native HAL gates OPEN.
 Authority remains the converged rebuild strategy and frozen HAL wire contract.
 
@@ -32,7 +38,7 @@ That unchanged-launcher gpt-6-luna session PASS14.861seconds/one command, with43
 archived bindings and exact typed tool/final/case reports. Fourteen synthetic
 event-controller checks pass; no actual failed session is regraded or normalized.
 
-Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/response_frames_20261017/`
+Evidence: `historical-evidence/response_frames_20261017/`
 contains raw tests, Linux failure, immutable-source proof, direct receipts,
 source/helper reviews, Luna events/score/frozen-input index and cleanup receipts.
 Exact final closeout/promotion receipts separately determine landing.

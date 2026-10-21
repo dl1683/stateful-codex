@@ -1,14 +1,18 @@
 # Runtime legacy-write quiescence, 2026-10-17
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 The first project-owned, engine-neutral database milestone remains **OPEN**.
 This slice adds an opt-in runtime row-write exclusion primitive, source commit
 `b17440e6372e18fdec8e473a9cd6e25bd6c1e2be`, with no automatic/native routing
 caller. It does not stop execution, migrate populated knowledge/runtime/metadata,
 attach native app-server operations to a project store, or perform lock cutover.
 
-Evidence packet: [native cutover admission](../sc_dogfood/lsr_drivers/reports/stateful_rebuild/native_cutover_admission_20261017/).
-The relative directory above is outside this checkout; authoritative local path:
-`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/native_cutover_admission_20261017`.
+Historical native-cutover evidence is not distributed in this repository.
 
 ## Source behavior and boundaries
 
@@ -81,7 +85,7 @@ original launcher/binary5e4767 remained unchanged. All84 new and69 old frozen
 input hashes still match;87 before/after retained identities agree.
 
 Authoritative second packet:
-`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/native_locked_transport_20261017`.
+`historical-evidence/native_locked_transport_20261017`.
 Read `failed_journey_diagnosis1.json`, `luna1/score.json`, raw events/rollout,
 `witness_review1.txt` and the first packet's `scratch/locked_transport1` native
 receipts. The diagnosis opens no DB and does not regrade either journey.

@@ -1,5 +1,11 @@
 # Project cutover remains open: schema and writer-feasibility handoff
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Storage exclusion landed8ca47f; the native query journey remains FAIL_RETAINED.
 Native attachment, populated import, old-writer exclusion, lock cutover and B0
 remain OPEN. This handoff adds no native routing or product activation.
@@ -28,7 +34,7 @@ This covers warmed Python API calls and13-column hierarchy/clock objects only.
 SQLx/native clients, active writers, OR REPLACE/recursive conflict/cascades/DDL,
 all-table/semantic/FTS effects, multi-DB/import/recovery/power loss remain unproved.
 
-Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/:
+Receipts: historical-evidence
 native_attachment_20261017/{schema_inventory2/,schema_inventory_review1.txt,MIGRATION_READING_NOTES.md};
 old_writer_barrier_feasibility_20261017/{RECORD.md,source_review3.txt,probe1/,luna1/,post_failure_diagnostic.json,evidence_review1.txt}.
 Fresh exact evidence/closeout verdicts govern qualification; native_attachment_20261017/promotion2_after.json governs publication.

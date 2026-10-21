@@ -1,5 +1,11 @@
 # Project-store rebuild baseline and custody: 2026-10-15
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 This is S0 evidence and preparation for the owner-directed project-store rebuild.
 It does not activate a project-local store or qualify migration, rollback, locking,
 compaction survival, foreign-agent operations, or HAL delivery.

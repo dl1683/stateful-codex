@@ -1,5 +1,11 @@
 # Stateful Codex evaluation record
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 > **Current placement (2026-10-17 simplification).** `scodex` selects `<project>/.stateful` or `STATEFUL_STORE_ROOT`, preserving native layout/schema/locks. The shared home is archived without knowledge import; the neutral reader supports native eligible reads. Earlier combined-store/import milestones are historical for placement; answer-survival and HAL qualification remain separate. See the final store-root entry for results and limitations.
 
 > **Rebuild active (2026-10-17).** The current owner directive supersedes the
@@ -1035,7 +1041,7 @@ This is synthetic historical attribution, not effective truth or authenticated p
 
 Source dc707b23a8af adds an opt-in native x86_64 GNU-hosted Rust1.95 path with GNU LLVM application targets, real pinned official GNU runtime/unwind archives, declared LLVM dlltool inputs, matching test bridge and OS workspace status. Shared Windows snapshot-root setup is independent of cwd; capabilities snapshot compares the complete parsed JSON object with explicit raw ASCII/4096-byte/newline checks. No Rust application/context/schema/launcher change. Fresh source_review_final1 APPROVE SOURCE scoped/no P1/P2. Windows Bazel gnu_cli_test8 passes7 cases/2 targets; windows_cli2 passes11/0skip; full WSL linux_pi1 passes149 runnable/one intentional worker skip at unchanged60-second limits and zero retries. Earlier Linux full-suite hold is resolved for this recorded unchanged-source run; earlier timeout cause/universal timing is not established. Diagnostic E0463, mixed-CRT, missing-runtime/tool, snapshot-path/order and my Windows-default-decoding failures retained. Final just fmt passes; no tests after formatting. Build-only reviewed-HEAD candidate4 passes with9577 identical input leaves and a hash-verified source archive.
 
-One actual unchanged-launcher gpt-6-luna trial FAIL_NATIVE_TOOL_AVAILABILITY: the prepared code-mode-host=false configuration made the installed exec host unavailable. Native exit0, one completed turn, authoritative function0/custom1, zero command_execution items, final error objects instead of identities. Original validator failure prohibited/extra tool and independent_audit.json retained. All18 postflight entries and current pins match. No retry, repair or normalization; raw output, original failure and unconditional per-binding postflight retained. This does not qualify native usability or content fidelity. Effective native config/managed-requirements and stock ChatGPT login admitted without retaining raw auth/config; refresh-endpoint overrides removed, code mode disabled. Ordinary native engine-home session writes remain possible; immutability claims cover the closed project fixtures and pinned artifacts. Fresh frozen controller review precedes the sole model attempt. Evidence: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/qualification_20261016.
+One actual unchanged-launcher gpt-6-luna trial FAIL_NATIVE_TOOL_AVAILABILITY: the prepared code-mode-host=false configuration made the installed exec host unavailable. Native exit0, one completed turn, authoritative function0/custom1, zero command_execution items, final error objects instead of identities. Original validator failure prohibited/extra tool and independent_audit.json retained. All18 postflight entries and current pins match. No retry, repair or normalization; raw output, original failure and unconditional per-binding postflight retained. This does not qualify native usability or content fidelity. Effective native config/managed-requirements and stock ChatGPT login admitted without retaining raw auth/config; refresh-endpoint overrides removed, code mode disabled. Ordinary native engine-home session writes remain possible; immutability claims cover the closed project fixtures and pinned artifacts. Fresh frozen controller review precedes the sole model attempt. Evidence: historical-evidence/qualification_20261016
 
 Qualification is limited to the explicit short-output-base opt-in CLI lane; default Windows/MSVC/ARM64/full native Codex/offline/HAL remain unqualified. Native405-to329-byte Marathi and separate final nested double-escaping failures remain OPEN. No native project-store routing, populated shared-DB migration/old-writer barrier, atomic completion, compaction survival, verified edit/Forget ingress, MCP or customer acceptance. First company-brain milestone NOT FULFILLED. Separate upstream dirty B0 custody and historical refs preserved; no approved merge batch available.
 
@@ -1630,14 +1636,14 @@ customer qualification absent. See [scope and receipts](STATEFUL_RUNTIME_QUIESCE
 
 ## SC-REBUILD-20261017-STORE-ROOT
 
-`scodex` selects the Git root/plain folder's `.stateful`, overridden by `STATEFUL_STORE_ROOT`. Files, schemas, migrations and locks stay native. Only login/config seed a fresh ignored home. The original shared home is retained at C:/Users/devan/.codex-stateful-archive-20261017-store-root; no knowledge import or fallback. Direct Codex defaults stay unchanged.
+`scodex` selects the Git root/plain folder's `.stateful`, overridden by `STATEFUL_STORE_ROOT`. Files, schemas, migrations and locks stay native. Only login/config seed a fresh ignored home. The original shared home is retained at historical-evidence; no knowledge import or fallback. Direct Codex defaults stay unchanged.
 A generated README explains schema/tables/plain SQLite. `stateful-memory root/native-read` detects native layout and reuses eligible/retirement reads without engine authentication; old reader fixtures still work.
 
 One local jobs2 build passed. Initial scoped Rust:177 passed,1 fixture setup failure,2 PI timeouts,1 skipped. Compiled native migrations fixed the fixture; reader13/13 PASS. Both timeouts reproduce on unchanged9fa6256bcd, whose third timeout passed here. No assertions/timeouts weakened. Scoped fix/fmt passed; no Rust reruns afterward.
 
 The sole launcher/Luna journey wrote a rule; a different process/thread recalled CIRRUS-4827 without it in the prompt, and neutral exact read passed. Overall script exit1 remains RETAINED: EXTRA shared-empty assertion failed. Recreated shared files predate this check (16:56 vs17:18), creator unestablished; canary project1/shared0. No second model journey, exclusion barrier or HAL claim.
 
-Reviews led to attached-CD routing, atomic ignore publication, memory-text boundaries, UTF8 Git paths and PATH-only tool resolution. Earlier fixture, encoding-probe and review failures remain retained; approval gates promotion. Parent Python8/8 passed; combined Python9/9 PASS (launcher_unicode_20261017/security_joint.log), also covering caller models, optional Stateful modes, Unicode/NBSP/TOML and dual policies. Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/{store_root_20261017,launcher_unicode_20261017}/; exact approved source/integration is in stateful_rebuild_latest.md.
+Reviews led to attached-CD routing, atomic ignore publication, memory-text boundaries, UTF8 Git paths and PATH-only tool resolution. Earlier fixture, encoding-probe and review failures remain retained; approval gates promotion. Parent Python8/8 passed; combined Python9/9 PASS (launcher_unicode_20261017/security_joint.log), also covering caller models, optional Stateful modes, Unicode/NBSP/TOML and dual policies. Receipts: historical-evidence/{store_root_20261017,launcher_unicode_20261017}/; exact approved source/integration is in stateful_rebuild_latest.md.
 
 A follow-up confidentiality repair refuses repository-tracked home files before
 private policies/config/login are seeded; Git errors inside a repository refuse
@@ -1653,7 +1659,7 @@ dropped writes. A different fresh real Codex session ran the unchanged project
 normal suite: **15/15 PASS**, including ten causal framing tests, zero selected
 skips or retries. `just bazel-lock-update` passed with no lockfile drift.
 Tests bind pre-cleanup source; final scoped fix/fmt and one whole-feature review
-are separate gates. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/frame_io_20261018/`.
+are separate gates. Evidence: `historical-evidence/frame_io_20261018/`.
 
 No caller, configuration, RPC or model behavior is activated. Queue16MiB,
 continuous stderr64KiB drain, phase/total/shutdown budgets, native pipe
@@ -1669,7 +1675,7 @@ Two fresh real Droid design sessions settled this boundary. Different fresh real
 Fresh26case JUnit is in the checkout target and bound to its run UUID/logs; the shared-target JUnit was stale and rejected. No alternate build target or test rerun was used.
 Bazel refresh passed without lock drift. Cleanup/source review are separate recorded gates, with complete pre-cleanup bodies retained.
 No caller, outbound sharing, stderr drain, native lifecycle, controller, model/launcher or memory-survival qualification; all inherited holds remain.
-Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/transport_20261018/`.
+Evidence: `historical-evidence/transport_20261018/`.
 
 ## SC-REBUILD-20261018-D25-INACTIVE-STDERR
 
@@ -1678,7 +1684,7 @@ Two fresh real Droid design sessions settled this boundary. Different fresh real
 After normal1 RELEASE, tests added actual deadline-boundary repoll and terminal reader-lifetime assertions; normal2 verifies these. Production was unchanged; both original results and complete bodies remain retained.
 Fresh checkout JUnit run UUIDs/case names match logs/archives; stale shared-target reports rejected without alternate target or location hold. Cleanup/review are separate recorded gates.
 Generic async only, not native Windows cancellation, task/child cleanup, shared outbound/phase budgets, controller, launcher/model or memory survival. Guard65failures/native denial and all inherited holds remain.
-Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/stderr_20261018/`.
+Evidence: `historical-evidence/stderr_20261018/`.
 
 ## SC-REBUILD-20261018-D25-SHARED-ADMISSION
 
@@ -1688,7 +1694,7 @@ After RELEASE, only test setup gained a second confirmed-Pending poll, no produc
 Causal admissions prove queued/delivered/independent retention, failure/expiry/drop cleanup, empty/message precedence and rollback; no counter-only replacement proof. Full bodies and fresh checkout JUnit UUIDs match.
 No outbound writer consumes leases yet; raw FrameWriter remains unenforced. Serialization/staging/allocator/RSS/global/process/native/phase/shutdown/controller/journey/installation/release guarantees remain outside scope.
 Separate old-c598 fixture-only run: complete preflight PASS,2PASS/1FAIL/3NOT RUN,3children reaped; generic case3 refusal cause UNKNOWN. Old0/6,65broader failures and all inherited holds remain, guard runtime RELEASE NO.
-Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/shared_transport_20261018/`; native evidence: sibling `fixture_repair_20261018/`. Cleanup/review remain separate recorded gates.
+Evidence: `historical-evidence/shared_transport_20261018/`; native evidence: sibling `fixture_repair_20261018/`. Cleanup/review remain separate recorded gates.
 
 ## SC-REBUILD-20261018-D25-LEASED-WRITER
 
@@ -1698,26 +1704,26 @@ Different fresh real Codex normal1 passed53/53, all43existing plus10writer cases
 Causal admissions prove retained bytes/empty-message slots, Ready-future release, unpolled drop/clean reuse, actual pre-byte/partial blockage and pending-flush cancellation/recovery/permanent poisoning.
 Fixed-end active expiry, clean expired/invalid/foreign preflight, successful payload/empty LF and normalized write/flush Io errors are covered; local foreign-refusal byte balance is runtime-probed, message balance is source-supported.
 Private inactive typed ownership only: raw I/O, pre-admission input/encoding/staging/allocator/RSS/global/native/phase/total/shutdown/task/process/controller/journey/installation/release guarantees remain outside scope.
-Guard runtime RELEASE NO,65broader failures, old0/6 and separate old-c598 fixture2PASS/1FAIL/3NOT RUN plus every inherited hold remain. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/leased_writer_20261018/`; cleanup/review remain separate recorded gates.
+Guard runtime RELEASE NO,65broader failures, old0/6 and separate old-c598 fixture2PASS/1FAIL/3NOT RUN plus every inherited hold remain. Evidence: `historical-evidence/leased_writer_20261018/`; cleanup/review remain separate recorded gates.
 
 ## SC-REBUILD-20261018-D25-INACTIVE-WORK-DEADLINES
 
 Fresh Droid dialogues settled private inactive initialization60/RPC30/turn180/compaction180/total900 ownership, nested clipping, explicit completion, every-poll checks and rejected-output disposal; shutdown is a separate stage, no caller/native/controller/launcher/model or product acceptance, all inherited holds remain.
-Normal1 retained six E0283 diagnostics/0tests; only two counter types changed. Different fresh Codex normal2 passed62/62, but later analysis found staggered-overdue precedence wrong; agreed repair and causal scenarios passed fresh normal3 62/62 (53existing+9new),0skips/retries, source/JUnit bound; overlapping runs. Inner Result::Ok noncompletion/Ready zero-poll and isolated elapsed-branch behavior remain source-supported qualifications. Tests precede fix/fmt and one exact review, no tests afterward. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/journey_deadlines_20261018/`.
+Normal1 retained six E0283 diagnostics/0tests; only two counter types changed. Different fresh Codex normal2 passed62/62, but later analysis found staggered-overdue precedence wrong; agreed repair and causal scenarios passed fresh normal3 62/62 (53existing+9new),0skips/retries, source/JUnit bound; overlapping runs. Inner Result::Ok noncompletion/Ready zero-poll and isolated elapsed-branch behavior remain source-supported qualifications. Tests precede fix/fmt and one exact review, no tests afterward. Evidence: `historical-evidence/journey_deadlines_20261018/`.
 
 ## SC-REBUILD-20261018-D25-INACTIVE-SHUTDOWN
 
 Separately settled stage extends the landed work owner with one unclipped5s shutdown allowance, irreversible work closure, preserved prior failures and nonrestartable completion/expiry; every-poll checks and rejected-output disposal remain shared, timer expiry checks the requested scope.
 Different fresh real Codex normal1 passed67/67 (62existing+5new),0skips/retries, complete command-time bodies/profile/resources and fresh checkout JUnit UUID/hash bound. Causal paused-time cases cover cleanup success after unobserved total900, new/idle/all-active closure, prior TurnExpired preservation, unpolled/Pending drop/resume/nonrenewal, exact Ready zero-repoll and crossing-output disposal while the wrapper remains retained.
 Shutdown Ready(Ok) noncompletion and Ready zero-poll are directly tested; prior work-scope qualifications remain. No isolated Elapsed-branch proof, autonomous timer, absolute905s lifetime, native cancellation/task/process/reap, caller/controller/model/launcher/compaction/restoration/installation/release qualification. All inherited holds remain. Tests precede separate scoped fix/final fmt and one exact review, no tests afterward.
-Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/journey_shutdown_20261018/`.
+Evidence: `historical-evidence/journey_shutdown_20261018/`.
 
 ## SC-REBUILD-20261018-GUARD-CONTRAST
 
 Fresh Droid dialogue and different fresh Codex source verification support a conditional outside-root `.codex` ancestor explanation, not the historical first refusal, which remains UNKNOWN. No replay, guard weakening, OS-denial claim or original-result regrade.
 A separate agreed fresh Public synthetic topology preserved the retained historical-c598 artifact/build/five-provenance/21-byte config/oracle/capture gates. Different fresh real Codex ran exactly once:1test/1child PASS, natural exit1/config.toml unclosed-array diagnostic, original oracle and separate resource acceptance PASS, stdout0/stderr313 observed/retained bytes, no timeout/overflow/reader exceptions or remaining owned child/readers; artifact unchanged.
 Fresh final real Droid implementation/evidence review APPROVE exact wrapper ce96d1ae83893fb341ea9f1791bd40b5be6ea270cd6e9887a243e1d06808641e. Point-in-time topology is not race-free; absent-root metadata/pipe closure are source-supported, capture replacement-decoded not raw-byte fidelity, no descendant or hard20s whole-wrapper guarantee.
-Only this old artifact's new fixture/oracle qualifies, not current guard/runtime/controller/launcher/installation/compaction. Original2PASS/1FAIL/3NOT RUN, old0of6,65broader failures and every inherited hold remain. Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/{guard_diagnosis_20261018,guard_contrast_20261018}/`.
+Only this old artifact's new fixture/oracle qualifies, not current guard/runtime/controller/launcher/installation/compaction. Original2PASS/1FAIL/3NOT RUN, old0of6,65broader failures and every inherited hold remain. Evidence: `historical-evidence/{guard_diagnosis_20261018,guard_contrast_20261018}/`.
 
 ## SC-REBUILD-20261018-D25-INACTIVE-OWNED-CHILD
 
@@ -1733,7 +1739,7 @@ Kernel error/race/post-call crossing/Drop branches remain source-reviewed only.
 No descendant/pipe/task containment, shutdown-clock integration, controller,
 guard/launcher/model/compaction/installation or release acceptance follows.
 All inherited holds and original failures remain. Evidence:
-`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_child_20261018/`.
+`historical-evidence/owned_child_20261018/`.
 
 ## SC-REBUILD-20261018-D25-INACTIVE-OWNED-PUMPS
 
@@ -1749,7 +1755,7 @@ in-memory stdoutPartialEof/stderrIo alongside wrapperCompleted pass.
 Elapsed-timer/post-harvest crossing remain unforced; current-thread scheduler
 tests do not qualify OS pipes/processes, descendants or production integration.
 All guard/controller/launcher/model/compaction/installation/release holds remain.
-Evidence:`C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/owned_pumps_20261018/`.
+Evidence:`historical-evidence/owned_pumps_20261018/`.
 
 ## SC-REBUILD-20261020-CONTINUATION-SCOPE
 
@@ -1780,7 +1786,7 @@ independent context, not another copy of already reviewed code. That is an
 operation-specific prerequisite, not a blanket stop or a new approval ladder.
 All restoration/recall, foreign-write/live-upgrade, ordinary/Work/PartB,
 migration59/60, matched216, original placementEXIT1 and HAL holds remain.
-Evidence: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/continuity_20261020/`.
+Evidence: `historical-evidence/continuity_20261020/`.
 
 ## SC-CONSOLIDATION-20261020-ARCHIVED-COMPACTION-AND-B0
 
@@ -1797,8 +1803,8 @@ The imported continuity source is
 `archive/20261020/heads/rebuild/compaction-continuity-20261020` (`4a2c965c507e`).
 B0/upstream history is retained at
 `archive/20261020/heads/sync/upstream-20261015` (`04a51b086571`).
-The later dirty compaction evaluation append and all seven dirty upstream
-files remain in the private consolidation backup, not in those tag trees.
+The uncommitted payloads are not in these tag trees; recovery is owner-controlled
+and is not qualified by this ledger.
 
 The archived active-compaction qualification has four failed normal suites:
 CLI 459 PASS / 8 FAIL / 2 runner skips; app-server 1845 PASS / 46 FAIL /

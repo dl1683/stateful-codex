@@ -1,5 +1,11 @@
 # Inactive project-bound verification lease component
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 This adds two guard-consuming runtime APIs for starting and ending a lease in
 the admitted project's `.stateful/memory.sqlite`. They share the legacy SQL
 policy, require the compiled runtime domain and exact project-owned run, and
@@ -7,7 +13,7 @@ commit prior staged writes with the lease operation. Refusal drops the guard;
 its owner becomes close-only. Cancellation during COMMIT remains uncertain:
 close and reconcile. A lease does not establish checker or acceptance evidence.
 
-Evidence directory: `C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/verification_20261016/`.
+Evidence directory: `historical-evidence/verification_20261016/`.
 Design: `DESIGN.md`; parity boundary: [reviewed design](./STATEFUL_PROJECT_ACCEPTANCE_PARITY_DESIGN_20261016.md).
 
 ## Source and local gates

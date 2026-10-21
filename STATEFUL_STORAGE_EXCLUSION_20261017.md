@@ -1,5 +1,11 @@
 # Project storage exclusion: source qualified; native user check failed
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Source7033dc338f5f20ae50d23590321e72e0643513cd reserves .stateful directories
 from automatic full/targeted source scans and native freshness hashing, with
 lexical/canonical checks and host case rules. Retained Active/Replaced FILE/region
@@ -20,6 +26,6 @@ and all five postflights pass. Separate readonly diagnostic finds6durable nodes,
 exact2public FILEs and no private source; this does not pass the failed journey.
 FirstDB/native attachment/import/old-writer/lock, macOS/mixed-host remain OPEN.
 
-Receipts: C:/Users/devan/sc_dogfood/lsr_drivers/reports/stateful_rebuild/native_attachment_20261017/:
+Receipts: historical-evidence/native_attachment_20261017/
 RECORD.md, scoped_gates_qualification.json, cleanup_review1.txt, native_user_manifest.json,
 native_user1/session/, native_user1/durable_diagnostic.json; promotion_after.json governs landing.

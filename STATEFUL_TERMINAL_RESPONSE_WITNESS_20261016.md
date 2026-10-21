@@ -1,5 +1,11 @@
 # Inactive terminal composition and HAL response codec, 2026-10-16
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Two disjoint slices extend the inactive foundations at main `4b87191f85b0`.
 Neither attaches project storage or a console worker to a native user session.
 Source commits are `b6c645a8fc` (434 insertions, 2 deletions) and `ddfd2a9d89`

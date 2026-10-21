@@ -1,5 +1,11 @@
 > Archived on 2026-10-12 from STATEFUL_CODEX_MASTER_PLAN.md and STATEFUL_CODEX_CURRENT_STATE.md during the entropy pass; not authoritative. The current build order is in [`STATEFUL_CODEX_MASTER_PLAN.md`](./STATEFUL_CODEX_MASTER_PLAN.md) and the current snapshot in [`STATEFUL_CODEX_CURRENT_STATE.md`](./STATEFUL_CODEX_CURRENT_STATE.md).
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 # Stateful Codex plan history
 
 Every part below is moved verbatim; line numbers refer to the source file at `e2249ad43`.

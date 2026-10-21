@@ -1,5 +1,11 @@
 # S2 acceptance parity before project-store activation
 
+> **Archived historical record, not current operating instructions.**
+> Use [current state](./STATEFUL_CODEX_CURRENT_STATE.md) for status and holds.
+> Historical external evidence is not distributed in this repository.
+> Paths and personal identifiers are redacted; original bytes and any
+> historical digest claims refer to the version preserved in Git history.
+
 Design only, based on main `3b005a5e68e720b3b3e903b521d8886c76ceadb8`.
 No new completion path, policy, native routing or migration is activated here.
 The canonical order remains S1 -> M0-M3 -> S2 -> S3. The parallel upstream
