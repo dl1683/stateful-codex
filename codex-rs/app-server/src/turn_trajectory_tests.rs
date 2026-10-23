@@ -7,6 +7,8 @@ use codex_protocol::protocol::TokenUsage;
 fn counts_only_outputs_paired_with_observed_model_calls() {
     let mut state = TurnTrajectoryState::default();
     state.record_response_item(&ResponseItem::FunctionCall {
+        encrypted_content: None,
+        status: None,
         id: None,
         name: "example".to_string(),
         namespace: None,

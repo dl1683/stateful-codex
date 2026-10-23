@@ -774,13 +774,15 @@ async fn durable_completion_stores_digest_sources_for_large_call_ids() {
             home.path().abs().into(),
         )
         .unwrap();
-        completion_call.environments = vec![codex_extension_api::ToolEnvironment {
-            environment_id: "local".to_string(),
-            cwd: sandbox.cwd.clone(),
-            file_system: Arc::new(codex_exec_server::LocalFileSystem::unsandboxed()),
-            file_system_sandbox_context: sandbox,
-            _lifetime: std::marker::PhantomData,
-        }];
+        let file_system = codex_exec_server::FileSystemEnvironmentAccessor::new(
+            &codex_exec_server::LOCAL_FS,
+            sandbox.clone(),
+        );
+        completion_call.environments = vec![codex_extension_api::ToolEnvironment::new(
+            "local".to_string(),
+            sandbox.cwd.clone(),
+            &file_system,
+        )];
         let output = tool
             .handle(completion_call)
             .await

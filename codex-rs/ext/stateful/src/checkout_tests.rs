@@ -1,3 +1,4 @@
+use crate::world_state_section_tests::snapshot as section_snapshot;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -24,8 +25,12 @@ fn reports_render_once_per_turn_and_never_exceed_the_window() {
             plan.window_bytes
         );
         let section = plan.section();
-        shown.push(section.snapshot()["shown"].as_str().map(str::to_string));
-        previous = Some(section.snapshot().clone());
+        shown.push(
+            section_snapshot(&section)["shown"]
+                .as_str()
+                .map(str::to_string),
+        );
+        previous = Some(section_snapshot(&section));
     }
     assert_eq!(
         shown,
@@ -41,7 +46,7 @@ fn reports_render_once_per_turn_and_never_exceed_the_window() {
     let first = CheckoutReportPlan::new(None, "turn-1", Some(&report));
     let fragment = START_MARKER.len() + 1_400 + END_MARKER.len();
     let first_bytes = first.window_bytes;
-    let snapshot = first.section().snapshot().clone();
+    let snapshot = section_snapshot(&first.section());
     let later = CheckoutReportPlan::new(Some(&snapshot), "turn-1", Some(&report));
     let later_bytes = later.window_bytes;
     let later = later.section();
@@ -51,9 +56,11 @@ fn reports_render_once_per_turn_and_never_exceed_the_window() {
             later_bytes,
             later
                 .render_diff(PreviousWorldStateSection::Known(&snapshot))
+                .1
                 .is_none(),
             later
                 .render_diff(PreviousWorldStateSection::Absent)
+                .1
                 .is_some(),
             CheckoutReportPlan::new(Some(&json!({})), "turn-9", None).window_bytes,
         ),

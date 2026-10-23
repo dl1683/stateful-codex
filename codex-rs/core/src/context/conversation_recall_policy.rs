@@ -6,7 +6,9 @@
 //! keeps the request prefix cacheable.
 
 use super::ContextualUserFragment;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::input_text;
 
 const START_MARKER: &str = "<conversation_recall_policy>";
 const END_MARKER: &str = "</conversation_recall_policy>";
@@ -28,10 +30,14 @@ impl ConversationRecallPolicy {
     /// The request copy of `instructions`, with the policy appended once. Empty instructions
     /// still carry the policy.
     pub(crate) fn decorate(instructions: &str) -> String {
+        let policy = Self
+            .render()
+            .into_text()
+            .expect("conversation recall policy renders text");
         if instructions.is_empty() {
-            Self.render()
+            policy
         } else {
-            format!("{instructions}\n\n{}", Self.render())
+            format!("{instructions}\n\n{policy}")
         }
     }
 }
@@ -53,7 +59,7 @@ impl ContextualUserFragment for ConversationRecallPolicy {
         (START_MARKER, END_MARKER)
     }
 
-    fn body(&self) -> String {
-        format!("\n{POLICY}\n")
+    fn body(&self) -> ContentItem {
+        input_text(format!("\n{POLICY}\n"))
     }
 }

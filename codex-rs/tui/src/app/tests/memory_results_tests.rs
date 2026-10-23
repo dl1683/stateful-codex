@@ -32,8 +32,10 @@ async fn turn(server: &mut AppServerSession, thread: ThreadId, text: &str) -> Re
         })
         .await?;
     loop {
-        if let Some(codex_app_server_client::AppServerEvent::ServerNotification(notification)) =
+        if let Some(event) =
             tokio::time::timeout(Duration::from_secs(/*secs*/ 10), server.next_event()).await?
+            && let codex_app_server_client::AppServerEvent::ServerNotification(notification) =
+                event.event
             && matches!(*notification, ServerNotification::TurnCompleted(_))
         {
             return Ok(());

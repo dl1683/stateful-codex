@@ -218,9 +218,11 @@ def test_review_inventory_recognizes_both_tool_schema_spellings(
 def test_shipping_legacy_registration_preserves_the_reserved_protocol_environment() -> (
     None
 ):
+    codex = Path("/opt/codex")
+    server = Path("/src/server.py")
     command = _review_registration_command(
-        Path("/opt/codex"),
-        Path("/src/server.py"),
+        codex,
+        server,
         transport="stdio",
         mode=SHIPPING_LEGACY_VERSION,
         profile=REVIEW_PROFILE,
@@ -228,7 +230,7 @@ def test_shipping_legacy_registration_preserves_the_reserved_protocol_environmen
     )
 
     assert command == [
-        "/opt/codex",
+        str(codex),
         "mcp",
         "add",
         "mcp_spec_fixture",
@@ -236,7 +238,7 @@ def test_shipping_legacy_registration_preserves_the_reserved_protocol_environmen
         f"CODEX_MCP_PROTOCOL_VERSION={LEGACY_ENVIRONMENT_SENTINEL}",
         "--",
         sys.executable,
-        "/src/server.py",
+        str(server),
         "--mode",
         SHIPPING_LEGACY_VERSION,
         "--transport",

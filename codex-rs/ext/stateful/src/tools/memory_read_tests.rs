@@ -57,6 +57,8 @@ async fn predecessor_fan_in_from_update_batches_bounds_history_and_model_replay(
                         source: codex_extension_api::ToolCallSource::Direct,
                         conversation_history: codex_extension_api::ConversationHistory::default(),
                         turn_item_emitter: Arc::new(codex_extension_api::NoopTurnItemEmitter),
+                        attachment_store: Arc::new(codex_attachment_store::InlineAttachmentStore),
+                        ephemeral: false,
                         environments: Vec::new(),
                         payload: codex_extension_api::ToolPayload::Function {
                             arguments: serde_json::json!({"mutations":batch}).to_string(),

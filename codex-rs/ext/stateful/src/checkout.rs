@@ -7,6 +7,7 @@
 //! thread), and the report says so; attribution is left to commit messages and explicit
 //! markings. Observed commits are kept as dated maintenance facts, not promoted.
 
+use codex_protocol::models::input_text;
 use std::time::Duration;
 
 use codex_git_utils::GitCommitRange;
@@ -735,7 +736,7 @@ impl CheckoutReportPlan {
             shown,
             window_bytes,
         } = self;
-        codex_extension_api::WorldStateSectionContribution::new(
+        crate::world_state_section::fixed_world_state_section(
             WORLD_STATE_ID,
             serde_json::json!({ "turnId": turn_id, "shown": shown, "windowBytes": window_bytes }),
             move |previous| {
@@ -749,7 +750,7 @@ impl CheckoutReportPlan {
                     codex_extension_api::RenderedWorldStateFragment::new(
                         "developer",
                         (START_MARKER, END_MARKER),
-                        body,
+                        input_text(body.clone()),
                     )
                 })
             },

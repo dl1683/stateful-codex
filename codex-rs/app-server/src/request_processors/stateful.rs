@@ -621,7 +621,9 @@ fn thread_store_error(error: ThreadStoreError) -> JSONRPCErrorError {
         ThreadStoreError::Unsupported { .. } => {
             method_not_found("Stateful runs are unavailable without sqlite state")
         }
-        ThreadStoreError::Internal { .. } => {
+        ThreadStoreError::Retryable { .. }
+        | ThreadStoreError::OutcomeUnknown { .. }
+        | ThreadStoreError::Internal { .. } => {
             internal_error(format!("failed to validate Stateful run scope: {error}"))
         }
     }

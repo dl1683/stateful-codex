@@ -12,9 +12,13 @@ use super::*;
 fn answer(id: &str, order: u64, thread_id: ThreadId) -> ResponseItemEnvelope {
     ResponseItemEnvelope {
         item: ResponseItem::Message {
+            encrypted_content: None,
+            status: None,
             id: Some(ResponseItemId::from_server(id.to_string())),
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
+                annotations: None,
+                logprobs: None,
                 text: format!("answer {id}"),
             }],
             phase: Some(MessagePhase::FinalAnswer),

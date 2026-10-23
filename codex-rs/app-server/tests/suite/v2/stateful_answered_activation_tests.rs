@@ -226,7 +226,7 @@ async fn completion(contract: bool, issues: Vec<&str>, attempts: usize) -> Resul
                 receipt["instruction"]
                     .as_str()
                     .expect("instruction")
-                    .contains("cannot be verified as completed")
+                    .contains("verified Completion is unavailable")
             );
         }
     }

@@ -52,6 +52,7 @@ impl ConversationPacketBoundary {
 pub enum ConversationRecordKind {
     User,
     AssistantFinal,
+    /// Nonterminal assistant text, including stable partial answers.
     AssistantCommentary,
 }
 

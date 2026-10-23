@@ -1,3 +1,50 @@
+# Stateful Codex: Start here
+
+This is the Stateful fork. Work on canonical `main`, not an archive tag.
+Read [README.md](README.md) first; the upstream contributor rules below remain intact.
+
+## Navigation
+
+- `codex-rs/`: native Rust workspace; Stateful knowledge is in `project-intelligence/`,
+  agent integration in `ext/stateful/`, execution in `stateful-runtime/`.
+  `project-store/` and `windows-console-protocol/` include inactive components;
+  `stateful-memory/` provides bounded neutral reads. Avoid growing `codex-core`.
+- `clients/`: Stateful's dependency-free Node gateway/browser and evaluation tools.
+- `sdk/`: upstream client SDKs; `codex-cli/`: upstream distribution/launcher tooling.
+- `scripts/`: build/maintenance tools and the project-home launcher `scodex.py`.
+- `docs/`: imported upstream references; `docs/stateful/` is the five-file
+  Stateful contributor set authorized for this fork, not upstream product docs.
+- `assets/`: presentation assets; `bazel/` and `tools/`: build/lint infrastructure.
+- `patches/` and `third_party/`: dependency patches, vendored inputs and licenses.
+- `.github/`, `.cargo/`, `.vscode/`: CI, Cargo and editor setup.
+- Canonical contracts/source map: [architecture](docs/stateful/ARCHITECTURE.md).
+- Canonical build, storage, browser, tests and contribution guide:
+  [development](docs/stateful/DEVELOPMENT.md).
+- Canonical evidence ledger: [results](docs/stateful/RESULTS.md).
+- Canonical decisions, failures and recovery: [failures](docs/stateful/FAILURES.md).
+- Canonical benchmark protocol/commands: [evaluation](docs/stateful/EVALUATION.md).
+
+Current-tree corrections for inherited references below: the MCP connection
+manager is `codex-rs/codex-mcp/src/connection_manager.rs`; core integration
+tests are in `codex-rs/core/tests/suite/`. The app-server v2 protocol is now in
+`codex-rs/app-server-protocol/src/protocol/v2/`, with entry point `mod.rs`, rather
+than the inherited `v2.rs` filename. Model-context fragments are in
+`codex-rs/core/src/context/`, corresponding to the inherited `core/context`
+reference. The `$remote-tests` skill is externally
+supplied and is not included in this checkout; obtain it from your development
+environment before following its additional instructions.
+
+## Current status and boundaries
+
+Research preview, not release-qualified. Historical checks are dated in RESULTS.
+Native project-local home routing is landed; single-file conversion is inactive.
+Login/model/native memory and independent clean-clone acceptance remain unverified.
+Native memory, correction/Forget, compaction and upstream migration each require
+separate qualification. No hold is lifted by documentation.
+Do not revive retired rebuilds, import old knowledge, merge failing archives behind
+flags, enable foreign writes, weaken sandbox/authority rules, or publish private data.
+Preserve upstream docs, executable prompts, fixtures, migrations and existing work.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:

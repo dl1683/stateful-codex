@@ -93,6 +93,8 @@ fn call(arguments: &Value) -> ToolCall<'static> {
         source: ToolCallSource::Direct,
         conversation_history: ConversationHistory::default(),
         turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+        attachment_store: Arc::new(codex_attachment_store::InlineAttachmentStore),
+        ephemeral: false,
         environments: Vec::new(),
         payload: ToolPayload::Function {
             arguments: arguments.to_string(),

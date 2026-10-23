@@ -289,6 +289,7 @@ async fn backfill_large_single_item_is_passed_through() {
 fn summary_turn(id: &str, status: TurnStatus) -> Turn {
     Turn {
         id: id.to_string(),
+        root_turn_id: None,
         items_view: TurnItemsView::Summary,
         items: Vec::new(),
         status,

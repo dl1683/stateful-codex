@@ -2,7 +2,7 @@
 //!
 //! Every model request must carry exactly one full project root: installed in the replacement
 //! history by mid-turn compaction, not repeated on an unchanged step, amended by one update when the
-//! root changes, left out of a manual checkpoint and reinjected on the next turn, and reinjected
+//! root changes, installed in a manual checkpoint, and reinjected
 //! once when a thread is cold-resumed from either a compacted or an already repaired history.
 
 use std::collections::BTreeMap;
@@ -124,7 +124,7 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
     let _: ThreadCompactStartResponse = app.read_response(compact_request).await?;
     let _: TurnCompletedNotification = app.read_notification("turn/completed").await?;
 
-    // Restart straight from the manual checkpoint, whose history holds no root.
+    // Restart straight from the manual checkpoint, whose history holds the current root.
     drop(app);
     let mut app = start_app(codex_home.path()).await?;
     resume(&mut app, &thread_id).await?;
@@ -201,8 +201,8 @@ async fn project_root_appears_once_across_compaction_revision_and_resume() -> Re
     );
     assert!(seeded.root_revision.is_some() && revised.update_revision > seeded.root_revision);
 
-    // The mid-turn checkpoint installs the root; the manual checkpoint leaves it to the next turn.
-    assert_eq!(checkpoint_root_counts(&rollout)?, vec![1, 0]);
+    // Upstream rebuilds initial context for both mid-turn and manual checkpoints.
+    assert_eq!(checkpoint_root_counts(&rollout)?, vec![1, 1]);
 
     // The continuity record is installed once per context window: every request holds exactly
     // one, and the record rebuilt at the mid-turn boundary already shows that turn in progress.

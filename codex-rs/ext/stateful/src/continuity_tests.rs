@@ -1,3 +1,4 @@
+use crate::world_state_section_tests::text as fragment_text;
 use codex_extension_api::PreviousWorldStateSection;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -180,14 +181,17 @@ fn section_renders_once_per_context_window() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("a new window renders the record");
     assert_eq!(rendered.markers(), (START_MARKER, END_MARKER));
     assert!(section.matches_retained_fragment(
         "developer",
-        &format!("{START_MARKER}{}{END_MARKER}", rendered.body())
+        &format!("{START_MARKER}{}{END_MARKER}", fragment_text(&rendered))
     ));
     assert_eq!(
-        section.render_diff(PreviousWorldStateSection::Known(&previous)),
+        section
+            .render_diff(PreviousWorldStateSection::Known(&previous))
+            .1,
         None
     );
 }
@@ -289,8 +293,10 @@ fn deferred_section_renders_nothing_but_still_recognizes_a_record() {
     let record_text = format!("{START_MARKER}Project ID: project-1\nbody{END_MARKER}");
     assert_eq!(
         (
-            section.render_diff(PreviousWorldStateSection::Absent),
-            section.render_diff(PreviousWorldStateSection::Known(&deferred)),
+            section.render_diff(PreviousWorldStateSection::Absent).1,
+            section
+                .render_diff(PreviousWorldStateSection::Known(&deferred))
+                .1,
             section.matches_retained_fragment("developer", &record_text),
         ),
         (None, None, true)

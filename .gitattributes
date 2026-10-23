@@ -13,3 +13,4 @@ MODULE.bazel text eol=lf
 *.bzl.* text eol=lf
 *.sky text eol=lf
 *.sky.* text eol=lf
+patches/v8_array_sort_elements_kind.patch text eol=lf

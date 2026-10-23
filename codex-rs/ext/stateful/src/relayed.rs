@@ -22,6 +22,7 @@ use codex_project_intelligence::KnowledgeCategory;
 use codex_project_intelligence::KnowledgeContext;
 use codex_project_intelligence::NewBlackboardEntry;
 use codex_project_intelligence::RootPromotion;
+use codex_protocol::models::input_text;
 use serde_json::Value;
 use serde_json::json;
 use sha2::Digest;
@@ -358,7 +359,7 @@ impl RelayedNotePlan {
             shown,
             window_bytes,
         } = self;
-        WorldStateSectionContribution::new(
+        crate::world_state_section::fixed_world_state_section(
             WORLD_STATE_ID,
             json!({ "turnId": turn_id, "shown": shown, "windowBytes": window_bytes }),
             move |previous| {
@@ -368,7 +369,11 @@ impl RelayedNotePlan {
                     return None;
                 }
                 body.as_ref().map(|body| {
-                    RenderedWorldStateFragment::new("developer", (START_MARKER, END_MARKER), body)
+                    RenderedWorldStateFragment::new(
+                        "developer",
+                        (START_MARKER, END_MARKER),
+                        input_text(body.clone()),
+                    )
                 })
             },
         )

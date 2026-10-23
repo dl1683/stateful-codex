@@ -77,6 +77,7 @@ use crate::DeletedProject;
 use crate::ItemPage;
 use crate::ListItemsParams;
 use crate::ListProjectsParams;
+use crate::ListThreadAttachmentThreadsParams;
 use crate::ListThreadAttachmentsParams;
 use crate::ListThreadSectionsParams;
 use crate::ListThreadsParams;
@@ -105,6 +106,7 @@ use crate::StoredThread;
 use crate::StoredThreadHistory;
 use crate::StoredThreadSection;
 use crate::StoredThreadSectionsPage;
+use crate::ThreadAttachmentOwnerPage;
 use crate::ThreadAttachmentPage;
 use crate::ThreadMetadataPatch;
 use crate::ThreadOccurrenceSearchPage;
@@ -151,6 +153,8 @@ pub struct LocalThreadStore {
     state_db: Option<StateDbHandle>,
     thread_history_db: Arc<OnceCell<sqlx::SqlitePool>>,
     thread_data_cleanup: Option<Arc<ThreadDataCleanup>>,
+    #[cfg(test)]
+    startup_migration_retry_gate: Option<Arc<StartupMigrationRetryGate>>,
 }
 
 type ThreadDataCleanup = dyn Fn(Vec<ThreadId>) -> ThreadStoreFuture<'static, ()> + Send + Sync;
@@ -225,6 +229,14 @@ impl LiveWriterLocks {
     }
 }
 
+// Per-store synchronization for exercising startup contention through the public entry point.
+#[cfg(test)]
+#[derive(Default)]
+struct StartupMigrationRetryGate {
+    retry_started: tokio::sync::Notify,
+    retry_allowed: tokio::sync::Notify,
+}
+
 /// Process-scoped configuration for local thread storage.
 ///
 /// This describes where local storage lives. New-thread rollout metadata such
@@ -269,6 +281,8 @@ impl LocalThreadStore {
             state_db,
             thread_history_db: Arc::new(OnceCell::new()),
             thread_data_cleanup: None,
+            #[cfg(test)]
+            startup_migration_retry_gate: None,
         }
     }
 
@@ -323,6 +337,26 @@ impl LocalThreadStore {
     /// Return the live local rollout path for legacy local-only code paths.
     pub async fn live_rollout_path(&self, thread_id: ThreadId) -> ThreadStoreResult<PathBuf> {
         live_writer::rollout_path(self, thread_id).await
+    }
+
+    /// Select only materialized rollout inputs without creating a file for untouched threads.
+    pub(crate) async fn feedback_rollout_path(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadStoreResult<Option<PathBuf>> {
+        let (recorder, _, _) = live_writer::live_writer_parts(self, thread_id).await?;
+        if recorder
+            .unpersisted_session_meta()
+            .await
+            .map_err(|error| ThreadStoreError::Internal {
+                message: error.to_string(),
+            })?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        // Keep the path even if a materialized file was deleted: collection must report that error.
+        Ok(Some(recorder.rollout_path().to_path_buf()))
     }
 
     pub(super) async fn ensure_live_recorder_absent(
@@ -582,6 +616,25 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(async move { model_context::load_latest_model_context(self, params).await })
     }
 
+    fn is_model_context_current(
+        &self,
+        params: LoadThreadHistoryParams,
+        revision: String,
+    ) -> ThreadStoreFuture<'_, bool> {
+        Box::pin(async move {
+            let resolved = if params.include_archived {
+                thread_rollout_resolver::resolve_current_including_archived(self, params.thread_id)
+                    .await?
+            } else {
+                thread_rollout_resolver::resolve_current(self, params.thread_id).await?
+            };
+            let Some(resolved) = resolved else {
+                return Ok(false);
+            };
+            Ok(history_revision::read(&resolved.path).await.as_ref() == Some(&revision))
+        })
+    }
+
     fn prepare_fork(&self, params: PrepareForkParams) -> ThreadStoreFuture<'_, PreparedFork> {
         Box::pin(async move { paginated_fork::prepare(self, params).await })
     }
@@ -670,6 +723,15 @@ impl ThreadStore for LocalThreadStore {
         params: ListThreadAttachmentsParams,
     ) -> ThreadStoreFuture<'_, ThreadAttachmentPage> {
         Box::pin(async move { thread_attachments::list_thread_attachments(self, params).await })
+    }
+
+    fn list_thread_attachment_threads(
+        &self,
+        params: ListThreadAttachmentThreadsParams,
+    ) -> ThreadStoreFuture<'_, ThreadAttachmentOwnerPage> {
+        Box::pin(
+            async move { thread_attachments::list_thread_attachment_threads(self, params).await },
+        )
     }
 
     fn remove_thread_attachment(
@@ -802,6 +864,8 @@ impl ThreadStore for LocalThreadStore {
 mod tests {
     #[path = "acquisition_tests.rs"]
     mod acquisition_tests;
+    #[path = "delegated_preview_tests.rs"]
+    mod delegated_preview_tests;
     use std::sync::Arc;
 
     use codex_protocol::ThreadId;
@@ -1014,6 +1078,7 @@ mod tests {
                     memory_mode: ThreadMemoryMode::Enabled,
                 },
             },
+            /*resume_preparation*/ None,
         )
         .await
         .expect("resume paginated thread from its requested rollout");
@@ -1064,26 +1129,20 @@ mod tests {
                 root_turn_id: None,
                 disabled_plugin_ids: None,
                 cwd: serde_json::from_value(serde_json::json!(cwd)).expect("absolute cwd"),
-                workspace_roots: None,
-                current_date: None,
-                timezone: None,
                 approval_policy,
                 approvals_reviewer: None,
                 sandbox_policy: SandboxPolicy::DangerFullAccess,
                 permission_profile: None,
                 active_permission_profile: None,
-                network: None,
                 file_system_sandbox_policy: None,
                 model: model.to_string(),
                 comp_hash: None,
-                personality: None,
                 collaboration_mode: None,
                 multi_agent_version: None,
-                multi_agent_mode: None,
                 realtime_active: None,
                 cyber_access_program: None,
                 effort: None,
-                summary: ReasoningSummary::Auto,
+                summary: Some(ReasoningSummary::Auto),
             })
         };
 
@@ -1151,6 +1210,7 @@ mod tests {
         live_thread
             .append_items(&[RolloutItem::EventMsg(EventMsg::TurnStarted(
                 TurnStartedEvent {
+                    turn_attribution: None,
                     turn_id: "turn-1".to_string(),
                     root_turn_id: None,
                     trace_id: None,
@@ -1196,6 +1256,7 @@ mod tests {
                     },
                 )),
                 RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                    root_turn_id: None,
                     turn_id: "turn-1".to_string(),
                     started_at: None,
                     last_agent_message: None,
@@ -1368,6 +1429,7 @@ mod tests {
                     memory_mode: ThreadMemoryMode::Enabled,
                 },
             },
+            /*resume_preparation*/ None,
         )
         .await
         .expect("resume live thread");
@@ -1424,6 +1486,7 @@ mod tests {
                     memory_mode: ThreadMemoryMode::Enabled,
                 },
             },
+            /*resume_preparation*/ None,
         )
         .await
         .expect("resume external live thread");
@@ -1690,6 +1753,8 @@ mod tests {
 
             let late_edit = RolloutItem::ResponseItem(
                 ResponseItem::Message {
+                    status: None,
+                    encrypted_content: None,
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {

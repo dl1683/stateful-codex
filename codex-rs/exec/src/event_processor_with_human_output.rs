@@ -41,6 +41,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
     stateful_attribution: StatefulAttributionAccumulator,
     /// What project memory newly saved during this run, by kind, for the closing summary.
     memory_saved: std::collections::BTreeMap<&'static str, usize>,
+    last_turn_diff: String,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -65,6 +66,7 @@ impl EventProcessorWithHumanOutput {
             final_message: None,
             final_message_rendered: false,
             emit_final_message_on_shutdown: false,
+            last_turn_diff: String::new(),
             stateful_attribution: StatefulAttributionAccumulator::default(),
             memory_saved: std::collections::BTreeMap::new(),
         }
@@ -453,9 +455,12 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 TurnStatus::InProgress => CodexStatus::Running,
             },
             ServerNotification::TurnDiffUpdated(notification) => {
-                if !notification.diff.trim().is_empty() {
+                if notification.diff != self.last_turn_diff && !notification.diff.trim().is_empty()
+                {
                     eprintln!("{}", notification.diff);
                 }
+                // Remember empty updates too, so a restored diff is rendered again.
+                self.last_turn_diff = notification.diff;
                 CodexStatus::Running
             }
             ServerNotification::TurnPlanUpdated(notification) => {
@@ -483,6 +488,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             ServerNotification::TurnStarted(notification) => {
                 self.stateful_attribution.start_turn(&notification.turn.id);
+                self.last_turn_diff.clear();
                 CodexStatus::Running
             }
             _ => CodexStatus::Running,

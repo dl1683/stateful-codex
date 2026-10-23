@@ -225,6 +225,7 @@ macro_rules! client_request_definitions {
     ) => {
         /// Request from the client to the server.
         #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+        #[allow(clippy::large_enum_variant)]
         #[serde(tag = "method", rename_all = "camelCase")]
         pub enum ClientRequest {
             $(
@@ -566,6 +567,19 @@ client_request_definitions! {
         serialization: thread_or_path(params.thread_id, params.path),
         response: v2::ThreadForkResponse,
     },
+    #[experimental("thread/sample")]
+    ThreadSample => "thread/sample" {
+        params: v2::ThreadSampleParams,
+        // Waiting for a sample must not block requests on its parent thread.
+        serialization: None,
+        response: v2::ThreadSampleResponse,
+    },
+    #[experimental("thread/sample/cancel")]
+    ThreadSampleCancel => "thread/sample/cancel" {
+        params: v2::ThreadSampleCancelParams,
+        serialization: None,
+        response: v2::ThreadSampleCancelResponse,
+    },
     ThreadArchive => "thread/archive" {
         params: v2::ThreadArchiveParams,
         serialization: thread_id(params.thread_id),
@@ -677,6 +691,11 @@ client_request_definitions! {
         params: v2::ThreadAttachmentListParams,
         serialization: None,
         response: v2::ThreadAttachmentListResponse,
+    },
+    ThreadAttachmentOwnerList => "thread/attachmentOwner/list" {
+        params: v2::ThreadAttachmentOwnerListParams,
+        serialization: None,
+        response: v2::ThreadAttachmentOwnerListResponse,
     },
     ThreadAttachmentRemove => "thread/attachment/remove" {
         params: v2::ThreadAttachmentRemoveParams,
@@ -1016,6 +1035,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadReadResponse,
     },
+    #[experimental("thread/readState/update")]
+    ThreadReadStateUpdate => "thread/readState/update" {
+        params: v2::ThreadReadStateUpdateParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadReadStateUpdateResponse,
+    },
     // Uses `inspect_params` because only `persistBeforeList` is experimental.
     ThreadTurnsList => "thread/turns/list" {
         params: v2::ThreadTurnsListParams,
@@ -1029,6 +1054,13 @@ client_request_definitions! {
         // Explicitly concurrent: this primarily reads append-only rollout storage.
         serialization: None,
         response: v2::ThreadItemsListResponse,
+    },
+    #[experimental("thread/items/read")]
+    ThreadItemsRead => "thread/items/read" {
+        params: v2::ThreadItemsReadParams,
+        // Explicitly concurrent: this primarily reads append-only rollout storage.
+        serialization: None,
+        response: v2::ThreadItemsReadResponse,
     },
     /// Append raw Responses API items to the thread history without starting a user turn.
     ThreadInjectItems => "thread/inject_items" {
@@ -1464,6 +1496,13 @@ client_request_definitions! {
         response: v2::BedrockSetupResponse,
     },
 
+    #[experimental("account/bedrock/checkGovCloudRequirements")]
+    BedrockCheckGovCloudRequirements => "account/bedrock/checkGovCloudRequirements" {
+        params: v2::BedrockCheckGovCloudRequirementsParams,
+        serialization: global("account-auth"),
+        response: v2::BedrockCheckGovCloudRequirementsResponse,
+    },
+
     CancelLoginAccount => "account/login/cancel" {
         params: v2::CancelLoginAccountParams,
         serialization: global("account-auth"),
@@ -1510,6 +1549,12 @@ client_request_definitions! {
         params: v2::FeedbackUploadParams,
         serialization: None,
         response: v2::FeedbackUploadResponse,
+    },
+
+    FeedbackSave => "feedback/save" {
+        params: v2::FeedbackSaveParams,
+        serialization: None,
+        response: v2::FeedbackSaveResponse,
     },
 
     /// Execute a standalone command (argv vector) under the server's sandbox.
@@ -2088,6 +2133,8 @@ server_notification_definitions! {
     Error => "error" (v2::ErrorNotification),
     ThreadStarted => "thread/started" (v2::ThreadStartedNotification),
     ThreadStatusChanged => "thread/status/changed" (v2::ThreadStatusChangedNotification),
+    #[experimental("thread/readState/changed")]
+    ThreadReadStateChanged => "thread/readState/changed" (v2::ThreadReadStateChangedNotification),
     ThreadArchived => "thread/archived" (v2::ThreadArchivedNotification),
     ThreadDeleted => "thread/deleted" (v2::ThreadDeletedNotification),
     ThreadUnarchived => "thread/unarchived" (v2::ThreadUnarchivedNotification),
@@ -2755,7 +2802,9 @@ mod tests {
         let environment_add = ClientRequest::EnvironmentAdd {
             request_id: request_id(),
             params: v2::EnvironmentAddParams {
+                skills: None,
                 auth_bearer_token: None,
+                websocket_request_id: None,
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
                 connect_timeout_ms: None,
@@ -4010,7 +4059,9 @@ mod tests {
         let request = ClientRequest::EnvironmentAdd {
             request_id: RequestId::Integer(9),
             params: v2::EnvironmentAddParams {
+                skills: None,
                 auth_bearer_token: Some("private-executor-token".into()),
+                websocket_request_id: Some("caller-sample-id".to_string()),
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
                 connect_timeout_ms: Some(300_000),
@@ -4025,7 +4076,9 @@ mod tests {
                     "environmentId": "remote-a",
                     "execServerUrl": "ws://127.0.0.1:8765",
                     "connectTimeoutMs": 300000,
-                    "authBearerToken": "private-executor-token"
+                    "authBearerToken": "private-executor-token",
+                    "websocketRequestId": "caller-sample-id",
+                    "skills": null
                 }
             }),
             serde_json::to_value(&request)?,
@@ -4230,6 +4283,7 @@ mod tests {
                 realtime_end_instructions: Some("Resume normal text responses.".to_string()),
                 prompt: Some(Some("You are on a call".to_string())),
                 realtime_session_id: Some("sess_456".to_string()),
+                voice_session_id: Some("voice_789".to_string()),
                 transport: None,
                 version: Some(RealtimeConversationVersion::V3),
                 voice: Some(RealtimeVoice::Marin),
@@ -4269,6 +4323,7 @@ mod tests {
                     "realtimeEndInstructions": "Resume normal text responses.",
                     "prompt": "You are on a call",
                     "realtimeSessionId": "sess_456",
+                    "voiceSessionId": "voice_789",
                     "transport": null,
                     "version": "v3",
                     "voice": "marin"
@@ -4301,6 +4356,7 @@ mod tests {
                 realtime_end_instructions: None,
                 prompt: None,
                 realtime_session_id: None,
+                voice_session_id: None,
                 transport: None,
                 version: None,
                 voice: None,
@@ -4326,6 +4382,7 @@ mod tests {
                     "realtimeStartInstructions": null,
                     "realtimeEndInstructions": null,
                     "realtimeSessionId": null,
+                    "voiceSessionId": null,
                     "transport": null,
                     "version": null,
                     "voice": null
@@ -4354,6 +4411,7 @@ mod tests {
                 realtime_end_instructions: None,
                 prompt: Some(None),
                 realtime_session_id: None,
+                voice_session_id: None,
                 transport: None,
                 version: None,
                 voice: None,
@@ -4380,6 +4438,7 @@ mod tests {
                     "realtimeEndInstructions": null,
                     "prompt": null,
                     "realtimeSessionId": null,
+                    "voiceSessionId": null,
                     "transport": null,
                     "version": null,
                     "voice": null
@@ -4536,21 +4595,13 @@ mod tests {
     }
 
     #[test]
-    fn mock_experimental_method_is_marked_experimental() {
-        let request = ClientRequest::MockExperimentalMethod {
-            request_id: RequestId::Integer(1),
-            params: v2::MockExperimentalMethodParams::default(),
-        };
-        let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
-        assert_eq!(reason, Some("mock/experimentalMethod"));
-    }
-
-    #[test]
     fn environment_add_is_marked_experimental() {
         let request = ClientRequest::EnvironmentAdd {
             request_id: RequestId::Integer(1),
             params: v2::EnvironmentAddParams {
+                skills: None,
                 auth_bearer_token: None,
+                websocket_request_id: None,
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
                 connect_timeout_ms: None,
@@ -4584,37 +4635,6 @@ mod tests {
 
         let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
         assert_eq!(reason, Some("command/exec.permissionProfile"));
-    }
-
-    #[test]
-    fn thread_realtime_start_is_marked_experimental() {
-        let request = ClientRequest::ThreadRealtimeStart {
-            request_id: RequestId::Integer(1),
-            params: v2::ThreadRealtimeStartParams {
-                client_managed_handoffs: None,
-                delegation_ack_filler: None,
-                flush_transcript_tail_on_session_end: None,
-                codex_responses_as_items: None,
-                codex_response_item_prefix: None,
-                codex_response_handoff_mode: None,
-                backend_reasoning_status: false,
-                codex_response_handoff_channel_prefixes: None,
-                thread_id: "thr_123".to_string(),
-                model: None,
-                output_modality: RealtimeOutputModality::Audio,
-                include_startup_context: None,
-                initial_items: None,
-                realtime_start_instructions: None,
-                realtime_end_instructions: None,
-                prompt: Some(Some("You are on a call".to_string())),
-                realtime_session_id: None,
-                transport: None,
-                version: None,
-                voice: None,
-            },
-        };
-        let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
-        assert_eq!(reason, Some("thread/realtime/start"));
     }
 
     #[test]

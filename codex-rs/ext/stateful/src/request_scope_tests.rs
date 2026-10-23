@@ -1,3 +1,5 @@
+use crate::world_state_section_tests::snapshot as section_snapshot;
+use crate::world_state_section_tests::text as fragment_text;
 use pretty_assertions::assert_eq;
 
 use codex_extension_api::PreviousWorldStateSection;
@@ -189,7 +191,8 @@ fn scope_notes_name_their_request_and_count_against_the_window() {
         let body = plan
             .section()
             .render_diff(previous)
-            .map(|fragment| fragment.body().to_string());
+            .1
+            .map(|fragment| fragment_text(&fragment).to_string());
         (body, bytes)
     };
     let note = format!(
@@ -321,8 +324,8 @@ fn notes_share_a_bounded_reserve_and_legacy_restrictions_are_retired() {
             plan.window_bytes
         );
         let section = plan.section();
-        noted.push(section.snapshot()["noted"].as_bool());
-        previous = Some(section.snapshot().clone());
+        noted.push(section_snapshot(&section)["noted"].as_bool());
+        previous = Some(section_snapshot(&section));
     }
     assert_eq!(noted, vec![Some(true), Some(true), Some(true), Some(false)]);
 
@@ -331,7 +334,8 @@ fn notes_share_a_bounded_reserve_and_legacy_restrictions_are_retired() {
     let body = ScopeNotePlan::new(Some(&legacy), "turn-9", RequestScope::Continuity, None)
         .section()
         .render_diff(PreviousWorldStateSection::Known(&legacy))
-        .map(|fragment| fragment.body().to_string());
+        .1
+        .map(|fragment| fragment_text(&fragment).to_string());
     assert_eq!(body, Some(LEGACY_RETIREMENT.to_string()));
 }
 
@@ -348,7 +352,7 @@ fn steered_narrow_turns_stay_within_the_reserve_and_notes_survive_a_new_window()
         for scope in [RequestScope::SelfContained, RequestScope::Continuity] {
             let plan = ScopeNotePlan::new(previous.as_ref(), &turn_id, scope, Some(&head));
             charges.push(plan.window_bytes);
-            previous = Some(plan.section().snapshot().clone());
+            previous = Some(section_snapshot(&plan.section()));
         }
     }
     assert!(
@@ -360,7 +364,7 @@ fn steered_narrow_turns_stay_within_the_reserve_and_notes_survive_a_new_window()
     // when compaction removed the fragment the note is rendered again.
     let first = ScopeNotePlan::new(None, "turn-1", RequestScope::SelfContained, Some(&head));
     let first_bytes = first.window_bytes;
-    let first_snapshot = first.section().snapshot().clone();
+    let first_snapshot = section_snapshot(&first.section());
     let replanned = ScopeNotePlan::new(
         Some(&first_snapshot),
         "turn-1",
@@ -373,9 +377,11 @@ fn steered_narrow_turns_stay_within_the_reserve_and_notes_survive_a_new_window()
         (
             section
                 .render_diff(PreviousWorldStateSection::Known(&first_snapshot))
+                .1
                 .is_some(),
             section
                 .render_diff(PreviousWorldStateSection::Absent)
+                .1
                 .is_some(),
         ),
         (false, true)

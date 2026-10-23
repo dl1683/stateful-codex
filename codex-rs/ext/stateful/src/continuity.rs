@@ -8,11 +8,12 @@
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
+use codex_protocol::models::input_text;
 use serde_json::json;
 
 use crate::continuity_excerpt::quote_excerpt;
 
-const WORLD_STATE_ID: &str = "stateful_continuity";
+pub(super) const WORLD_STATE_ID: &str = "stateful_continuity";
 pub(super) const START_MARKER: &str = "<stateful_continuity>";
 pub(super) const END_MARKER: &str = "</stateful_continuity>";
 /// Hard bound for the whole fragment, markers included (about 2k tokens); a P0 item.
@@ -417,7 +418,7 @@ pub(super) fn continuity_world_state_section(
 ) -> WorldStateSectionContribution {
     let project_id = record.project_id.clone();
     let body = record.render(max_fragment_bytes);
-    WorldStateSectionContribution::new(
+    crate::world_state_section::fixed_world_state_section(
         WORLD_STATE_ID,
         json!({ "projectId": project_id }),
         move |previous| match previous {
@@ -426,7 +427,7 @@ pub(super) fn continuity_world_state_section(
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (START_MARKER, END_MARKER),
-                    body.clone(),
+                    input_text(body.clone()),
                 ))
             }
         },
@@ -443,7 +444,7 @@ pub(super) fn continuity_world_state_section(
 /// harness reports the section absent while no record fragment is in history).
 pub(super) fn deferred_continuity_section(project_id: &str) -> WorldStateSectionContribution {
     let project_id = project_id.to_string();
-    WorldStateSectionContribution::new(
+    crate::world_state_section::fixed_world_state_section(
         WORLD_STATE_ID,
         json!({ "projectId": project_id, "deferred": true }),
         |_| None,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::world_state_section_tests::snapshot as section_snapshot;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_state::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -55,20 +56,22 @@ async fn c3r1_source_handle_redelivery_preserves_honest_bounded_lower_bound() {
     let replay = handle_section(turn_store.get::<SourceHandles>().as_deref())
         .unwrap()
         .1;
-    assert_eq!(replay.snapshot(), first.snapshot());
+    assert_eq!(section_snapshot(&replay), section_snapshot(&first));
     assert!(
         replay
-            .render_diff(PreviousWorldStateSection::Known(first.snapshot()))
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(&first)))
+            .1
             .is_none()
     );
     extension
         .observe_original_item(&thread_store, &turn_store, &messages[8])
         .await;
     let (bytes, ninth) = handle_section(turn_store.get::<SourceHandles>().as_deref()).unwrap();
-    assert_eq!(ninth.snapshot()["omittedIsExact"], false);
+    assert_eq!(section_snapshot(&ninth)["omittedIsExact"], false);
     assert!(
         ninth
-            .render_diff(PreviousWorldStateSection::Known(first.snapshot()))
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(&first)))
+            .1
             .is_some()
     );
     assert!(bytes <= 899);
@@ -80,7 +83,7 @@ async fn c3r1_source_handle_redelivery_preserves_honest_bounded_lower_bound() {
             .unwrap()
             .1;
         // The unknown tail stays a lower bound; replay cannot inflate a false total.
-        assert_eq!(next.snapshot(), ninth.snapshot());
+        assert_eq!(section_snapshot(&next), section_snapshot(&ninth));
         assert_eq!(turn_store.get::<SourceHandles>().unwrap().handles.len(), 8);
     }
     // An unhandled original has no handle, yet its sealed bytes stay exactly readable.

@@ -1,3 +1,5 @@
+use crate::world_state_section_tests::snapshot as section_snapshot;
+use crate::world_state_section_tests::text as fragment_text;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::PreviousWorldStateSection;
@@ -45,7 +47,7 @@ fn section(status: ProjectIntelligenceStatus) -> WorldStateSectionContribution {
 
 fn assert_fragment_bounded(fragment: &RenderedWorldStateFragment) {
     let (start, end) = fragment.markers();
-    assert!(start.len() + fragment.body().len() + end.len() <= MAX_MODEL_ITEM_BYTES);
+    assert!(start.len() + fragment_text(fragment).len() + end.len() <= MAX_MODEL_ITEM_BYTES);
 }
 
 fn project(name: &str, roots: Vec<StoredProjectRoot>) -> StoredProject {
@@ -115,7 +117,10 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
     let current = section(current);
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("changed refresh health must be visible");
 
     // Status lines are replaced as one block, so no stale health line survives.
@@ -124,17 +129,12 @@ fn incomplete_refresh_health_is_visible_and_changes_project_context() {
         ("<stateful_project_update>", "</stateful_project_update>")
     );
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Current status lines (replace every earlier status line):")
     );
-    assert!(rendered.body().contains("inventoryComplete=false"));
-    assert!(rendered.body().contains("filesSkipped=1"));
-    assert!(
-        rendered
-            .body()
-            .contains("Do not infer that an unindexed file is absent")
-    );
+    assert!(fragment_text(&rendered).contains("inventoryComplete=false"));
+    assert!(fragment_text(&rendered).contains("filesSkipped=1"));
+    assert!(fragment_text(&rendered).contains("Do not infer that an unindexed file is absent"));
 }
 
 #[test]
@@ -148,6 +148,7 @@ fn renders_selected_project_as_bounded_typed_world_state() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("new project state should render");
 
     assert_eq!(rendered.role(), "developer");
@@ -155,15 +156,11 @@ fn renders_selected_project_as_bounded_typed_world_state() {
         rendered.markers(),
         ("<stateful_project>", "</stateful_project>")
     );
-    assert!(rendered.body().contains("Project ID: project-1"));
-    assert!(rendered.body().contains("Project name: Research Project"));
-    assert!(rendered.body().contains("C:\\work\\research"));
-    assert!(rendered.body().contains("Project intelligence revision: 0"));
-    assert!(
-        rendered
-            .body()
-            .contains("had their cited source bytes rechecked this turn")
-    );
+    assert!(fragment_text(&rendered).contains("Project ID: project-1"));
+    assert!(fragment_text(&rendered).contains("Project name: Research Project"));
+    assert!(fragment_text(&rendered).contains("C:\\work\\research"));
+    assert!(fragment_text(&rendered).contains("Project intelligence revision: 0"));
+    assert!(fragment_text(&rendered).contains("had their cited source bytes rechecked this turn"));
     for phrase in [
         "continue from it instead of rediscovering it",
         "do not query or reread merely to confirm what is shown",
@@ -177,21 +174,25 @@ fn renders_selected_project_as_bounded_typed_world_state() {
         "at most 8 E aliases directly material to the outcome",
         "rootRevision is not the run's expectedRevision",
     ] {
-        assert!(rendered.body().contains(phrase), "missing {phrase:?}");
+        assert!(
+            fragment_text(&rendered).contains(phrase),
+            "missing {phrase:?}"
+        );
     }
-    assert!(!rendered.body().contains("established premises"));
-    assert!(rendered.body().len() <= MAX_BODY_BYTES);
+    assert!(!fragment_text(&rendered).contains("established premises"));
+    assert!(fragment_text(&rendered).len() <= MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
 }
 
 #[test]
 fn unchanged_snapshot_does_not_repeat_project_context() {
     let section = section(available(project("Research", Vec::new())));
-    let snapshot = section.snapshot().clone();
+    let snapshot = section_snapshot(&section);
 
     assert!(
         section
             .render_diff(PreviousWorldStateSection::Known(&snapshot))
+            .1
             .is_none()
     );
 }
@@ -206,7 +207,10 @@ fn invisible_project_metadata_change_does_not_repeat_project_context() {
 
     assert!(
         current
-            .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+                &previous
+            )))
+            .1
             .is_none()
     );
 }
@@ -217,13 +221,14 @@ fn unknown_legacy_snapshot_renders_the_full_current_packet() {
 
     let rendered = current
         .render_diff(PreviousWorldStateSection::Unknown)
+        .1
         .expect("unknown legacy state must be replaced with current project intelligence");
 
     assert_eq!(
         rendered.markers(),
         ("<stateful_project>", "</stateful_project>")
     );
-    assert!(rendered.body().contains("Project intelligence revision: 0"));
+    assert!(fragment_text(&rendered).contains("Project intelligence revision: 0"));
 }
 
 #[test]
@@ -253,7 +258,10 @@ fn revision_only_change_renders_a_compact_update() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("the completion revision must be updated");
 
     assert_eq!(
@@ -261,10 +269,10 @@ fn revision_only_change_renders_a_compact_update() {
         ("<stateful_project_update>", "</stateful_project_update>")
     );
     assert_eq!(
-        rendered.body(),
+        fragment_text(&rendered),
         "Project intelligence revision advanced from 7 to 11. The model-visible root blackboard knowledge and source routes are unchanged. Use rootRevision 11 for completion; retain the existing root packet for reasoning and routing."
     );
-    assert!(!rendered.body().contains("Project roots:"));
+    assert!(!fragment_text(&rendered).contains("Project roots:"));
     assert_fragment_bounded(&rendered);
 }
 
@@ -294,9 +302,10 @@ fn hard_bound_uses_whole_lines_and_truthful_omission() {
         .collect();
     let rendered = section(with_entries(/*revision*/ 3, entries))
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("dense project state should render");
     assert_fragment_bounded(&rendered);
-    assert!(rendered.body().contains("omitted by the context bound"));
+    assert!(fragment_text(&rendered).contains("omitted by the context bound"));
 }
 
 #[test]
@@ -313,7 +322,7 @@ fn unexpected_fragment_overflow_clears_visible_root() {
         super::RegistryUpdate::Record(None),
     );
     assert_fragment_bounded(&rendered);
-    assert!(rendered.body().contains("exceeded its hard byte bound"));
+    assert!(fragment_text(&rendered).contains("exceeded its hard byte bound"));
     assert_eq!(registry.get("thread-1"), None);
 }
 
@@ -331,7 +340,10 @@ fn rewritten_status_line_replaces_the_status_block() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("changed root knowledge must render");
 
     assert_eq!(
@@ -339,16 +351,11 @@ fn rewritten_status_line_replaces_the_status_block() {
         ("<stateful_project_update>", "</stateful_project_update>")
     );
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Current status lines (replace every earlier status line):")
     );
-    assert!(!rendered.body().contains("Project roots:"));
-    assert!(
-        rendered
-            .body()
-            .contains("3 candidate entries await promotion (not shown)")
-    );
+    assert!(!fragment_text(&rendered).contains("Project roots:"));
+    assert!(fragment_text(&rendered).contains("3 candidate entries await promotion (not shown)"));
 }
 
 #[test]
@@ -370,14 +377,17 @@ fn promoted_entry_change_sends_only_new_lines_and_alias_moves() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("root change must render");
 
     assert_eq!(
         rendered.markers(),
         ("<stateful_project_update>", "</stateful_project_update>")
     );
-    let body = rendered.body();
+    let body = fragment_text(&rendered);
     assert_fragment_bounded(&rendered);
     assert!(body.contains("revision advanced from 3 to 4"));
     assert!(body.contains("The permit UTH-0441 was never transferred."));
@@ -392,7 +402,7 @@ fn snapshot_without_root_layout_falls_back_to_the_full_packet() {
         /*revision*/ 3,
         vec![hit("entry-b", "The approval threshold is 10.")],
     ));
-    let mut legacy = previous.snapshot().clone();
+    let mut legacy = section_snapshot(&previous);
     let legacy_object = legacy.as_object_mut().expect("snapshot is an object");
     legacy_object.remove("rootEntries");
     let current = section(with_entries(
@@ -402,6 +412,7 @@ fn snapshot_without_root_layout_falls_back_to_the_full_packet() {
 
     let rendered = current
         .render_diff(PreviousWorldStateSection::Known(&legacy))
+        .1
         .expect("root change must render");
 
     assert_eq!(
@@ -427,7 +438,10 @@ fn wholesale_root_change_renders_the_full_packet() {
     let current = section(with_entries(/*revision*/ 4, replacement));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("root change must render");
 
     assert_eq!(
@@ -496,11 +510,14 @@ fn long_project_metadata_is_truncated_on_utf8_boundaries() {
     )));
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("new project state should render");
 
-    assert!(rendered.body().len() <= MAX_BODY_BYTES);
-    assert!(codex_utils_string::approx_token_count(rendered.body()) <= MAX_ESTIMATED_TOKENS);
-    assert!(std::str::from_utf8(rendered.body().as_bytes()).is_ok());
+    assert!(fragment_text(&rendered).len() <= MAX_BODY_BYTES);
+    assert!(
+        codex_utils_string::approx_token_count(fragment_text(&rendered)) <= MAX_ESTIMATED_TOKENS
+    );
+    assert!(std::str::from_utf8(fragment_text(&rendered).as_bytes()).is_ok());
 }
 
 #[test]
@@ -549,7 +566,7 @@ fn visible_root_tracks_only_what_the_model_holds_in_full() {
         /*revision*/ 3,
         vec![hit("entry-a", "The permit was never transferred."), derived],
     ));
-    first.render_diff(PreviousWorldStateSection::Absent);
+    let (first_snapshot, _) = first.render_diff(PreviousWorldStateSection::Absent);
     let shown = registry
         .get("thread-1")
         .expect("full render records the root");
@@ -565,19 +582,23 @@ fn visible_root_tracks_only_what_the_model_holds_in_full() {
         /*revision*/ 4,
         vec![hit("entry-a", "The permit was never transferred.")],
     ));
-    same.render_diff(PreviousWorldStateSection::Known(first.snapshot()));
+    same.render_diff(PreviousWorldStateSection::Known(
+        first_snapshot.as_ref().expect("first snapshot"),
+    ));
     assert_eq!(registry.get("thread-1"), None);
 
     let full = tracked(with_entries(
         /*revision*/ 5,
         vec![hit("entry-a", "The permit was never transferred.")],
     ));
-    full.render_diff(PreviousWorldStateSection::Absent);
+    let (full_snapshot, _) = full.render_diff(PreviousWorldStateSection::Absent);
     let advanced = tracked(with_entries(
         /*revision*/ 6,
         vec![hit("entry-a", "The permit was never transferred.")],
     ));
-    advanced.render_diff(PreviousWorldStateSection::Known(full.snapshot()));
+    advanced.render_diff(PreviousWorldStateSection::Known(
+        full_snapshot.as_ref().expect("full snapshot"),
+    ));
     assert_eq!(
         registry.get("thread-1").map(|shown| shown.project_revision),
         Some(6)
@@ -647,10 +668,13 @@ fn edited_tail_of_a_long_entry_is_sent_as_a_change() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("an edited entry must render");
 
-    assert!(rendered.body().contains("TAIL-NEW"));
+    assert!(fragment_text(&rendered).contains("TAIL-NEW"));
 }
 
 #[test]
@@ -681,12 +705,15 @@ fn non_content_semantic_changes_reach_the_model_as_changes() {
         ("premise pin", &previous_pin, pinned(2), "@r2"),
     ] {
         let rendered = section(with_entries(/*revision*/ 4, vec![changed]))
-            .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+                previous,
+            )))
+            .1
             .unwrap_or_else(|| panic!("a {label} change must render"));
         assert!(
-            rendered.body().contains(expected),
+            fragment_text(&rendered).contains(expected),
             "{label}: {}",
-            rendered.body()
+            fragment_text(&rendered)
         );
     }
 }
@@ -714,13 +741,16 @@ fn entry_freshness_change_reaches_the_root_delta() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("freshness-only root change must render");
 
     assert_eq!(
         rendered.markers(),
         ("<stateful_project_update>", "</stateful_project_update>")
     );
-    assert!(rendered.body().contains("evidence=stale"));
-    assert!(rendered.body().contains("verification=stale"));
+    assert!(fragment_text(&rendered).contains("evidence=stale"));
+    assert!(fragment_text(&rendered).contains("verification=stale"));
 }

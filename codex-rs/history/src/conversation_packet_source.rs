@@ -72,7 +72,7 @@ impl CandidateText<'_> {
         content
             .iter()
             .filter_map(|item| match item {
-                ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
                     Some(text.as_str())
                 }
                 _ => None,
@@ -450,7 +450,11 @@ fn record_kind(
         | (RetainedSourceRole::Assistant, None, Some(AssistantDeliveryClassification::Final)) => {
             Some(ConversationRecordKind::AssistantFinal)
         }
-        (RetainedSourceRole::Assistant, Some(MessagePhase::Commentary), _)
+        (
+            RetainedSourceRole::Assistant,
+            Some(MessagePhase::Commentary | MessagePhase::PartialAnswer),
+            _,
+        )
         | (
             RetainedSourceRole::Assistant,
             None,

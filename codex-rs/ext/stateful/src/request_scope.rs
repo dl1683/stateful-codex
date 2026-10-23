@@ -10,6 +10,7 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
+use codex_protocol::models::input_text;
 use codex_protocol::user_input::UserInput;
 use serde_json::Value;
 use serde_json::json;
@@ -205,17 +206,25 @@ impl ScopeNotePlan {
             "noted": noted,
             "windowBytes": window_bytes,
         });
-        WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot, move |previous| {
-            if let PreviousWorldStateSection::Known(previous) = previous
-                && previous.get("turnId").and_then(Value::as_str) == Some(turn_id.as_str())
-                && previous.get("scope").and_then(Value::as_str) == Some(scope.name())
-            {
-                return None;
-            }
-            note.as_ref().map(|note| {
-                RenderedWorldStateFragment::new("developer", (START_MARKER, END_MARKER), note)
-            })
-        })
+        crate::world_state_section::fixed_world_state_section(
+            WORLD_STATE_ID,
+            snapshot,
+            move |previous| {
+                if let PreviousWorldStateSection::Known(previous) = previous
+                    && previous.get("turnId").and_then(Value::as_str) == Some(turn_id.as_str())
+                    && previous.get("scope").and_then(Value::as_str) == Some(scope.name())
+                {
+                    return None;
+                }
+                note.as_ref().map(|note| {
+                    RenderedWorldStateFragment::new(
+                        "developer",
+                        (START_MARKER, END_MARKER),
+                        input_text(note.clone()),
+                    )
+                })
+            },
+        )
         .with_retained_fragment_matcher(|role, text| {
             role == "developer"
                 && text.trim_start().starts_with(START_MARKER)

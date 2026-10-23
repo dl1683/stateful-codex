@@ -1,4 +1,5 @@
 use super::*;
+use crate::sqlite::SqliteWriteQueryExt;
 
 /// Opaque ownership proof for one rollout metadata backfill worker.
 ///
@@ -52,7 +53,7 @@ WHERE id = 1
         .bind(crate::BackfillStatus::Complete.as_str())
         .bind(crate::BackfillStatus::Running.as_str())
         .bind(lease_cutoff)
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok((result.rows_affected() == 1).then_some(BackfillLease { owner_token }))
     }
@@ -69,7 +70,7 @@ WHERE id = 1
         )
         .bind(crate::BackfillStatus::Running.as_str())
         .bind(Utc::now().timestamp())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(())
     }
@@ -93,7 +94,7 @@ WHERE id = 1 AND status = ? AND owner_token = ?
         .bind(Utc::now().timestamp())
         .bind(crate::BackfillStatus::Running.as_str())
         .bind(lease.owner_token.as_str())
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(result.rows_affected() == 1)
     }
@@ -137,7 +138,7 @@ WHERE id = 1
         .bind(last_watermark)
         .bind(now)
         .bind(now)
-        .execute(self.pool.as_ref())
+        .execute_with_busy_retry(self.pool.as_ref())
         .await?;
         Ok(())
     }

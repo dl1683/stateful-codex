@@ -544,6 +544,8 @@ fn update_call(mutation: serde_json::Value, response_bytes: usize) -> ToolCall<'
         source: ToolCallSource::Direct,
         conversation_history: ConversationHistory::default(),
         turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+        attachment_store: Arc::new(codex_attachment_store::InlineAttachmentStore),
+        ephemeral: false,
         environments: Vec::new(),
         payload: ToolPayload::Function {
             arguments: json!({ "mutations": [mutation] }).to_string(),

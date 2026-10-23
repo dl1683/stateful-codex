@@ -12,7 +12,7 @@ impl Session {
         let state = self.state.lock().await;
         let history = &state.history;
         let window_ids = state.auto_compact_window_ids();
-        let mut items = vec![RolloutItem::Compacted(CompactedItem {
+        let mut items = vec![RolloutItem::Compacted(Box::new(CompactedItem {
             message: String::new(),
             replacement_history: Some(history.annotated_items().to_vec()),
             guardian_history: history.guardian_history_checkpoint(),
@@ -29,7 +29,7 @@ impl Session {
             conversation_packet: history
                 .conversation_packet()
                 .map(|packet| (**packet).clone()),
-        })];
+        }))];
         if let Some(world_state) = history.world_state_checkpoint() {
             items.push(RolloutItem::WorldState(world_state));
         }

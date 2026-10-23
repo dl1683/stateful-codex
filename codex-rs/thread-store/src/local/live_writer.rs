@@ -2,13 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_rollout::RolloutConfig;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::RolloutRecorderParams;
-use codex_rollout::is_persisted_rollout_item;
+use codex_rollout::into_persisted_rollout_items;
 use tracing::warn;
 
 use super::LocalThreadStore;
@@ -324,6 +325,24 @@ pub(super) async fn live_writer_parts(
     Ok((entry.recorder.clone(), entry.rollout_id, entry.history_mode))
 }
 
+/// Uses the writer's creation record only until its rollout has been materialized.
+pub(super) async fn unpersisted_session_meta(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+) -> Option<(PathBuf, SessionMeta)> {
+    let (recorder, _, _) = live_writer_parts(store, thread_id).await.ok()?;
+    // Materialized reads should not queue behind unrelated transcript writes.
+    if codex_rollout::existing_rollout_path(recorder.rollout_path())
+        .await
+        .is_some()
+    {
+        return None;
+    }
+    // A writer may finish shutdown after lookup; durable reads remain the fallback.
+    let meta = recorder.unpersisted_session_meta().await.ok()??;
+    Some((recorder.rollout_path().to_path_buf(), meta))
+}
+
 async fn write_and_project(
     store: &LocalThreadStore,
     thread_id: ThreadId,
@@ -336,8 +355,8 @@ async fn write_and_project(
     let (recorder, rollout_id, history_mode) = live_writer_parts(store, thread_id).await?;
     let sync_rollout_path = matches!(&write_op, RolloutWriteOp::Persist | RolloutWriteOp::Flush);
     let write_op = match write_op {
-        RolloutWriteOp::AppendItems(mut items) => {
-            items.retain(|item| is_persisted_rollout_item(item, history_mode));
+        RolloutWriteOp::AppendItems(items) => {
+            let items = into_persisted_rollout_items(items, history_mode);
             if items.is_empty() {
                 return Ok(());
             }

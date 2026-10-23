@@ -121,6 +121,8 @@ fn call(tool: &str, arguments: &Value) -> ToolCall<'static> {
         source: ToolCallSource::Direct,
         conversation_history: ConversationHistory::default(),
         turn_item_emitter: Arc::new(NoopTurnItemEmitter),
+        attachment_store: Arc::new(codex_attachment_store::InlineAttachmentStore),
+        ephemeral: false,
         environments: Vec::new(),
         payload: ToolPayload::Function {
             arguments: arguments.to_string(),
@@ -291,6 +293,10 @@ async fn check_cwd_uses_only_the_first_registered_local_root_through_the_tool() 
         second.path().abs().into(),
     )
     .expect("sandbox context");
+    let file_system = codex_exec_server::FileSystemEnvironmentAccessor::new(
+        &codex_exec_server::LOCAL_FS,
+        sandbox.clone(),
+    );
     for (project_id, environment_id) in [
         (rooted.id.as_str(), "local"),
         (rootless.id.as_str(), "local"),
@@ -313,13 +319,11 @@ async fn check_cwd_uses_only_the_first_registered_local_root_through_the_tool() 
                 "expectedObservation": "every test passes", "artifacts": ["out.txt"]
             }]}),
         );
-        declaration.environments = vec![codex_extension_api::ToolEnvironment {
-            environment_id: environment_id.to_string(),
-            cwd: sandbox.cwd.clone(),
-            file_system: Arc::new(codex_exec_server::LocalFileSystem::unsandboxed()),
-            file_system_sandbox_context: sandbox.clone(),
-            _lifetime: std::marker::PhantomData,
-        }];
+        declaration.environments = vec![codex_extension_api::ToolEnvironment::new(
+            environment_id.to_string(),
+            sandbox.cwd.clone(),
+            &file_system,
+        )];
         if project_id == rootless.id || environment_id == "remote" {
             let error = fixture
                 .acceptance

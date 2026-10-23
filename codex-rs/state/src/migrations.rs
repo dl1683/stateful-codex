@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::sqlite::SqliteWriteQueryExt;
 use sqlx::AssertSqlSafe;
 use sqlx::SqlSafeStr;
 use sqlx::migrate::Migration;
@@ -22,7 +23,7 @@ pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator =
 /// checksum, so this only relaxes the "database is ahead of me" case.
 ///
 /// This does not make migration compatibility bidirectional. The legacy fork
-/// version-56 owner-token row is repaired to version 59 before migration; an
+/// version-56 owner-token row is repaired to version 62 before migration; an
 /// older binary will therefore reject the upgraded database because it still
 /// expects that row at version 56. The supported coexistence window is an old
 /// binary opening an old database before the upgrade and the new binary
@@ -143,7 +144,7 @@ WHERE version = ?
     .bind(38_i64)
     .bind(legacy_checksum)
     .bind(recency_migration.version)
-    .execute(pool)
+    .execute_with_busy_retry(pool)
     .await?;
     Ok(())
 }
@@ -151,9 +152,11 @@ WHERE version = ?
 /// Reconcile the fork's unreleased version-56 owner-token migration with the
 /// upstream version-56 creator-identity migration.
 ///
-/// The fork migration is preserved semantically as version 59. A database
+/// The fork migration is preserved semantically as version 62, after upstream 61.
+/// Existing fork version-59/60 stores remain subject to the read-only history
+/// guard; this does not convert their applied migration ledger. A database
 /// that already applied the fork migration has the owner-token column and a
-/// version-56 row but no creator columns; move that row to 59 after replaying
+/// version-56 row but no creator columns; move that row to 62 after replaying
 /// its reset so upstream 56-58 can run normally. This is an explicit
 /// compatibility repair, not a silent rewrite of a released migration.
 pub(crate) async fn repair_legacy_backfill_owner_migration_version(
@@ -163,7 +166,7 @@ pub(crate) async fn repair_legacy_backfill_owner_migration_version(
     let Some(owner_migration) = migrator
         .migrations
         .iter()
-        .find(|migration| migration.version == 59)
+        .find(|migration| migration.version == 62)
     else {
         return Ok(());
     };
@@ -224,3 +227,7 @@ pub(crate) async fn repair_legacy_backfill_owner_migration_version(
 #[cfg(test)]
 #[path = "migrations_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "migration_collision_tests.rs"]
+mod collision_tests;

@@ -62,7 +62,9 @@ def test_private_goal_operation_coalesces_runtime_continuations(tmp_path) -> Non
             routes = codex._client._router._goal_operations.copy()  # noqa: SLF001
             requests = harness.responses.wait_for_requests(3)
 
-    lifecycle = [event.method for event in events if event.method.startswith("turn/")]
+    lifecycle = [
+        event.method for event in events if event.method in {"turn/started", "turn/completed"}
+    ]
     routed_ids = [
         routed_id
         for event in events

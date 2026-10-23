@@ -452,6 +452,8 @@ pub struct ListTurnsParams {
 pub struct StoredTurn {
     /// Turn id.
     pub turn_id: String,
+    /// Causal root recorded for this turn. Older projected turns may not have one.
+    pub root_turn_id: Option<String>,
     /// Projected app-server item snapshots associated with this turn, according to `items_view`.
     pub items: Vec<StoredThreadItem>,
     /// Amount of item detail included in `items`.
@@ -492,6 +494,8 @@ pub enum ListItemsPosition {
 /// Parameters for listing persisted items within a thread.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListItemsParams {
+    /// Exact item lookup scoped to `turn_id`; incompatible with cursors and update replay.
+    pub item_ids: Option<Vec<String>>,
     /// Thread id to read.
     pub thread_id: ThreadId,
     /// Optional turn id to filter by. When omitted, returns items across the thread.
@@ -1139,12 +1143,12 @@ mod tests {
     }
 
     fn session_meta(history_mode: ThreadHistoryMode) -> RolloutItem {
-        RolloutItem::SessionMeta(codex_protocol::protocol::SessionMetaLine {
+        RolloutItem::SessionMeta(Box::new(codex_protocol::protocol::SessionMetaLine {
             meta: codex_protocol::protocol::SessionMeta {
                 history_mode,
                 ..Default::default()
             },
             git: None,
-        })
+        }))
     }
 }

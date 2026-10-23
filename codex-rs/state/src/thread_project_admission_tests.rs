@@ -18,7 +18,7 @@ async fn admission_holds_binding_until_dependent_commit_and_refuses_the_old_proj
         .await
         .expect("table");
     sqlx::raw_sql(include_str!(
-        "../migrations/0060_thread_project_generation.sql"
+        "../migrations/0063_thread_project_generation.sql"
     ))
     .execute(&writer)
     .await
@@ -84,7 +84,7 @@ async fn c2_project_generation_changes_on_unlink_and_round_trip_switch() {
         .await
         .unwrap();
     sqlx::raw_sql(include_str!(
-        "../migrations/0060_thread_project_generation.sql"
+        "../migrations/0063_thread_project_generation.sql"
     ))
     .execute(&pool)
     .await

@@ -708,7 +708,12 @@ async fn guardians_retain_evidence_after_compaction_and_resume(
     assert_eq!(
         items
             .iter()
-            .filter(|line| matches!(line.item, RolloutItem::RetainedContext(_)))
+            .filter(|line| matches!(
+                line.item,
+                RolloutItem::RetainedContext(
+                    codex_rollout::RetainedContextEvent::VerifiedAnswer { .. }
+                )
+            ))
             .count(),
         1,
         "verified answers must be persisted",

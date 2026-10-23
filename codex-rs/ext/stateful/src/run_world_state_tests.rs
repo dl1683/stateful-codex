@@ -1,3 +1,5 @@
+use crate::world_state_section_tests::snapshot as section_snapshot;
+use crate::world_state_section_tests::text as fragment_text;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_stateful_runtime::NewObligation;
@@ -21,7 +23,10 @@ use super::run_world_state_section;
 
 fn assert_fragment_bounded(fragment: &RenderedWorldStateFragment) {
     let (start, end) = fragment.markers();
-    assert!(start.len() + fragment.body().len() + end.len() <= crate::limits::MAX_MODEL_ITEM_BYTES);
+    assert!(
+        start.len() + fragment_text(fragment).len() + end.len()
+            <= crate::limits::MAX_MODEL_ITEM_BYTES
+    );
 }
 
 #[test]
@@ -72,47 +77,39 @@ fn run_world_state_is_semantic_bounded_and_stable() {
     });
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("first contribution renders");
-    assert!(rendered.body().contains("Mode: Socratic"));
-    assert!(rendered.body().contains("Run revision: 2"));
+    assert!(fragment_text(&rendered).contains("Mode: Socratic"));
+    assert!(fragment_text(&rendered).contains("Run revision: 2"));
+    assert!(fragment_text(&rendered).contains("pass expectedRevision: 2 (the run revision"));
     assert!(
-        rendered
-            .body()
-            .contains("pass expectedRevision: 2 (the run revision")
-    );
-    assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("never the project intelligence revision) to stateful_run_update.")
     );
-    assert!(rendered.body().contains("Strategy revision: 1"));
-    assert!(rendered.body().contains("Do not invoke execution tools"));
-    assert!(rendered.body().contains("Unresolved user steering: none"));
+    assert!(fragment_text(&rendered).contains("Strategy revision: 1"));
+    assert!(fragment_text(&rendered).contains("Do not invoke execution tools"));
+    assert!(fragment_text(&rendered).contains("Unresolved user steering: none"));
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Semantic progress: while work remains, call obligation_update only when")
     );
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("plus exactly completionDisposition noReusableLearning and result if the run learned nothing reusable")
     );
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Completion, the final Stateful mutation, is one stateful_run_update")
     );
-    assert!(
-        rendered
-            .body()
-            .contains("Learned: One unresolved assumption")
-    );
-    assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
+    assert!(fragment_text(&rendered).contains("Learned: One unresolved assumption"));
+    assert!(fragment_text(&rendered).len() <= super::MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
     assert!(
         section
-            .render_diff(PreviousWorldStateSection::Known(section.snapshot()))
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+                &section
+            )))
+            .1
             .is_none()
     );
 }
@@ -150,15 +147,15 @@ fn run_world_state_discloses_omitted_detail() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("first contribution renders");
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Call stateful_run_read with section=\"goal\" and follow nextCursor")
     );
     // Collaborative runs carry no tool-call checkpoint nudges.
-    assert!(!rendered.body().contains("Semantic checkpoint"));
-    assert!(rendered.body().len() <= super::MAX_BODY_BYTES);
+    assert!(!fragment_text(&rendered).contains("Semantic checkpoint"));
+    assert!(fragment_text(&rendered).len() <= super::MAX_BODY_BYTES);
     assert_fragment_bounded(&rendered);
 }
 
@@ -212,14 +209,17 @@ fn obligation_change_replaces_only_the_obligation_block() {
     let current = run_world_state_section(status("The landlord consent is also missing.", 2));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("obligation change must render");
 
     assert_eq!(
         rendered.markers(),
         ("<stateful_run_update>", "</stateful_run_update>")
     );
-    let body = rendered.body();
+    let body = fragment_text(&rendered);
     assert_fragment_bounded(&rendered);
     assert!(body.contains("Run ID: run-1"));
     assert!(body.contains("Semantic obligation (replaces the previous obligation entirely):"));
@@ -265,7 +265,10 @@ fn different_run_renders_the_full_packet() {
     let current = section("run-2");
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("a new run must render");
 
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
@@ -305,7 +308,10 @@ fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
     let due = run_world_state_section(status(Some(1)));
 
     let rendered = due
-        .render_diff(PreviousWorldStateSection::Known(current.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &current,
+        )))
+        .1
         .expect("a due checkpoint must render");
 
     assert_eq!(
@@ -313,14 +319,14 @@ fn due_checkpoint_renders_one_line_that_changes_only_per_epoch() {
         ("<stateful_run_update>", "</stateful_run_update>")
     );
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Semantic checkpoint: advisory due (process-local checkpoint 1)")
     );
-    assert!(!rendered.body().contains("Goal:"));
+    assert!(!fragment_text(&rendered).contains("Goal:"));
     assert!(
         run_world_state_section(status(Some(1)))
-            .render_diff(PreviousWorldStateSection::Known(due.snapshot()))
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(&due)))
+            .1
             .is_none()
     );
 }
@@ -387,7 +393,10 @@ fn deletion_only_obligation_change_still_replaces_the_block() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("a removed obligation item must render");
 
     assert_eq!(
@@ -395,11 +404,10 @@ fn deletion_only_obligation_change_still_replaces_the_block() {
         ("<stateful_run_update>", "</stateful_run_update>")
     );
     assert!(
-        rendered
-            .body()
+        fragment_text(&rendered)
             .contains("Semantic obligation (replaces the previous obligation entirely):")
     );
-    assert!(!rendered.body().contains("The landlord consent is missing."));
+    assert!(!fragment_text(&rendered).contains("The landlord consent is missing."));
 }
 
 #[test]
@@ -411,6 +419,7 @@ fn unknown_previous_run_state_renders_the_full_packet() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Unknown)
+        .1
         .expect("unknown retained state must render");
 
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
@@ -457,11 +466,14 @@ fn swapping_one_field_for_another_renders_the_full_packet() {
     ));
 
     let rendered = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("a mode change must render");
 
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
-    assert!(!rendered.body().contains("Autonomous capacity"));
+    assert!(!fragment_text(&rendered).contains("Autonomous capacity"));
 }
 
 #[test]
@@ -473,9 +485,10 @@ fn multiline_obligation_items_stay_inside_the_obligation_block() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("first contribution renders");
 
-    assert!(rendered.body().contains(
+    assert!(fragment_text(&rendered).contains(
         "- Learned: The permit was never transferred. It is still in the seller's name."
     ));
 }
@@ -549,8 +562,9 @@ fn maximal_run_state_keeps_the_obligation_ahead_of_steering_within_bounds() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("first contribution renders");
-    let body = rendered.body();
+    let body = fragment_text(&rendered);
     let (start, end) = rendered.markers();
     let obligation_at = body
         .find("Current semantic obligation:")
@@ -589,14 +603,17 @@ fn unanswered_checkpoint_escalates_through_a_delta() {
     let overdue = run_world_state_section(status(Some(2)));
 
     let rendered = overdue
-        .render_diff(PreviousWorldStateSection::Known(advisory.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &advisory,
+        )))
+        .1
         .expect("escalation must render");
 
     assert_eq!(
         rendered.markers(),
         ("<stateful_run_update>", "</stateful_run_update>")
     );
-    assert!(rendered.body().contains("Call obligation_update now"));
+    assert!(fragment_text(&rendered).contains("Call obligation_update now"));
 }
 
 #[test]
@@ -617,7 +634,9 @@ fn collaborative_checkpoint_epochs_do_not_emit_updates() {
     let after = run_world_state_section(status(Some(2)));
 
     assert_eq!(
-        after.render_diff(PreviousWorldStateSection::Known(before.snapshot())),
+        after
+            .render_diff(PreviousWorldStateSection::Known(&section_snapshot(&before)))
+            .1,
         None
     );
 }
@@ -637,13 +656,10 @@ fn changed_collaborative_policy_replaces_a_retained_packet() {
 
     let rendered = section
         .render_diff(PreviousWorldStateSection::Known(&previous))
+        .1
         .expect("a changed policy renders");
     assert_eq!(rendered.markers(), ("<stateful_run>", "</stateful_run>"));
-    assert!(
-        rendered
-            .body()
-            .contains("stays open across the user's turns")
-    );
+    assert!(fragment_text(&rendered).contains("stays open across the user's turns"));
 }
 
 // Immediate A2 parent 7d43f2336: retained snapshot fingerprint projection for this fixture.
@@ -667,6 +683,7 @@ fn completion_guidance_world_state_exact_text() {
         let retained = serde_json::from_str(A1_RETAINED).expect("A1 snapshot");
         let rendered = section
             .render_diff(PreviousWorldStateSection::Known(&retained))
+            .1
             .expect("A2 guidance must reach an A1-retained packet");
         let expected = match mode {
             WorkflowMode::Autonomous => {
@@ -680,7 +697,11 @@ fn completion_guidance_world_state_exact_text() {
             }
         };
         for expected_line in expected.lines() {
-            assert!(rendered.body().lines().any(|line| line == expected_line));
+            assert!(
+                fragment_text(&rendered)
+                    .lines()
+                    .any(|line| line == expected_line)
+            );
         }
     }
 }

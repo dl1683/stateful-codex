@@ -1,6 +1,7 @@
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
+use codex_protocol::models::input_text;
 use codex_stateful_runtime::ObligationPacket;
 use codex_stateful_runtime::StatefulObligation;
 use codex_stateful_runtime::StatefulRun;
@@ -401,8 +402,10 @@ pub(super) fn run_world_state_section(
         "obligation": line_digest(&block_lines(&body, RunBlockKind::Obligation).collect::<Vec<_>>().join("\n")),
         "acceptance": line_digest(&block_lines(&body, RunBlockKind::Acceptance).collect::<Vec<_>>().join("\n")),
     });
-    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
-        match previous {
+    crate::world_state_section::fixed_world_state_section(
+        WORLD_STATE_ID,
+        snapshot.clone(),
+        move |previous| match previous {
             PreviousWorldStateSection::Known(previous)
                 if previous.get("fingerprint") == snapshot.get("fingerprint") =>
             {
@@ -414,7 +417,7 @@ pub(super) fn run_world_state_section(
                 Some(RenderedWorldStateFragment::new(
                     "developer",
                     (UPDATE_START_MARKER, UPDATE_END_MARKER),
-                    delta,
+                    input_text(delta),
                 ))
             }
             PreviousWorldStateSection::Absent
@@ -422,10 +425,10 @@ pub(super) fn run_world_state_section(
             | PreviousWorldStateSection::Known(_) => Some(RenderedWorldStateFragment::new(
                 "developer",
                 (START_MARKER, END_MARKER),
-                body.clone(),
+                input_text(body.clone()),
             )),
-        }
-    })
+        },
+    )
     .with_legacy_matcher({
         let project_id = project_id.clone();
         let run_id = run_id.clone();

@@ -115,7 +115,7 @@ impl ContextManager {
         }
         // A single text part is recorded verbatim; anything else cannot be compared exactly.
         let recorded_text = match content.as_slice() {
-            [ContentItem::OutputText { text: recorded }] if *recorded == text => {
+            [ContentItem::OutputText { text: recorded, .. }] if *recorded == text => {
                 RecordedText::Exact
             }
             _ => RecordedText::Differs,

@@ -38,7 +38,14 @@ impl ThreadProjectAdmission {
         thread_id: ThreadId,
         expected_project_id: &str,
     ) -> Result<Option<Self>, sqlx::Error> {
-        let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
+        let pool = sqlite
+            .open_read_write_pool(&sqlite.state_db_path())
+            .await
+            .map_err(|error| {
+                error
+                    .downcast::<sqlx::Error>()
+                    .unwrap_or_else(|error| sqlx::Error::Configuration(error.into()))
+            })?;
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
         let binding = sqlx::query_as::<_, (Option<String>, i64)>(
             "SELECT project_id, project_binding_generation FROM threads WHERE id = ?",

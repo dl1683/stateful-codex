@@ -60,18 +60,20 @@ async fn self_contained_requests_defer_the_record_until_a_request_refers_to_earl
             ..Default::default()
         })
         .await?;
-    // Two narrow turns, a manual compaction, another narrow turn, then a reply to the
+    // Two narrow turns, repeated manual compaction, another narrow turn, then a reply to the
     // earlier proposal.
     send_turn(&mut server, &fresh.thread.id, NARROW_REQUEST).await?;
     send_turn(&mut server, &fresh.thread.id, NARROW_REQUEST).await?;
-    let compact_request = server
-        .send_thread_compact_start_request(ThreadCompactStartParams {
-            thread_id: fresh.thread.id.clone(),
-        })
-        .await?;
-    let _: ThreadCompactStartResponse = server.read_response(compact_request).await?;
-    let _: codex_app_server_protocol::TurnCompletedNotification =
-        server.read_notification("turn/completed").await?;
+    for _ in 0..2 {
+        let compact_request = server
+            .send_thread_compact_start_request(ThreadCompactStartParams {
+                thread_id: fresh.thread.id.clone(),
+            })
+            .await?;
+        let _: ThreadCompactStartResponse = server.read_response(compact_request).await?;
+        let _: codex_app_server_protocol::TurnCompletedNotification =
+            server.read_notification("turn/completed").await?;
+    }
     send_turn(&mut server, &fresh.thread.id, NARROW_REQUEST).await?;
     // A named file does not supply the earlier proposal it applies.
     send_turn(
@@ -98,6 +100,7 @@ async fn self_contained_requests_defer_the_record_until_a_request_refers_to_earl
         first_narrow,
         second_narrow,
         _compaction,
+        _second_compaction,
         after_compaction,
         reply,
     ] = bodies.as_slice()

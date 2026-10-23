@@ -2,6 +2,7 @@ use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::RenderedWorldStateFragment;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::ProjectRefreshStatus;
+use codex_protocol::models::input_text;
 use codex_thread_store::StoredProject;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -271,7 +272,7 @@ pub(super) fn project_world_state_section(
     let project_id = status.project_id().to_string();
     let delta_input = DeltaInput::new(&project_id, &body, &layout);
     let matcher_project_id = project_id.clone();
-    WorldStateSectionContribution::new(WORLD_STATE_ID, snapshot.clone(), move |previous| {
+    crate::world_state_section::fixed_world_state_section(WORLD_STATE_ID, snapshot.clone(), move |previous| {
         match previous {
             PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
             PreviousWorldStateSection::Known(previous)
@@ -389,7 +390,7 @@ fn final_fragment(
             }
         }
     }
-    RenderedWorldStateFragment::new(role, markers, body)
+    RenderedWorldStateFragment::new(role, markers, input_text(body))
 }
 
 fn clear_visible_root(visible_root: Option<&(VisibleRootRegistry, String)>) {

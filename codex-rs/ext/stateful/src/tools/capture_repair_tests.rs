@@ -32,6 +32,8 @@ pub(super) fn call(
         source,
         conversation_history: Default::default(),
         turn_item_emitter: Arc::new(codex_extension_api::NoopTurnItemEmitter),
+        attachment_store: Arc::new(codex_attachment_store::InlineAttachmentStore),
+        ephemeral: false,
         environments: Vec::new(),
         payload: ToolPayload::Function {
             arguments: arguments.to_string(),

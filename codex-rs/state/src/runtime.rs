@@ -19,6 +19,7 @@ use crate::model::datetime_to_epoch_millis;
 use crate::model::datetime_to_epoch_seconds;
 use crate::model::epoch_millis_to_datetime;
 use crate::paths::file_modified_time_utc;
+use crate::sqlite::SqliteWriteQueryExt;
 use crate::telemetry::DbKind;
 use crate::telemetry::DbTelemetry;
 use chrono::DateTime;
@@ -43,6 +44,7 @@ mod backfill;
 pub use backfill::BackfillLease;
 mod external_agent_config_imports;
 mod goals;
+mod guardian_feedback;
 mod logs;
 mod logs_maintenance;
 mod memories;
@@ -57,6 +59,7 @@ mod rollout_migration;
 pub(crate) mod test_support;
 mod thread_attachments;
 mod thread_metadata;
+mod thread_read_state;
 mod thread_section_order;
 mod thread_sections;
 mod threads;
@@ -69,14 +72,21 @@ pub use goals::GoalAccountingMode;
 pub use goals::GoalAccountingOutcome;
 pub use goals::GoalStore;
 pub use goals::GoalUpdate;
+pub use guardian_feedback::GuardianReviewRecord;
+pub use guardian_feedback::MAX_GUARDIAN_REVIEW_BYTES;
+pub use guardian_feedback::MAX_GUARDIAN_REVIEW_RECORDS;
+pub use guardian_feedback::MAX_GUARDIAN_REVIEW_RECORDS_PER_THREAD;
 pub use memories::MemoryStore;
 pub use queued_items::SqliteQueueStore;
 pub use recovery::backup_runtime_db_for_fresh_start;
+pub use recovery::collect_runtime_db_backups;
 pub use recovery::is_sqlite_corruption_error;
 pub use recovery::runtime_db_path_for_corruption_error;
-pub use recovery::sqlite_error_detail_is_corruption;
 pub use recovery::sqlite_error_detail_is_lock;
 pub use remote_control::RemoteControlEnrollmentRecord;
+pub use thread_read_state::ReadStateOperation;
+pub use thread_read_state::ReadStateUpdate;
+pub use thread_read_state::ThreadReadState;
 pub use threads::ThreadFilterOptions;
 
 // "Partition" is the retained-log-content bucket we cap at 10 MiB:
@@ -383,7 +393,7 @@ ON CONFLICT(id) DO NOTHING
     .bind(1_i64)
     .bind(crate::BackfillStatus::Pending.as_str())
     .bind(Utc::now().timestamp())
-    .execute(pool)
+    .execute_with_busy_retry(pool)
     .await?;
     Ok(())
 }

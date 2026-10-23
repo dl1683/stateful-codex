@@ -100,6 +100,7 @@ export class Thread {
       workingDirectory: options?.workingDirectory,
       skipGitRepoCheck: options?.skipGitRepoCheck,
       outputSchemaFile: schemaPath,
+      cyberAccessProgram: turnOptions.cyberAccessProgram,
       modelReasoningEffort: options?.modelReasoningEffort,
       signal: turnOptions.signal,
       networkAccessEnabled: options?.networkAccessEnabled,

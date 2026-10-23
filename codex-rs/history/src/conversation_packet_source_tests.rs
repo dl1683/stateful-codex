@@ -64,13 +64,27 @@ fn delivered(
         User => ("user", ContentItem::InputText { text }, None),
         AssistantFinal => (
             "assistant",
-            ContentItem::OutputText { text },
+            ContentItem::OutputText {
+                annotations: None,
+                logprobs: None,
+                text,
+            },
             Some(MessagePhase::FinalAnswer),
         ),
-        AssistantCommentary => ("assistant", ContentItem::OutputText { text }, None),
+        AssistantCommentary => (
+            "assistant",
+            ContentItem::OutputText {
+                annotations: None,
+                logprobs: None,
+                text,
+            },
+            None,
+        ),
     };
     ResponseItemEnvelope {
         item: ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: Some(ResponseItemId::from_server(id.to_string())),
             role: role.to_string(),
             content: vec![content],
@@ -140,6 +154,8 @@ fn packs_original_deliveries_by_delivery_order_and_excludes_compaction_output() 
         },
     );
     let context = ResponseItemEnvelope::new(ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -433,13 +449,28 @@ fn phase_less_deliveries_use_host_classification_and_pending_ones_stay_out() {
         |metadata| metadata.assistant_delivery_classification = Some(Commentary),
     );
 
+    let mut partial = edited(
+        delivered(
+            "partial",
+            /*order*/ 5,
+            AssistantCommentary,
+            "stable partial answer",
+        ),
+        |metadata| metadata.assistant_delivery_classification = Some(Final),
+    );
+    let ResponseItem::Message { phase, .. } = &mut partial.item else {
+        panic!("delivered assistant message");
+    };
+    *phase = Some(MessagePhase::PartialAnswer);
+
     let packet = first_packet(&[
         delivered("request", 0, User, "question"),
         phase_less("legacy", 1, None),
         phase_less("preamble", 2, Some(Commentary)),
         phase_less("answer", 3, Some(Final)),
         explicit,
-        phase_less("unresolved", 5, Some(Pending)),
+        partial,
+        phase_less("unresolved", /*order*/ 6, Some(Pending)),
     ]);
 
     assert_eq!(
@@ -450,8 +481,14 @@ fn phase_less_deliveries_use_host_classification_and_pending_ones_stay_out() {
             record("preamble", 2, AssistantCommentary, "preamble"),
             record("answer", 3, AssistantFinal, "answer"),
             record("explicit", 4, AssistantFinal, "explicit"),
+            record(
+                "partial",
+                /*order*/ 5,
+                AssistantCommentary,
+                "stable partial answer"
+            ),
         ]
     );
     // The unresolved delivery is a known omission, not a complete window.
-    assert_eq!(coverage(&packet), (BoundedWindow, 5, 5, 0, 0));
+    assert_eq!(coverage(&packet), (BoundedWindow, 6, 6, 0, 0));
 }

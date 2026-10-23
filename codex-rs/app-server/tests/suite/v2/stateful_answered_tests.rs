@@ -37,6 +37,7 @@ use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_app_server_protocol::WarningNotification;
 use codex_features::Feature;
+use codex_protocol::models::MessagePhase;
 use codex_state::SqliteConfig;
 use codex_stateful_runtime as runtime;
 use codex_stateful_runtime::ANSWERED_UNVERIFIED_BASIS;
@@ -69,7 +70,7 @@ fn message(id: &str, text: &str) -> String {
     ])
 }
 
-fn commentary(id: &str, text: &str) -> String {
+fn message_with_phase(id: &str, text: &str, phase: MessagePhase) -> String {
     responses::sse(vec![
         responses::ev_response_created(id),
         serde_json::json!({
@@ -78,7 +79,7 @@ fn commentary(id: &str, text: &str) -> String {
                 "type": "message",
                 "role": "assistant",
                 "id": id,
-                "phase": "commentary",
+                "phase": phase,
                 "content": [{"type": "output_text", "text": text}]
             }
         }),
@@ -305,7 +306,14 @@ async fn anything_but_a_genuine_ready_answer_keeps_the_ordinary_route() -> Resul
     let cases = [
         (StatefulWorkflowMode::Autonomous, message("r1", &continuing)),
         (StatefulWorkflowMode::Autonomous, message("r1", BLOCK)),
-        (StatefulWorkflowMode::Autonomous, commentary("r1", &ready())),
+        (
+            StatefulWorkflowMode::Autonomous,
+            message_with_phase("r1", &ready(), MessagePhase::Commentary),
+        ),
+        (
+            StatefulWorkflowMode::Autonomous,
+            message_with_phase("r1", &ready(), MessagePhase::PartialAnswer),
+        ),
         (StatefulWorkflowMode::Collaborative, message("r1", &ready())),
     ];
     for (mode, response) in cases {
@@ -580,7 +588,10 @@ async fn running_turns_warn_only_for_status_lines() -> Result<()> {
             ),
             Vec::new(),
         ),
-        (commentary("r1", STATUS_LINE), Vec::new()),
+        (
+            message_with_phase("r1", STATUS_LINE, MessagePhase::Commentary),
+            Vec::new(),
+        ),
     ] {
         let mut harness = harness().await?;
         let started = harness.start_run(StatefulWorkflowMode::Autonomous).await?;

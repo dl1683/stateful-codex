@@ -1,6 +1,9 @@
 //! Aggregate size of the Stateful developer content a fresh window carries for a realistic
 //! project: the project root, the run packet, and every other Stateful section.
 
+use crate::world_state_section_tests::snapshot as section_snapshot;
+use crate::world_state_section_tests::text as fragment_text;
+
 use codex_extension_api::PreviousWorldStateSection;
 use codex_extension_api::WorldStateSectionContribution;
 use codex_project_intelligence::BlackboardEntry;
@@ -273,9 +276,10 @@ fn continuity_record() -> ContinuityRecord {
 fn rendered_bytes(section: WorldStateSectionContribution) -> usize {
     section
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .map_or(0, |fragment| {
             let (start, end) = fragment.markers();
-            start.len() + fragment.body().len() + end.len()
+            start.len() + fragment_text(&fragment).len() + end.len()
         })
 }
 
@@ -313,7 +317,7 @@ fn fresh_window_stateful_content_stays_within_its_budget() {
             Some(&head),
         );
         let self_contained = sections[0] + sections[1] + narrow.window_bytes;
-        let narrow_snapshot = narrow.section().snapshot().clone();
+        let narrow_snapshot = section_snapshot(&narrow.section());
         let widened = crate::request_scope::ScopeNotePlan::new(
             Some(&narrow_snapshot),
             "turn-1",

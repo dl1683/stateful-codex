@@ -40,7 +40,7 @@ pub(crate) const ANSWER_OUTCOME_GUIDANCE: &str = "Give a substantive final answe
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LastAgentMessage {
     text: String,
-    commentary: bool,
+    nonterminal: bool,
 }
 
 impl LastAgentMessage {
@@ -53,7 +53,10 @@ impl LastAgentMessage {
                     AgentMessageContent::Text { text } => text.as_str(),
                 })
                 .collect(),
-            commentary: matches!(item.phase, Some(MessagePhase::Commentary)),
+            nonterminal: match item.phase {
+                Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) => true,
+                Some(MessagePhase::FinalAnswer) | None => false,
+            },
         }
     }
 }
@@ -63,7 +66,7 @@ pub(crate) fn genuine_final(input: &TurnFinalizeInput<'_>) -> bool {
     input
         .turn_store
         .get::<LastAgentMessage>()
-        .is_some_and(|last| !last.commentary && last.text == input.last_agent_message)
+        .is_some_and(|last| !last.nonterminal && last.text == input.last_agent_message)
 }
 
 /// Ends the turn's run as answered, unverified, when the turn's final message is a genuine,

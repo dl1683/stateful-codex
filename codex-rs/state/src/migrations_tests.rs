@@ -164,7 +164,7 @@ async fn state_database_with_legacy_version_56_owner_migration_opens_and_migrate
     let owner_migration = STATE_MIGRATOR
         .migrations
         .iter()
-        .find(|migration| migration.version == 59)
+        .find(|migration| migration.version == 62)
         .expect("owner-token migration should exist");
     let legacy_version_and_checksum = sqlx::query_as::<_, (i64, Vec<u8>)>(
         "SELECT version, checksum FROM _sqlx_migrations WHERE version = 56",
@@ -866,6 +866,15 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .await
     .expect("existing turn-scoped item should be inserted");
 
+    sqlx::query("INSERT INTO thread_turns (thread_id, turn_id, rollout_ordinal, status) VALUES ('thread-1', 'turn-1', 0, 'completed')")
+        .execute(&pool)
+        .await
+        .expect("insert an existing turn before migration");
+    sqlx::query("INSERT INTO thread_history_projection_state (thread_id, next_rollout_byte_offset, next_rollout_ordinal) VALUES ('thread-1', 42, 3)")
+        .execute(&pool)
+        .await
+        .expect("insert an existing projection checkpoint");
+
     THREAD_HISTORY_MIGRATOR
         .run(&pool)
         .await
@@ -884,12 +893,13 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .execute(&pool)
     .await
     .expect("thread-scoped realtime item should be inserted separately");
-    sqlx::query(
-        "INSERT INTO thread_history_projection_state (thread_id, next_rollout_byte_offset, next_rollout_ordinal) VALUES ('thread-1', 0, 0)",
+    let checkpoint = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT next_rollout_byte_offset, next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = 'thread-1'",
     )
-    .execute(&pool)
+    .fetch_one(&pool)
     .await
-    .expect("thread projection checkpoint should be inserted");
+    .expect("existing projection checkpoint survives migration");
+    assert_eq!(checkpoint, (42, 3));
 
     let older_pool = sqlite
         .open_thread_history_db(&older_migrator, /*telemetry_override*/ None)
@@ -901,6 +911,17 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .execute(&older_pool)
     .await
     .expect("older binaries should continue writing ordinary turn-scoped items");
+    sqlx::query("INSERT INTO thread_turns (thread_id, turn_id, rollout_ordinal, status) VALUES ('thread-1', 'turn-2', 4, 'completed')")
+        .execute(&older_pool)
+        .await
+        .expect("older writers can still insert turns without roots");
+    let roots = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT root_turn_id FROM thread_turns ORDER BY rollout_ordinal",
+    )
+    .fetch_all(&older_pool)
+    .await
+    .expect("old turns and older writers leave causal roots unknown");
+    assert_eq!(roots, vec![None, None]);
     let ordinary_items = sqlx::query_as::<_, (String, String)>(
         "SELECT item_id, turn_id FROM thread_items WHERE thread_id = ? ORDER BY rollout_ordinal",
     )

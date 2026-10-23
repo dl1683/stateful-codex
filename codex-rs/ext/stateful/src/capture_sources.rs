@@ -7,6 +7,7 @@ use codex_project_intelligence::SourceObservation;
 use codex_project_intelligence::SourceSpan;
 use codex_project_intelligence::SourceSpanRole;
 use codex_protocol::items::UserMessageItem;
+use codex_protocol::models::input_text;
 use codex_protocol::user_input::UserInput;
 
 #[cfg(test)]
@@ -171,7 +172,6 @@ pub(crate) fn handle_section(
 ) -> Option<(usize, codex_extension_api::WorldStateSectionContribution)> {
     use codex_extension_api::PreviousWorldStateSection;
     use codex_extension_api::RenderedWorldStateFragment;
-    use codex_extension_api::WorldStateSectionContribution;
     use serde_json::json;
     let handles = handles?;
     let omitted = handles.handles.len() + usize::from(handles.additional_handles);
@@ -197,17 +197,19 @@ pub(crate) fn handle_section(
     let bytes = text.len() + 49;
     Some((
         bytes,
-        WorldStateSectionContribution::new("capture_sources", snapshot.clone(), move |previous| {
-            match previous {
+        crate::world_state_section::fixed_world_state_section(
+            "capture_sources",
+            snapshot.clone(),
+            move |previous| match previous {
                 PreviousWorldStateSection::Known(previous) if previous == &snapshot => None,
                 PreviousWorldStateSection::Absent
                 | PreviousWorldStateSection::Unknown
                 | PreviousWorldStateSection::Known(_) => Some(RenderedWorldStateFragment::new(
                     "developer",
                     ("<capture_sources>", "</capture_sources>"),
-                    text.clone(),
+                    input_text(text.clone()),
                 )),
-            }
-        }),
+            },
+        ),
     ))
 }

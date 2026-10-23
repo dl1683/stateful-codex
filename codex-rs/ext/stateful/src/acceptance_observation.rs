@@ -359,13 +359,7 @@ async fn observe_command(
         }
         return Ok(());
     }
-    let output = command.aggregated_output.clone().unwrap_or_else(|| {
-        format!(
-            "{}{}",
-            command.stdout.as_deref().unwrap_or_default(),
-            command.stderr.as_deref().unwrap_or_default()
-        )
-    });
+    let output = command.aggregated_output.as_deref().unwrap_or_default();
     let output_digest = format!("sha256:{:x}", Sha256::digest(output.as_bytes()));
     let end = governing_digests(roots, &ledger).await;
     let end_identity = workspace_manifest(roots).await;
@@ -450,7 +444,7 @@ async fn observe_command(
                 outcome,
                 command: criterion.check_command.clone().unwrap_or_default(),
                 exit_code: command.exit_code,
-                output_tail: tail(&output),
+                output_tail: tail(output),
                 output_digest: output_digest.clone(),
                 artifact_digest: digest,
                 checker_digest: checker,

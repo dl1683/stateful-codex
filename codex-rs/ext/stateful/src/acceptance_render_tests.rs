@@ -1,3 +1,5 @@
+use crate::world_state_section_tests::snapshot as section_snapshot;
+use crate::world_state_section_tests::text as fragment_text;
 use codex_extension_api::PreviousWorldStateSection;
 use codex_stateful_runtime::AcceptanceCriterion;
 use codex_stateful_runtime::AcceptanceEvidence;
@@ -146,15 +148,19 @@ fn stale_evidence_replaces_only_the_acceptance_block() {
     let current = run_world_state_section(status(run(3), ledger(2, 1, criteria), 0));
     let full = previous
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("full packet");
     assert!(
-        full.body()
+        fragment_text(&full)
             .contains("- C1 [derived; check; required; plan admitted] All tests pass. artifacts: out.txt. checker: verify.sh. -> passed `check-1` per its host-admitted plan (files re-checked at completion)")
     );
     let delta = current
-        .render_diff(PreviousWorldStateSection::Known(previous.snapshot()))
+        .render_diff(PreviousWorldStateSection::Known(&section_snapshot(
+            &previous,
+        )))
+        .1
         .expect("stale evidence renders");
-    let body = delta.body();
+    let body = fragment_text(&delta);
     assert!(body.contains("Acceptance (replaces the previous acceptance ledger view):"));
     assert!(body.contains("- C1 [derived; check; required; plan admitted] All tests pass. artifacts: out.txt. checker: verify.sh. -> UNMET: stale: the workspace changed after `check-1` started; run it again"));
     assert!(!body.contains("Goal:"));
@@ -167,11 +173,15 @@ fn a_full_ledger_stays_bounded_and_names_the_exact_read() {
         .collect();
     let rendered = run_world_state_section(status(run(0), ledger(5, 0, criteria), 0))
         .render_diff(PreviousWorldStateSection::Absent)
+        .1
         .expect("full packet");
     let (start, end) = rendered.markers();
-    assert!(start.len() + rendered.body().len() + end.len() <= crate::limits::MAX_MODEL_ITEM_BYTES);
-    assert!(rendered.body().contains("Acceptance shortened:"));
-    assert!(rendered.body().contains("section=\"acceptance\""));
+    assert!(
+        start.len() + fragment_text(&rendered).len() + end.len()
+            <= crate::limits::MAX_MODEL_ITEM_BYTES
+    );
+    assert!(fragment_text(&rendered).contains("Acceptance shortened:"));
+    assert!(fragment_text(&rendered).contains("section=\"acceptance\""));
 }
 
 #[test]

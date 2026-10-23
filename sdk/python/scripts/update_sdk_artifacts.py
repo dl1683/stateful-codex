@@ -14,6 +14,7 @@ import tempfile
 import types
 import typing
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Sequence, get_args, get_origin
 
@@ -181,7 +182,7 @@ def stage_python_sdk_package(
         requirements["require_runtime_version"](runtime_versions[0])
     except ValueError as exc:
         raise RuntimeError(f"Cannot package the Python SDK: {exc}") from exc
-    pyproject_path.write_text(pyproject_text)
+    pyproject_path.write_text(pyproject_text, newline="\n")
     return staging_dir
 
 
@@ -209,7 +210,7 @@ def stage_python_runtime_package(
     pyproject_text = _rewrite_project_version(pyproject_text, package_version)
     if platform_tag is not None:
         pyproject_text = _rewrite_runtime_platform_tag(pyproject_text, platform_tag)
-    pyproject_path.write_text(pyproject_text)
+    pyproject_path.write_text(pyproject_text, newline="\n")
 
     runtime_package_root = staged_runtime_package_root(staging_dir)
     if package_source.is_dir():
@@ -284,6 +285,18 @@ def _flatten_string_enum_one_of(definition: dict[str, Any]) -> bool:
     if isinstance(title, str):
         definition["title"] = title
     return True
+
+
+def _normalize_open_ended_enum(definition: dict[str, Any]) -> None:
+    variants = definition.pop("oneOf", definition.get("anyOf", []))
+    definition["anyOf"] = [
+        variant
+        for variant in variants
+        if "enum" in variant or variant.get("type") not in ("string", ["string", "object"])
+    ]
+    object_fallback = {"type": "object", "additionalProperties": {}}
+    if object_fallback not in definition["anyOf"]:
+        definition["anyOf"].append(object_fallback)
 
 
 DISCRIMINATOR_KEYS = ("type", "method", "mode", "state", "status", "role", "reason")
@@ -522,8 +535,10 @@ def _normalized_schema_bundle_text(schema_dir: Path) -> str:
     _preserve_guardian_approval_path_wrappers(schema)
     definitions = schema.get("definitions", {})
     if isinstance(definitions, dict):
-        for definition in definitions.values():
+        for name, definition in definitions.items():
             if isinstance(definition, dict):
+                if name == "CodexErrorInfo":
+                    _normalize_open_ended_enum(definition)
                 _flatten_string_enum_one_of(definition)
     # Normalize the schema into something datamodel-code-generator can map to
     # stable class names instead of anonymous numbered helpers.
@@ -531,7 +546,7 @@ def _normalized_schema_bundle_text(schema_dir: Path) -> str:
     return json.dumps(schema, indent=2, sort_keys=True) + "\n"
 
 
-def generate_v2_all(schema_dir: Path) -> None:
+def generate_v2_all(schema_dir: Path, *, format_output: bool = True) -> None:
     """Regenerate the Pydantic v2 protocol model module from app-server schemas."""
     out_path = sdk_root() / "src" / "openai_codex" / "generated" / "v2_all.py"
     out_dir = out_path.parent
@@ -541,7 +556,12 @@ def generate_v2_all(schema_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
         normalized_bundle = Path(td) / schema_bundle_path(schema_dir).name
-        normalized_bundle.write_text(_normalized_schema_bundle_text(schema_dir))
+        normalized_bundle.write_text(_normalized_schema_bundle_text(schema_dir), newline="\n")
+        if not format_output:
+            # The pinned generator accepts an empty formatter list through TOML.
+            (Path(td) / "pyproject.toml").write_text(
+                "[tool.datamodel-codegen]\nformatters = []\n", newline="\n"
+            )
         run_python_module(
             "datamodel_code_generator",
             [
@@ -568,21 +588,18 @@ def generate_v2_all(schema_dir: Path) -> None:
                 "--use-annotated",
                 "--use-union-operator",
                 "--disable-timestamp",
-                # Keep the generated file formatted deterministically so the
-                # checked-in artifact only changes when the schema does.
-                "--formatters",
-                "ruff-format",
-            ],
-            cwd=sdk_root(),
+            ]
+            + (["--formatters", "ruff-format"] if format_output else []),
+            cwd=sdk_root() if format_output else Path(td),
         )
     _preserve_inline_image_class_names(out_path)
+    _add_legacy_image_generation_thread_item_alias(out_path)
     _require_nullable_field(out_path, "ChatgptAccount", r"email: str \| None")
-    _require_nullable_field(
-        out_path, "McpResourceReadTarget", r"link_id: Annotated\[\n(?:        .*\n)+    \]"
-    )
+    _require_nullable_field(out_path, "McpResourceReadTarget", r"link_id: Annotated\[[\s\S]*?\]")
+    _preserve_open_enum(out_path, "CodexErrorInfoValue", allow_empty=True)
     _preserve_reasoning_effort_enum(out_path)
     _preserve_thread_source_enum(out_path)
-    _preserve_plan_type_enum(out_path)
+    _preserve_open_enum(out_path, "PlanType")
     _preserve_host_answer_outcome(out_path)
     _normalize_generated_timestamps(out_path)
 
@@ -598,13 +615,13 @@ def _preserve_host_answer_outcome(out_path: Path) -> None:
         class_end = len(source)
     class_source, count = re.subn(
         r"(?m)^    outcome: StatefulHostAnswerOutcome(?: \| None)? = "
-        r'(?:"answered"|StatefulHostAnswerOutcome\.answered)$',
+        r"(?:[\"']answered[\"']|StatefulHostAnswerOutcome\.answered)$",
         "    outcome: StatefulHostAnswerOutcome = StatefulHostAnswerOutcome.answered",
         source[class_start:class_end],
     )
     if count != 1:
         raise RuntimeError("Generated StatefulHostAnswer has an unexpected outcome field")
-    out_path.write_text(source[:class_start] + class_source + source[class_end:])
+    out_path.write_text(source[:class_start] + class_source + source[class_end:], newline="\n")
 
 
 def _preserve_inline_image_class_names(out_path: Path) -> None:
@@ -622,7 +639,23 @@ def _preserve_inline_image_class_names(out_path: Path) -> None:
             raise RuntimeError(f"Generated SDK already defines {stable_name}")
         source = re.sub(rf"\b{re.escape(generated_name)}\b", stable_name, source)
 
-    out_path.write_text(source)
+    out_path.write_text(source, newline="\n")
+
+
+def _add_legacy_image_generation_thread_item_alias(out_path: Path) -> None:
+    """Keep the inline image-generation class import available after splitting the wire type."""
+    source = out_path.read_text()
+    class_start = source.find("class ResultThreadItem(BaseModel):")
+    if class_start == -1:
+        raise RuntimeError("Generated SDK is missing ResultThreadItem")
+    if re.search(r"\bImageGenerationThreadItem\b", source):
+        raise RuntimeError("Generated SDK already defines ImageGenerationThreadItem")
+    class_end = source.find("\n\nclass ", class_start)
+    if class_end == -1:
+        class_end = len(source)
+
+    alias = "\n\nImageGenerationThreadItem = ResultThreadItem\n"
+    out_path.write_text(source[:class_end] + alias + source[class_end:], newline="\n")
 
 
 def _require_nullable_field(out_path: Path, class_name: str, field_pattern: str) -> None:
@@ -643,7 +676,7 @@ def _require_nullable_field(out_path: Path, class_name: str, field_pattern: str)
     )
     if count != 1:
         raise RuntimeError(f"Generated {class_name} field did not have the expected nullable shape")
-    out_path.write_text(source[:class_start] + class_source + source[class_end:])
+    out_path.write_text(source[:class_start] + class_source + source[class_end:], newline="\n")
 
 
 def _preserve_reasoning_effort_enum(out_path: Path) -> None:
@@ -678,7 +711,7 @@ def _preserve_reasoning_effort_enum(out_path: Path) -> None:
         member._value_ = value
         return member
 """
-    out_path.write_text(source[:class_start] + open_enum + source[class_end:])
+    out_path.write_text(source[:class_start] + open_enum + source[class_end:], newline="\n")
 
 
 def _preserve_thread_source_enum(out_path: Path) -> None:
@@ -705,37 +738,40 @@ def _preserve_thread_source_enum(out_path: Path) -> None:
         member._value_ = value
         return member
 """
-    out_path.write_text(source[:class_start] + open_enum + source[class_end:])
+    out_path.write_text(source[:class_start] + open_enum + source[class_end:], newline="\n")
 
 
-def _preserve_plan_type_enum(out_path: Path) -> None:
-    """Keep the public plan constants while accepting values from newer runtimes."""
+def _preserve_open_enum(out_path: Path, name: str, *, allow_empty: bool = False) -> None:
+    """Keep generated enum constants while accepting values from newer runtimes."""
     source = out_path.read_text()
-    class_start = source.find("class PlanType(Enum):")
+    class_start = source.find(f"class {name}(Enum):")
     if class_start == -1:
-        raise RuntimeError("Generated SDK is missing PlanType")
+        raise RuntimeError(f"Generated SDK is missing {name}")
     class_end = source.find("\n\nclass ", class_start)
     if class_end == -1:
         class_end = len(source)
 
     class_source = source[class_start:class_end]
     class_source = class_source.replace(
-        "class PlanType(Enum):",
-        "class PlanType(str, Enum):",
+        f"class {name}(Enum):",
+        f"class {name}(str, Enum):",
         1,
     ).rstrip()
-    class_source += """
+    invalid_value = "not isinstance(value, str)"
+    if not allow_empty:
+        invalid_value += " or not value"
+    class_source += f"""
 
     @classmethod
-    def _missing_(cls, value: object) -> PlanType | None:
-        if not isinstance(value, str) or not value:
+    def _missing_(cls, value: object) -> {name} | None:
+        if {invalid_value}:
             return None
         member = str.__new__(cls, value)
         member._name_ = value
         member._value_ = value
         return member
 """
-    out_path.write_text(source[:class_start] + class_source + source[class_end:])
+    out_path.write_text(source[:class_start] + class_source + source[class_end:], newline="\n")
 
 
 def _notification_specs(schema_dir: Path) -> list[tuple[str, str]]:
@@ -872,7 +908,7 @@ def generate_notification_registry(schema_dir: Path) -> None:
         ]
     )
 
-    out.write_text("\n".join(lines))
+    out.write_text("\n".join(lines), newline="\n")
 
 
 def _normalize_generated_timestamps(root: Path) -> None:
@@ -882,7 +918,7 @@ def _normalize_generated_timestamps(root: Path) -> None:
         content = py_file.read_text()
         normalized = timestamp_re.sub("#   timestamp: <normalized>", content)
         if normalized != content:
-            py_file.write_text(normalized)
+            py_file.write_text(normalized, newline="\n")
 
 
 FIELD_ANNOTATION_OVERRIDES: dict[str, str] = {
@@ -1354,7 +1390,7 @@ def _render_thread_block(turn_fields: list[PublicFieldSpec], *, is_async: bool =
     return "\n".join(lines)
 
 
-def generate_public_api_flat_methods() -> None:
+def generate_public_api_flat_methods(*, format_output: bool = True) -> None:
     """Regenerate the public convenience methods from generated protocol models."""
     src_dir = sdk_root() / "src"
     public_api_path = src_dir / "openai_codex" / "api.py"
@@ -1402,16 +1438,17 @@ def generate_public_api_flat_methods() -> None:
         "AsyncThread.flat_methods",
         _render_thread_block(turn_start_fields, is_async=True),
     )
-    public_api_path.write_text(source)
-    run_python_module("ruff", ["format", str(public_api_path)], cwd=sdk_root())
+    public_api_path.write_text(source, newline="\n")
+    if format_output:
+        run_python_module("ruff", ["format", str(public_api_path)], cwd=sdk_root())
 
 
-def generate_types_from_schema_dir(schema_dir: Path) -> None:
+def generate_types_from_schema_dir(schema_dir: Path, *, format_output: bool = True) -> None:
     """Regenerate every SDK artifact derived from an existing schema directory."""
     # v2_all is the authoritative generated surface.
-    generate_v2_all(schema_dir)
+    generate_v2_all(schema_dir, format_output=format_output)
     generate_notification_registry(schema_dir)
-    generate_public_api_flat_methods()
+    generate_public_api_flat_methods(format_output=format_output)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1425,6 +1462,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--schema-dir",
         type=Path,
         help="App-server JSON schema directory (defaults to tool.codex.codegen.schema-dir)",
+    )
+    generate_types_parser.add_argument(
+        "--no-format",
+        dest="format_output",
+        action="store_false",
+        help="Generate build outputs without running formatters",
     )
 
     stage_sdk_parser = subparsers.add_parser(
@@ -1486,9 +1529,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(list(argv) if argv is not None else None)
 
 
-def default_cli_ops() -> CliOps:
+def default_cli_ops(*, format_output: bool = True) -> CliOps:
     return CliOps(
-        generate_types=generate_types_from_schema_dir,
+        generate_types=(
+            generate_types_from_schema_dir
+            if format_output
+            else partial(generate_types_from_schema_dir, format_output=False)
+        ),
         stage_python_sdk_package=stage_python_sdk_package,
         stage_python_runtime_package=stage_python_runtime_package,
     )
@@ -1523,7 +1570,7 @@ def run_command(args: argparse.Namespace, ops: CliOps) -> None:
 
 def main(argv: Sequence[str] | None = None, ops: CliOps | None = None) -> None:
     args = parse_args(argv)
-    run_command(args, ops or default_cli_ops())
+    run_command(args, ops or default_cli_ops(format_output=getattr(args, "format_output", True)))
     print("Done.")
 
 

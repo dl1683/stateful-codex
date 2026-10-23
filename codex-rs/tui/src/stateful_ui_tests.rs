@@ -207,7 +207,7 @@ async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Re
         ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         ThreadToolTransport::Disabled,
-        /*model_provider_override*/ None,
+        crate::app_server_session::StartupLaunchChoices::default(),
         StatefulStartup::from_cli(
             Some(StatefulModeCliArg::Collaborative),
             None,
@@ -260,7 +260,7 @@ async fn native_startup_attaches_the_selected_project_and_starts_the_run() -> Re
         ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         ThreadToolTransport::Disabled,
-        /*model_provider_override*/ None,
+        crate::app_server_session::StartupLaunchChoices::default(),
         StatefulStartup::from_cli(
             Some(StatefulModeCliArg::Socratic),
             None,
@@ -309,7 +309,7 @@ async fn native_ask_attaches_the_project_and_starts_no_run() -> Result<()> {
         ThreadParamsMode::Embedded,
         /*remote_cwd_override*/ None,
         ThreadToolTransport::Disabled,
-        /*model_provider_override*/ None,
+        crate::app_server_session::StartupLaunchChoices::default(),
         StatefulStartup::from_cli(Some(StatefulModeCliArg::Ask), None, None)?,
     )
     .await?;

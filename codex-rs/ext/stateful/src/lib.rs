@@ -50,6 +50,10 @@ mod turn_progress;
 mod visible_root;
 mod working_set;
 mod world_state;
+mod world_state_section;
+#[cfg(test)]
+#[path = "world_state_section_tests.rs"]
+mod world_state_section_tests;
 
 use std::sync::Arc;
 
@@ -208,14 +212,34 @@ impl ContextContributor for StatefulExtension {
             let run_status = self
                 .run_world_state(selected.project_id(), &thread_id, &run_activity)
                 .await;
+            let manual_compaction = input
+                .turn_store
+                .get::<codex_protocol::protocol::NonSteerableTurnKind>()
+                .is_some_and(|kind| {
+                    *kind == codex_protocol::protocol::NonSteerableTurnKind::Compact
+                });
+            // A manual checkpoint preserves deferral, including across repeated compactions.
+            // It is not a user request and must not widen the scope on its own.
+            let request_scope = if manual_compaction
+                && input
+                    .previous_world_state
+                    .and_then(|previous| previous.get(continuity::WORLD_STATE_ID))
+                    .and_then(|previous| previous.get("deferred"))
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
+            {
+                RequestScope::SelfContained
+            } else {
+                RequestScope::of_turn(input.turn_store)
+            };
             // Autonomous and Socratic runs own a goal, and unreadable run state is not
             // evidence of a self-contained request: both keep continuity.
             let scope = match run_status.as_ref() {
-                None => RequestScope::of_turn(input.turn_store),
+                None => request_scope,
                 Some(RunWorldStateStatus::Available { run, .. })
                     if run.value.mode == codex_stateful_runtime::WorkflowMode::Collaborative =>
                 {
-                    RequestScope::of_turn(input.turn_store)
+                    request_scope
                 }
                 Some(_) => RequestScope::Continuity,
             };
@@ -224,9 +248,16 @@ impl ContextContributor for StatefulExtension {
             let scope_note = request_scope::ScopeNotePlan::new(
                 input
                     .previous_world_state
+                    .filter(|_| !manual_compaction)
                     .and_then(|previous| previous.get(request_scope::WORLD_STATE_ID)),
                 input.turn_id,
-                scope,
+                // No request-specific note survives this replacement window. Reserve its
+                // bytes afresh when the next actual user request arrives.
+                if manual_compaction {
+                    RequestScope::Continuity
+                } else {
+                    scope
+                },
                 input
                     .turn_store
                     .get::<request_scope::RequestHead>()

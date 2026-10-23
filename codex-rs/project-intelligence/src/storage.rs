@@ -42,7 +42,12 @@ impl HierarchyStore {
         tokio::fs::create_dir_all(sqlite.home()).await?;
         let pool = sqlite
             .open_read_write_pool(&sqlite.home().join(DATABASE_NAME))
-            .await?;
+            .await
+            .map_err(|error| {
+                error
+                    .downcast::<sqlx::Error>()
+                    .unwrap_or_else(|error| sqlx::Error::Configuration(error.into()))
+            })?;
         if let Err(error) = sqlite.run_migrations(&pool, &MIGRATOR).await {
             pool.close().await;
             return Err(error.into());

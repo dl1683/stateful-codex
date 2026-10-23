@@ -61,6 +61,7 @@ use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadStateManager;
 
 pub(crate) struct ThreadExtensionDependencies {
+    pub(crate) sample_responses: Arc<crate::thread_sample::SampleResponseRegistry>,
     pub(crate) event_sink: Arc<dyn ExtensionEventSink>,
     pub(crate) stateful_event_sink: Option<Arc<dyn StatefulEventSink>>,
     pub(crate) auth_manager: Arc<AuthManager>,
@@ -70,6 +71,7 @@ pub(crate) struct ThreadExtensionDependencies {
     pub(crate) goal_service: Arc<GoalService>,
     pub(crate) environment_manager: Arc<EnvironmentManager>,
     pub(crate) executor_skill_provider: Arc<dyn codex_skills_extension::SkillProvider>,
+    pub(crate) cloud_skill_provider: Option<Arc<dyn codex_skills_extension::SkillProvider>>,
     pub(crate) git_attribution_base_url: String,
     pub(crate) http_client_factory: HttpClientFactory,
     /// Process-scoped queue shared by idle dispatch and app-server requests.
@@ -81,9 +83,11 @@ pub(crate) struct ThreadExtensionDependencies {
 }
 
 pub(crate) fn thread_extensions(
+    config: &Config,
     dependencies: ThreadExtensionDependencies,
 ) -> Arc<ExtensionRegistry<Config>> {
     let ThreadExtensionDependencies {
+        sample_responses,
         event_sink,
         stateful_event_sink,
         auth_manager,
@@ -93,6 +97,7 @@ pub(crate) fn thread_extensions(
         goal_service,
         environment_manager,
         executor_skill_provider,
+        cloud_skill_provider,
         git_attribution_base_url,
         http_client_factory,
         queue_service,
@@ -102,6 +107,12 @@ pub(crate) fn thread_extensions(
     } = dependencies;
     let stateful_sqlite = state_db.as_ref().map(|state_db| state_db.sqlite().clone());
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
+    if config
+        .features
+        .enabled(codex_features::Feature::MultiEnvCopyFile)
+    {
+        codex_multi_env_copy_file::install(&mut builder);
+    }
     if let Some(admission) = turn_start_admission {
         builder.turn_start_admission(admission);
     }
@@ -149,9 +160,12 @@ pub(crate) fn thread_extensions(
     codex_image_generation_extension::install(&mut builder, auth_manager, |config: &Config| {
         Some(config.codex_home.clone())
     });
-    let skill_providers = codex_skills_extension::SkillProviders::new()
+    let mut skill_providers = codex_skills_extension::SkillProviders::new()
         .with_executor_provider(executor_skill_provider)
         .with_host_provider(Arc::new(codex_skills_extension::HostSkillProvider::new()));
+    if let Some(provider) = cloud_skill_provider {
+        skill_providers = skill_providers.with_cloud_provider(provider);
+    }
     codex_skills_extension::install_with_providers_and_metrics(
         &mut builder,
         skill_providers,
@@ -166,6 +180,7 @@ pub(crate) fn thread_extensions(
                 .enabled(codex_features::Feature::SkillSearch),
         },
     );
+    builder.model_request_contributor(sample_responses);
     Arc::new(builder.build())
 }
 
